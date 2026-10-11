@@ -306,6 +306,7 @@ export class World {
     this.kernelParams = {
       SIZE: L.SIZE, r_c: L.r_c, K_core: L.K_core, r_0: L.beta * L.r_c,
       r_brain_core: L.r_brain_core, r_brain: L.r_brain, K_brain: L.K_brain,
+      A_brain: L.A_brain, r_brain_push: L.r_brain_push,
       r_wall: L.r_wall, K_wall: L.K_wall,
       nc: g.nc, skipFood: !init.foodMoves,
     }
@@ -461,7 +462,10 @@ export class World {
     this.trackLiveness()
     if (this.init.repro) this.reproduce()
     this.captures()
-    if (this.init.bonds) this.formBonds()
+    if (this.init.bonds) {
+      this.formBonds()
+      this.pruneBonds()
+    }
     this.stepField()
     this.stepPatches()
     this.aggregates.observe(this)
@@ -523,6 +527,30 @@ export class World {
    * Bond springs, and the breaking test. Tension above F_break snaps the bond: that is the
    * hysteresis, since forming only needed the pair to touch with F_form of pull behind it.
    */
+  /** Distance beyond which a bond's spring would need more than F_break to hold it. */
+  private get bondBreakAt(): number {
+    return this.L.r_bond + this.L.F_break / this.L.k_bond
+  }
+
+  /**
+   * Breaks bonds that are over-stretched *now*. Run after integrating as well as before, because
+   * a limb rides its brain: without this a bond could be stretched by a body's motion and stay
+   * visible, over-long, until the next tick noticed.
+   */
+  private pruneBonds(): void {
+    const { x, y, bonds, L } = this
+    const limit = this.bondBreakAt
+    bonds.forEach((i, j) => {
+      const dead = !this.alive[i] || !this.alive[j]
+      if (!dead && Math.hypot(this.minImage(x[j] - x[i]), this.minImage(y[j] - y[i])) <= limit) return
+      bonds.remove(i, j)
+      if (!dead) {
+        this.bondCool[i] = L.bond_cooldown
+        this.bondCool[j] = L.bond_cooldown
+      }
+    }, this.cap)
+  }
+
   private applyBonds(): void {
     const { L, x, y, fx, fy, bonds } = this
     bonds.forEach((i, j) => {
@@ -535,7 +563,7 @@ export class World {
       const r = Math.hypot(dx, dy)
       if (r < 1e-9) return
       const f = bondForce(r, L)
-      if (Math.abs(f) > L.F_break) {
+      if (r > this.bondBreakAt) {
         bonds.remove(i, j)
         this.bondCool[i] = L.bond_cooldown
         this.bondCool[j] = L.bond_cooldown
@@ -1132,6 +1160,11 @@ export class World {
   placeOrganism(spec: OrganismSpec): void {
     const b = spec.brain
     const { rng } = this
+    // A body is placed outright, which teleports every particle in it. Any bond those particles
+    // held would be stretched across the world, so they are cut: a bond is a contact, and these
+    // particles are no longer in contact with what they were touching.
+    this.bonds.clear(b)
+    for (const { idx } of spec.limbs) this.bonds.clear(idx)
     this.owner[b] = b
     this.nBirths++
     this.bornAt[b] = this.tick

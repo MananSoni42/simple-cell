@@ -5,7 +5,7 @@ import type { World } from '../core/world'
 // WebGPU types are not part of the TS DOM lib; the handful of calls used here are typed loosely.
 
 const WGSL = /* wgsl */ `
-struct Params { n: u32, nc: u32, size: f32, rc: f32, r0: f32, K: f32, rBrainCore: f32, rBrain: f32, KBrain: f32, pad0: f32, pad1: f32, pad2: f32 }
+struct Params { n: u32, nc: u32, size: f32, rc: f32, r0: f32, K: f32, rBrainCore: f32, rBrain: f32, KBrain: f32, ABrain: f32, rBrainPush: f32, pad: f32 }
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> pos: array<vec2<f32>>;
 @group(0) @binding(2) var<storage, read> minfo: array<vec2<i32>>; // x: type (-1 = dead), y: owner
@@ -60,8 +60,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
           kcore = P.KBrain;
         }
         var f = 0.0;
+        let anyBrain = ti == 4 || mj.x == 4;
         if (r < core) {
           f = kcore * (1.0 - core / max(r, core * 1e-3));
+        } else if (anyBrain) {
+          if (r < P.rBrainPush) { f = -P.ABrain * (1.0 - (r - core) / (P.rBrainPush - core)); }
         } else {
           let mjx = midx(mj.x);
           var a = 0.0;
@@ -140,6 +143,8 @@ export class GpuBackend implements ForceBackend {
     dv.setFloat32(24, p.r_brain_core, true)
     dv.setFloat32(28, p.r_brain, true)
     dv.setFloat32(32, p.K_brain, true)
+    dv.setFloat32(36, p.A_brain, true)
+    dv.setFloat32(40, p.r_brain_push, true)
     device.queue.writeBuffer(this.bufs.params, 0, this.params)
     device.queue.writeBuffer(this.bufs.A, 0, Float32Array.from(w.A))
   }

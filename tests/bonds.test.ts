@@ -128,3 +128,38 @@ describe('bond hysteresis', () => {
     expect(w.bonds.has(0, 1)).toBe(false)
   })
 })
+
+describe('bond length is bounded', () => {
+  it('never leaves a bond stretched past breaking at the end of a tick', () => {
+    const limit = bondRange(LAWS).breakAt
+    for (const seed of [3, 101, 303]) {
+      const w = new World({ ...initFromSeed(seed), n_start: 6, n_intrinsic: 150, n_brain: 10, bonds: true })
+      let longest = 0
+      for (let t = 0; t < 1500; t++) {
+        w.step()
+        w.bonds.forEach((i, j) => {
+          const S = w.L.SIZE
+          let dx = w.x[j] - w.x[i]
+          let dy = w.y[j] - w.y[i]
+          dx -= S * Math.round(dx / S)
+          dy -= S * Math.round(dy / S)
+          longest = Math.max(longest, Math.hypot(dx, dy))
+        }, w.cap)
+      }
+      // Before the post-integration prune, a body teleported by a spawn dragged its partner's
+      // bond across the whole world: measured 183 units against a 16.7 breaking point.
+      expect(longest, `seed ${seed}`).toBeLessThanOrEqual(limit + 1e-6)
+    }
+  })
+
+  it('cuts a bond when the body holding it is placed somewhere else', () => {
+    const w = pairWorld({ n_intrinsic: 4, n_brain: 1 })
+    place(w, 10)
+    w.step()
+    expect(w.bonds.has(0, 1)).toBe(true)
+    // particle 0 is taken into a socket, and the body is placed across the world
+    w.placeOrganism({ brain: 4, x: 20, y: 280, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
+    expect(w.bonds.has(0, 1)).toBe(false)
+    expect(w.bonds.count).toBe(0)
+  })
+})

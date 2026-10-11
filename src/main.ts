@@ -51,6 +51,8 @@ let seenCounter = -1
 let shown: RenderState | null = null
 let frameAt = 0
 let frameGap = 1000
+/** Speed to resume at when a run is restarted, so 'run it again' does not look frozen. */
+let resumeRate: number | null = null
 
 const send = (m: ToSim): void => link?.worker.postMessage(m)
 const l0 = (): Link => link as Link
@@ -88,6 +90,7 @@ function stop(): void {
     router.go('setup')
     return
   }
+  resumeRate = rate
   pause()
   send({ kind: 'finish' })
 }
@@ -122,8 +125,11 @@ function startWorld(init: Init, perf: Perf): void {
       renderer.fit(m.layout.SIZE)
       stats.reset()
       inspect.hide()
-      rate = 1
+      // keep the speed the run was using; starting a fast world back at 1 tick/s reads as broken
+      rate = resumeRate ?? 1
+      resumeRate = null
       paused = false
+      send({ kind: 'rate', rate })
       router.go('world')
       syncControls()
     } else if (m.kind === 'stats') latest = m.stats
@@ -159,7 +165,10 @@ $('page-explain').addEventListener('click', (e) => {
 })
 
 mountSetup($('page-setup'), {
-  start: startWorld,
+  start: (init, perf) => {
+    resumeRate = null // a world built by hand starts at a watchable speed
+    startWorld(init, perf)
+  },
   back: () => router.go('landing'),
   explain: () => {
     cameFrom = 'setup'

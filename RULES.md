@@ -78,6 +78,17 @@ r > r_c     →   F = 0
 | one of them a brain | `r_brain_core = 8` | `K_brain` |
 | **both brains** | `r_brain = 16` | `K_brain` |
 
+**R2.1b — A brain pushes everything away.** A brain has no row in the matrix, so it has nothing to
+attract with; beyond its core it simply repels, with strength `A_brain` fading to nothing by
+`r_brain_push = 26`. Its surroundings stay its own, and a body sits in a space it cleared. The
+reach is deliberately short of `r_c`, so limbs can still reach food just outside it — measured,
+raising `A_brain` from 0 to 0.5 left organism counts and limbs-per-organism unchanged or slightly
+better, while 0.8 began to cost births.
+
+One limitation worth stating: a limb held by *another* organism's rod cannot yield radially, so it
+can be pressed closer to a brain than a free particle ever would be. Measured, that happens on
+under 0.2% of brain-particle pairs.
+
 Positive `F` attracts. Force acts along the minimum-image separation vector. Two
 terms with two distinct jobs:
 
@@ -405,6 +416,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `beta` | 0.25 | core fraction → `r_0 = 10` |
 | `K_core` | 3.0 | hard-core strength; must exceed `max|A| = 1` |
 | `r_brain_core` · `r_brain` · `K_brain` | 8 · 16 · 12 | a brain's body radius against anything, against another brain, and its strength |
+| `A_brain` · `r_brain_push` | 0.5 · 26 | how hard a brain pushes everything away, and how far (R2.1b) |
 | `r_wall` · `K_wall` | 10 · 12 | terrain's exclusion radius and strength (R18) |
 | `food_coupling` | 0.5 | scales every Food row/column entry |
 | `d_max` · `dth_max` · `z_max` | 5 · 0.25 · 3 | motion budget (R2.4) |
@@ -640,7 +652,13 @@ a latch worth having is **hysteresis**: forming is easy, breaking is not.
 - **Hold** by a spring `k_bond·(r − r_bond)` toward a rest length of `r_bond` = 10, which is also
   the core radius, so a bonded pair sits just touching.
 - **Break** only when the spring needs more than `F_break` = 4, i.e. beyond **16.7** units,
-  after which both particles wait `bond_cooldown` ticks.
+  after which both particles wait `bond_cooldown` ticks. Bonds are checked **twice** a tick, before
+  forces and again after integrating, because a limb rides its brain: without the second pass a
+  bond could be stretched by a body's motion and stay visible, over-long, until the next tick.
+- **Cut outright** when a body is *placed* — spawned, budded or imported. Placement teleports every
+  particle in the body, and a bond is a contact: these particles are no longer touching what they
+  were touching. Without this, a spawn could drag a bond across the whole world; measured at 183
+  units against a 16.7 breaking point, which is what long bond lines on screen turned out to be.
 
 The gap between those two numbers is the point. **A bond can be stretched 40% further than it
 could ever have been made at**, so a joined pair stays joined through ordinary jostling instead
@@ -649,7 +667,9 @@ forces: `F_form` to make one, `F_break` to undo it.
 
 Measured across the presets: switching bonding on takes standing bonds from 0 to 20–60 in the
 dense worlds and leaves the sparse ones (Grazers, Desert) largely unbonded, which is what the
-chemistry should decide. Bonds are drawn as faint dashed lines, and the stats panel counts them.
+chemistry should decide. Bonds are drawn in their own colour — a cyan line over a soft halo, so a join reads clearly
+against both the empty field and a dense cluster, and is never mistaken for a rod. They tile across
+the seam like everything else, and the stats panel counts them.
 
 This is the mechanism multicellularity needs, and it is what the aggregate metrics in §13
 ultimately want to be built on: a group joined by bonds is a real object, not a coincidence of

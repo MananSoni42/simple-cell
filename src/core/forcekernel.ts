@@ -30,6 +30,8 @@ export interface KernelParams {
   r_brain_core: number // ... when one of the pair is a brain
   r_brain: number // ... when both are
   K_brain: number
+  A_brain: number
+  r_brain_push: number
   r_wall: number
   K_wall: number
   nc: number
@@ -47,7 +49,7 @@ const MIDX = Int8Array.from(MATRIX_INDEX)
  */
 export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: KernelParams): void {
   const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, ffx, ffy, A } = a
-  const { SIZE: S, r_c: rc, K_core: K, r_0, r_brain_core, r_brain, K_brain, r_wall, K_wall, nc, skipFood } = p
+  const { SIZE: S, r_c: rc, K_core: K, r_0, r_brain_core, r_brain, K_brain, A_brain, r_brain_push, r_wall, K_wall, nc, skipFood } = p
   const rc2 = rc * rc
   const half = S / 2
   for (let k0 = lo; k0 < hi; k0++) {
@@ -99,7 +101,10 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
           }
           let f: number
           if (r < core) f = kcore * (1 - core / Math.max(r, core * 1e-3))
-          else {
+          else if (iAmBrain || jIsBrain) {
+            // a brain has no chemistry, so beyond its core it simply pushes, fading out by r_brain_push
+            f = r < r_brain_push ? -A_brain * (1 - (r - core) / (r_brain_push - core)) : 0
+          } else {
             const mj = MIDX[tj]
             const beta = core / rc
             const u = r / rc

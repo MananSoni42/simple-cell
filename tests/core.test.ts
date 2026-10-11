@@ -6,6 +6,7 @@ import { type Init, LAWS, type Laws, QUANTA, initFromSeed, stability, substepsFo
 import { Rng } from '../src/core/rng'
 import { serialBackend } from '../src/core/backend'
 import { BRAIN_OUT } from '../src/core/neurons'
+import { BRAIN } from '../src/core/types'
 import { World } from '../src/core/world'
 import { configText, parseConfig } from '../src/ui/config'
 import { PRESETS } from '../src/ui/presets'
@@ -763,5 +764,51 @@ describe('neuron wiring', () => {
     w.step()
     expect(w.owner[0]).toBe(-1)
     expect(w.brainSig[b * 4 + 0]).toBe(0)
+  })
+})
+
+describe('brains repel', () => {
+  it('pushes a free particle away between its core and its reach, and not beyond', () => {
+    const init = smallInit({ T: 0, n_intrinsic: 1, n_brain: 1, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, repro: false, bonds: false })
+    init.A = Array.from({ length: 5 }, () => new Array(5).fill(0)) // no chemistry at all
+    const at = (gap: number): number => {
+      const w = new World(init, { laws: { SIZE: 400 }, autoSpawn: false })
+      w.placeOrganism({ brain: 1, x: 200, y: 200, limbs: [] })
+      w.x[0] = 200 + gap
+      w.y[0] = 200
+      w.grid.build()
+      serialStep(w)
+      return w.fx[0] // positive means pushed away, since the particle is at +x
+    }
+    const L = LAWS
+    expect(at((L.r_brain_core + L.r_brain_push) / 2)).toBeGreaterThan(0) // inside its reach: pushed
+    expect(at(L.r_brain_push + 4)).toBe(0) // beyond its reach: nothing
+    expect(at(L.r_brain_core - 2)).toBeGreaterThan(0) // inside the core: pushed harder
+    expect(at(L.r_brain_core - 2)).toBeGreaterThan(at((L.r_brain_core + L.r_brain_push) / 2))
+  })
+
+  it('keeps a clear space around itself in a running world', () => {
+    const w = new World({ ...initFromSeed(101), n_start: 6, n_intrinsic: 150, n_brain: 10 })
+    for (let t = 0; t < 1500; t++) w.step()
+    let near = 0
+    let checks = 0
+    for (let b = w.nIntr; b < w.nMatter; b++) {
+      if (!w.alive[b] || !w.isBrain(b)) continue
+      for (let j = 0; j < w.cap; j++) {
+        if (!w.alive[j] || j === b || w.owner[j] === b || w.type[j] === BRAIN) continue
+        const S = w.L.SIZE
+        let dx = w.x[j] - w.x[b]
+        let dy = w.y[j] - w.y[b]
+        dx -= S * Math.round(dx / S)
+        dy -= S * Math.round(dy / S)
+        const d = Math.hypot(dx, dy)
+        if (d < w.L.r_brain_core) near++
+        checks++
+      }
+    }
+    expect(checks).toBeGreaterThan(0)
+    // Not zero: a limb held by another organism's rod cannot yield radially, so it can be
+    // pressed closer than a free particle ever would be.
+    expect(near / checks).toBeLessThan(0.002)
   })
 })

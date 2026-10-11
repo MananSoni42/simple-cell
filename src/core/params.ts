@@ -13,6 +13,11 @@ export const LAWS = {
   r_brain_core: 8, // a brain's exclusion radius against any particle
   r_brain: 16, // brain-against-brain exclusion: organisms may only touch through limbs
   K_brain: 12,
+  // A brain pushes everything away, not only other brains: it has no chemistry to attract with,
+  // so its surroundings stay its own. The push reaches r_brain_push, deliberately short of the
+  // rod circle plus the interaction range, so limbs can still reach food the brain has cleared.
+  A_brain: 0.5,
+  r_brain_push: 26,
   food_coupling: 0.5, // scales every Food row/column entry, biasing chemistry toward structure
   // Hardest guardrail: half a core radius under a particle's own motion, so it can never
   // pass through anything. A rod tip may swing up to L_rod * dth_max = 4 on top of riding its

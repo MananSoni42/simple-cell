@@ -3,6 +3,7 @@ import { BRAIN, FOOD, WALL } from '../core/types'
 
 const BG = '#0b0e14'
 const COLORS = ['#ff6b81', '#ffc145', '#3ddc97', '#5b8def', '#f4f6fb', '#a3e635', '#394155']
+const BOND = '#8fd9ff' // bonds get their own colour so a join is never mistaken for a rod
 const LOW = '#ff4d4d'
 const R_PARTICLE = 2.7 // world units
 const R_BRAIN = 4
@@ -301,12 +302,11 @@ export class Renderer {
       for (const [ox, oy] of tiles(X[i], Y[i])) ctx.fillRect(X[i] + ox - r, Y[i] + oy - r, 2 * r, 2 * r)
     }
 
-    // bonds: the joins that persist, drawn under everything else
+    // Bonds: the joins that hold, and the thing to look at in this world, so they are drawn in
+    // their own colour and tiled across the seam like everything else.
     const bondsOn = w.bonds
     if (bondsOn) {
-      ctx.strokeStyle = 'rgba(244,246,251,0.4)'
-      ctx.lineWidth = Math.max(1, 0.8 * k)
-      ctx.setLineDash([3 * k, 2 * k])
+      ctx.lineCap = 'round'
       for (let i = 0; i < w.nIntr; i++) {
         if (!w.alive[i] || !vis(i)) continue
         for (let s2 = 0; s2 < bondsOn.max; s2++) {
@@ -316,13 +316,27 @@ export class Renderer {
           let dy = Y[j] - Y[i]
           if (Math.abs(dx) > px / 2) dx -= Math.sign(dx) * px // the shorter way round the torus
           if (Math.abs(dy) > px / 2) dy -= Math.sign(dy) * px
-          ctx.beginPath()
-          ctx.moveTo(X[i], Y[i])
-          ctx.lineTo(X[i] + dx, Y[i] + dy)
-          ctx.stroke()
+          for (const [ox, oy] of tiles(X[i], Y[i])) {
+            const x1 = X[i] + ox
+            const y1 = Y[i] + oy
+            // a soft halo under a solid line: visible against both the dark field and a cluster
+            ctx.strokeStyle = 'rgba(143,217,255,0.18)'
+            ctx.lineWidth = Math.max(2.5, 3 * k)
+            ctx.beginPath()
+            ctx.moveTo(x1, y1)
+            ctx.lineTo(x1 + dx, y1 + dy)
+            ctx.stroke()
+            ctx.strokeStyle = BOND
+            ctx.lineWidth = Math.max(1, 1.1 * k)
+            ctx.globalAlpha = 0.85
+            ctx.beginPath()
+            ctx.moveTo(x1, y1)
+            ctx.lineTo(x1 + dx, y1 + dy)
+            ctx.stroke()
+            ctx.globalAlpha = 1
+          }
         }
       }
-      ctx.setLineDash([])
     }
 
     // food, then free matter
