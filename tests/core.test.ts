@@ -196,3 +196,22 @@ describe('stats', () => {
     expect(c.organisms).toBeLessThanOrEqual(w.init.n_brain)
   })
 })
+
+describe('continuous inflow', () => {
+  it('keeps spawning past the brain count, closes the ledger, and never exceeds capacity', () => {
+    const init = smallInit({ inflow: true, n_brain: 3, T_spawn: 25, T_food: 2, T: 3 })
+    const w = new World(init, SMALL)
+    let maxOrgs = 0
+    for (let t = 0; t < 3000; t++) {
+      w.step()
+      if (t % 25 === 0) {
+        expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 6)
+        maxOrgs = Math.max(maxOrgs, census(w).organisms)
+      }
+    }
+    expect(w.nBirths).toBeGreaterThan(init.n_brain * 3)
+    expect(maxOrgs).toBeLessThanOrEqual(init.n_brain * 3)
+    expect(w.nBirths - w.nDeaths).toBe(census(w).organisms)
+    for (let i = 0; i < w.cap; i++) if (!w.alive[i]) expect(w.energy[i]).toBe(0)
+  })
+})

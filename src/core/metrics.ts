@@ -15,6 +15,7 @@ export function counts(w: World): Counts {
   let bound = 0
   let organisms = 0
   for (let i = 0; i < w.nMatter; i++) {
+    if (!w.alive[i]) continue
     if (w.type[i] === BRAIN) {
       if (w.isBrain(i)) organisms++
       else free++
@@ -27,7 +28,7 @@ export function counts(w: World): Counts {
 /** Number of particles of each type among matter (not food). Must never change. */
 export function massByType(w: World): number[] {
   const m = [0, 0, 0, 0, 0]
-  for (let i = 0; i < w.nMatter; i++) m[w.type[i]]++
+  for (let i = 0; i < w.nMatter; i++) if (w.alive[i]) m[w.type[i]]++
   return m
 }
 
@@ -72,6 +73,7 @@ export function clusterStats(w: World): ClusterStats {
   }
   const link2 = (2.5 * L.beta * L.r_c) ** 2
   for (let i = 0; i < w.nMatter; i++) {
+    if (!w.alive[i]) continue
     if (w.owner[i] >= 0 && w.owner[i] !== i) parent[find(i)] = find(w.owner[i])
     const n = w.grid.near(w.x[i], w.y[i])
     for (let k = 0; k < n; k++) {
@@ -85,14 +87,19 @@ export function clusterStats(w: World): ClusterStats {
     }
   }
   const size = new Int32Array(w.nMatter)
-  for (let i = 0; i < w.nMatter; i++) size[find(i)]++
+  let nAlive = 0
+  for (let i = 0; i < w.nMatter; i++) {
+    if (!w.alive[i]) continue
+    size[find(i)]++
+    nAlive++
+  }
   let count = 0
   let max = 0
   for (let i = 0; i < w.nMatter; i++) {
     if (size[i] > 0) count++
     if (size[i] > max) max = size[i]
   }
-  return { mean: w.nMatter / count, max, count }
+  return { mean: count ? nAlive / count : 0, max, count }
 }
 
 export function meanClusterSize(w: World): number {

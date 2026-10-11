@@ -256,7 +256,16 @@ extra code: regeneration is binding, running again on a body that already exists
 (each keeping its own reserve) and the brain becomes a free particle. Corpse-as-food
 is deferred.
 
-**R7.5 — Matter is conserved.** Intrinsic and brain particles are allocated once at
+**R7.6 — Continuous inflow (option).** With `inflow` on, matter is no longer conserved
+and the pool no longer limits organisms. Each spawn (R7.1) activates *fresh* particles —
+a new brain and 1–4 new limbs, each endowed with `E_init` (counted as injected) — in
+slots reserved for them: brain capacity is `3 × n_brain`, with room for four limbs per
+brain. In exchange all matter becomes mortal: free particles pay `c_up` too, and any
+particle whose reserve reaches 0 vanishes (its slot returns to the pool, residue
+burned). Organisms therefore keep arriving and keep dying, instead of the world
+filling up and freezing once every brain is in use.
+
+**R7.5 — Matter is conserved** *(default, `inflow` off).* Intrinsic and brain particles are allocated once at
 init and never created or destroyed. Birth and death only change `owner` and
 `socket`. Scarcity of free particles therefore creates competition for limbs with no
 competition logic anywhere.
@@ -336,6 +345,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `n_start` | 1 … 2 | organisms present at tick 0. **Editable** |
 | `n_food0` | 30 | food present at tick 0. **Editable** |
 | `max_food` | 120 | the sun pauses while this much food is in the world |
+| `inflow` | off | continuous organism inflow (R7.6). **Editable** |
 | `n_patch, r_patch, v_patch` | 1…3, 35…65, 0.05…0.2 | only for `patchy` |
 
 **Food modes.** All three place one Food particle per injection; they differ only in
@@ -366,18 +376,22 @@ all read-only: the chemistry is frozen. Two kinds of input:
 
 **World screen.**
 
-- **Tick meter**, default **1 tick / second**. `←` / `→` step the rate through
-  `0.25, 0.5, 1, 2, 5, 10, 30, 60, max` ticks/sec. `Space` pauses. `.` single-steps.
-  `Esc` returns to the start screen.
+- **Controls** (buttons along the bottom, with keys): **Start** resumes, **Pause** holds
+  (`Space` toggles), **Stop** discards the world and returns to the start screen (`Esc`),
+  **0.5×** / **2×** halve or double the speed (`←` / `→`) between 1/8 and 512 ticks/s.
+  The default is **1 tick / second**. `.` single-steps.
 - **Stats panel** with sparklines for organisms, food and total energy, plus: born /
   died / oldest / record lifespan, limbs per organism, the energy split (in organisms,
   in free particles, in food) and cumulative burned, and the largest connected cluster
   (particles touching, `r < 2.5 r_0`, with a brain always joined to its limbs).
 - **Rendering:** flat shapes only — circles for P1–P4 (coral, amber, mint, blue), a
-  white square for a brain, a lime diamond for food. Free particles are smaller and
-  translucent; bound limbs are full size with brightness following energy. Each
-  organism has a thick rod per limb and a faint disc marking its body. Between ticks
-  the renderer interpolates positions, so slow rates glide instead of jumping.
+  square for a brain, a lime diamond for food. Free particles are smaller and
+  translucent. Each organism has a thick rod per limb and a faint disc marking its
+  body. **Energy is drawn on the organism:** a brain is a gauge that fills from the
+  bottom, a limb is a dim disc with a bright core that grows with its reserve, and
+  either turns red when nearly empty. Between ticks the renderer interpolates, and it
+  rebuilds every limb from its brain's interpolated position and angle, so rods and
+  tips always move as one rigid body.
 
 ---
 

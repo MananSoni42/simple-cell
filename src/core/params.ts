@@ -42,6 +42,7 @@ export interface Init {
   n_start: number // organisms present at tick 0
   n_food0: number // food present at tick 0
   max_food: number // sun pauses when this much food is in the world
+  inflow: boolean // continuous organism inflow: new matter is created for each spawn, and all matter is mortal
   foodMode: FoodMode
   T_food: number
   T_spawn: number
@@ -70,6 +71,7 @@ export function initFromSeed(seed: number): Init {
     n_start: 1 + rng.int(2),
     n_food0: 30,
     max_food: 120,
+    inflow: false,
     foodMode: FOOD_MODES[rng.int(FOOD_MODES.length)],
     T_food: 2 + rng.int(5),
     T_spawn: 60 + rng.int(81),

@@ -26,6 +26,7 @@
   .counts { display:grid; grid-template-columns:repeat(2,1fr); gap:8px 14px; margin-bottom:22px; }
   .counts label { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--dim); }
   .counts input { width:72px; }
+  .check { display:block; color:var(--fg); margin-bottom:22px; } .check .dim { color:var(--dim); font-size:11px; }
   .go { color:var(--accent); letter-spacing:.06em; }
   #world { position:fixed; inset:0; }
   #c { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
@@ -36,6 +37,11 @@
   #stats .row { display:flex; justify-content:space-between; align-items:baseline; }
   #stats i { font-style:normal; }
   #stats canvas { width:100%; height:26px; display:block; margin-top:2px; }
+  #controls { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:8px; align-items:center; padding:6px 10px; background:rgba(11,14,20,.82); border:1px solid var(--line); border-radius:10px; }
+  #controls button { padding:5px 12px; }
+  #controls button.on { border-color:var(--accent); color:var(--accent); }
+  #controls .sep { width:1px; height:18px; background:var(--line); margin:0 4px; }
+  #b-rate { min-width:78px; text-align:center; color:var(--dim); }
   #help { position:absolute; left:14px; bottom:12px; color:var(--dim); pointer-events:none; }
 </style>
 </head>
@@ -44,7 +50,16 @@
 <div id="world" hidden>
   <canvas id="c"></canvas>
   <div id="stats"></div>
-  <div id="help">space pause · ←/→ speed · . step · esc back</div>
+  <div id="controls">
+    <button id="b-play" title="start / resume (space)">▶ Start</button>
+    <button id="b-pause" title="pause (space)">❚❚ Pause</button>
+    <button id="b-stop" title="stop and return to the start screen (esc)">■ Stop</button>
+    <span class="sep"></span>
+    <button id="b-slow" title="half speed (←)">0.5×</button>
+    <span id="b-rate">1 tick/s</span>
+    <button id="b-fast" title="double speed (→)">2×</button>
+  </div>
+  <div id="help">fill level = energy · red = starving · . single-step</div>
 </div>
 <script type="module" src="/src/main.ts"></script>
 </body>

@@ -28,10 +28,11 @@ function cellColor(a: number): string {
 export function mountStart(root: HTMLElement, onStart: (init: Init) => void): { show(): void; hide(): void } {
   let seed = Math.floor(Math.random() * 1e9)
   const overrides: Partial<Record<CountKey, number>> = {}
+  let inflow = false
   let base = initFromSeed(seed)
 
   const current = (): Init => {
-    const init = { ...base, ...overrides }
+    const init = { ...base, ...overrides, inflow }
     init.n_brain = Math.min(init.n_brain, init.n_intrinsic)
     init.n_start = Math.min(init.n_start, init.n_brain)
     init.n_food0 = Math.min(init.n_food0, init.max_food)
@@ -51,6 +52,7 @@ export function mountStart(root: HTMLElement, onStart: (init: Init) => void): { 
       <dl id="params"></dl>
       <div class="sub" style="margin-bottom:6px">starting population <span class="dim">(editable)</span></div>
       <div class="counts" id="counts"></div>
+      <label class="check"><input type="checkbox" id="inflow" /> continuous organism inflow <span class="dim">— new particles arrive with every organism, and all matter can die (brains ×3 capacity)</span></label>
       <div class="go">press ENTER to enter the world</div>
     </div>`
   const seedEl = root.querySelector<HTMLInputElement>('#seed')!
@@ -59,6 +61,8 @@ export function mountStart(root: HTMLElement, onStart: (init: Init) => void): { 
   const countsEl = root.querySelector<HTMLElement>('#counts')!
 
   countsEl.innerHTML = COUNTS.map((c) => `<label>${c.label}<input type="number" data-k="${c.key}" min="${c.min}" max="${c.max}" /></label>`).join('')
+  const inflowEl = root.querySelector<HTMLInputElement>('#inflow')!
+  inflowEl.addEventListener('change', () => (inflow = inflowEl.checked))
   const countInputs = Array.from(countsEl.querySelectorAll<HTMLInputElement>("input"))
   for (const input of countInputs) {
     input.addEventListener('input', () => {

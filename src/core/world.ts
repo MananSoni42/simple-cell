@@ -90,6 +90,7 @@ export class World {
   readonly init: Init
   readonly rng: Rng
   readonly A: Float64Array // flattened symmetric chemistry matrix
+  readonly continuous: boolean
   readonly nIntr: number
   readonly nMatter: number
   readonly cap: number
@@ -144,8 +145,10 @@ export class World {
     this.A = new Float64Array(N_MATRIX * N_MATRIX)
     for (let i = 0; i < N_MATRIX; i++) for (let j = 0; j < N_MATRIX; j++) this.A[i * N_MATRIX + j] = init.A[i][j]
 
-    this.nIntr = init.n_intrinsic
-    this.nMatter = init.n_intrinsic + init.n_brain
+    this.continuous = init.inflow
+    const brainCap = this.continuous ? init.n_brain * 3 : init.n_brain
+    this.nIntr = init.n_intrinsic + (this.continuous ? 4 * brainCap : 0)
+    this.nMatter = this.nIntr + brainCap
     this.cap = this.nMatter + (opts.maxFood ?? init.max_food)
     const n = this.cap
     this.x = new Float64Array(n)
@@ -169,12 +172,15 @@ export class World {
     this.wLimb = new Array(n)
     this.wBrain = new Array(n)
 
+    // Slots beyond the starting counts stay inactive; with continuous inflow they are
+    // filled by spawns, and slots of dead matter return to the inactive pool.
     for (let i = 0; i < this.nMatter; i++) {
       this.x[i] = this.rng.next() * L.SIZE
       this.y[i] = this.rng.next() * L.SIZE
       this.type[i] = i < this.nIntr ? this.rng.int(4) : BRAIN
-      this.energy[i] = L.E_init
-      this.alive[i] = 1
+      const active = i < this.nIntr ? i < init.n_intrinsic : !this.continuous
+      this.alive[i] = active ? 1 : 0
+      this.energy[i] = active ? L.E_init : 0
     }
     for (let i = this.cap - 1; i >= this.nMatter; i--) this.freeFood.push(i)
 
@@ -245,6 +251,7 @@ export class World {
     this.uptake()
     this.think()
     this.costs()
+    if (this.continuous) this.freeMatterDecay()
     this.deaths()
     this.captures()
     this.stepField()
@@ -448,6 +455,22 @@ export class World {
     }
   }
 
+  /** Deactivates a slot; any residual reserve is burned so the ledger stays exact. */
+  private kill(i: number): void {
+    this.burned += this.energy[i]
+    this.energy[i] = 0
+    this.alive[i] = 0
+  }
+
+  /** Continuous-inflow worlds: free matter pays upkeep too and vanishes at zero energy. */
+  private freeMatterDecay(): void {
+    for (let i = 0; i < this.nMatter; i++) {
+      if (!this.alive[i] || this.owner[i] !== -1) continue
+      this.pay(i, this.L.c_up)
+      if (this.energy[i] <= 1e-12) this.kill(i)
+    }
+  }
+
   private unbind(l: number): void {
     const b = this.owner[l]
     this.limbs[b * 4 + this.socket[l]] = -1
@@ -465,6 +488,7 @@ export class World {
           if (l >= 0) this.unbind(l)
         }
         this.owner[b] = -1
+        if (this.continuous) this.kill(b)
         this.nDeaths++
         this.recordAge = Math.max(this.recordAge, this.tick - this.bornAt[b])
         this.wLimb[b] = undefined
@@ -473,7 +497,10 @@ export class World {
       }
       for (let s = 0; s < 4; s++) {
         const l = this.limbs[b * 4 + s]
-        if (l >= 0 && this.energy[l] <= 1e-12) this.unbind(l)
+        if (l >= 0 && this.energy[l] <= 1e-12) {
+          this.unbind(l)
+          if (this.continuous) this.kill(l)
+        }
       }
     }
   }
@@ -616,13 +643,10 @@ export class World {
   spawnRandom(): boolean {
     const { rng, L } = this
     const brains: number[] = []
-    for (let b = this.nIntr; b < this.nMatter; b++) {
-      if (this.owner[b] === -1) brains.push(b)
-    }
+    const open = (i: number) => (this.continuous ? !this.alive[i] : this.owner[i] === -1)
+    for (let b = this.nIntr; b < this.nMatter; b++) if (open(b)) brains.push(b)
     const pool: number[] = []
-    for (let i = 0; i < this.nIntr; i++) {
-      if (this.owner[i] === -1 && this.cool[i] === 0) pool.push(i)
-    }
+    for (let i = 0; i < this.nIntr; i++) if (open(i) && this.cool[i] === 0) pool.push(i)
     if (brains.length === 0 || pool.length === 0) return false
 
     const quads = [0, 1, 2, 3]
@@ -641,7 +665,10 @@ export class World {
       limbs.push({ idx, quad: q, angle: this.quadLo(q) + rng.next() * (this.quadHi(q) - this.quadLo(q)) })
     }
     const brain = brains[rng.int(brains.length)]
-    for (const idx of [brain, ...limbs.map((l) => l.idx)]) this.endow(idx)
+    for (const idx of [brain, ...limbs.map((l) => l.idx)]) {
+      this.alive[idx] = 1
+      this.endow(idx)
+    }
     this.placeOrganism({
       brain,
       x: rng.next() * L.SIZE,
