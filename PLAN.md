@@ -127,13 +127,16 @@ and the restored world on for 400 more ticks and comparing hashes.
 | 14 | **Brain food inputs** (matrix Q3 parts 1–2) | Per-socket food counts plus the body-frame food-force vector |
 | 15 | **Explainer tab** (your UI ask) | One page, static SVG: body plan and quadrants, both neuron boxes with every input and output labelled, the energy path (food → limb keeps 10% → brain → redistribute), the signal field, and the lifecycle (spawn → capture → starve → dissolve → bud). Colours matching the renderer |
 
-## 5. Long-term — think before building
+## 5. Long-term — mostly done now
+
+Of the original four, three were superseded by the bond work and the metric round; the food
+odour field and learning remain.
 
 | # | Item | The question to settle first |
 |---|---|---|
 | 16 | **Food odour field** (matrix Q3 part 3) | Changes the ecology, not just the plumbing: with smell, foraging becomes solvable and sitting still stops being viable. Decide whether we want that before adding it |
 | 17 | **Full state export/import** | Format and forward compatibility; worth doing once rather than twice |
-| 18 | **Brain chemistry row** | Letting brains into the matrix lets bodies bond to bodies — the cheapest route to real multicellularity, and the most likely to change everything |
+| 18 | ~~**Brain chemistry row**~~ | **Superseded.** Particle bonds with hysteresis (R16) turned out to be the better route to multicellularity: bodies now join through their limbs, which is both more physical and more controllable than letting brains attract each other |
 | 19 | **Learning and selection** | Paused by request. §4's lineage and aggregate metrics are the instruments we will need when it resumes |
 
 ---

@@ -44,6 +44,8 @@ export const LAWS = {
   E_birth: 15, // reserve each particle of a budded child starts with
   E_viable: 1,
   corpse_frac: 0.5,
+  r_wall: 10, // a wall's exclusion radius
+  K_wall: 12,
   // Bonds between particles, with hysteresis: forming is easy, breaking is not. The gap between
   // F_form and F_break is the activation energy, and it is what lets aggregates persist instead
   // of constantly reshuffling.
@@ -96,6 +98,8 @@ export interface Init {
   food_batch: number // food particles per injection event (area scaling)
   spawn_batch: number // organisms per spawn event (area scaling)
   foodMoves: boolean // food drifts and responds to forces; otherwise it stays where it lands
+  walls: 'none' | 'pillars' | 'maze' | 'ring' // immovable terrain (R18)
+  n_wall: number
   bonds: boolean // particles may bond to each other (R16)
   repro: boolean // budding reproduction
   repro_mut: number // std-dev of weight mutation in children
@@ -126,6 +130,9 @@ export function applyQuantization(A: number[][]): number[][] {
  * How far apart two particles must stay. The matrix governs the mid-range; this is the
  * universal exclusion, and brains carry a body radius so organisms can only touch through limbs.
  */
+export const WALL_LAYOUTS = ['none', 'pillars', 'maze', 'ring'] as const
+export type WallLayout = (typeof WALL_LAYOUTS)[number]
+
 export function coreRadius(brainA: boolean, brainB: boolean, L: Laws): number {
   if (brainA && brainB) return L.r_brain
   if (brainA || brainB) return L.r_brain_core
@@ -164,6 +171,8 @@ function seedWorld(seed: number, scale = 1): Init {
     food_batch: area,
     spawn_batch: area,
     foodMoves: false,
+    walls: 'none',
+    n_wall: 40 * area,
     bonds: true,
     repro: true,
     repro_mut: 0.05,

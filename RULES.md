@@ -405,6 +405,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `beta` | 0.25 | core fraction → `r_0 = 10` |
 | `K_core` | 3.0 | hard-core strength; must exceed `max|A| = 1` |
 | `r_brain_core` · `r_brain` · `K_brain` | 8 · 16 · 12 | a brain's body radius against anything, against another brain, and its strength |
+| `r_wall` · `K_wall` | 10 · 12 | terrain's exclusion radius and strength (R18) |
 | `food_coupling` | 0.5 | scales every Food row/column entry |
 | `d_max` · `dth_max` · `z_max` | 5 · 0.25 · 3 | motion budget (R2.4) |
 | `substeps_max` | 16 | cap on automatic sub-stepping (R2.6) |
@@ -457,6 +458,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `foodMoves` | off | food drifts and responds to forces. **Editable** |
 | `repro` · `repro_mut` | on · 0.05 | budding (R7.7) and mutation std. **Editable** (on/off) |
 | `bonds` | on | particle bonding (R16). **Editable** |
+| `walls` · `n_wall` | none · 40 | terrain layout and how many pieces (R18). **Editable** |
 | `inflow` | off | continuous organism inflow (R7.6). **Editable** |
 | `quantized` | on | snap the 4×4 to the bond set (R1.4a). **Editable** |
 | `substeps` | from `T` | integration sub-steps (R2.6). **Editable**, with an auto button |
@@ -708,3 +710,36 @@ organisms with *random* brains wander off and tear their own bonds apart within 
 hundred ticks. Staying together is a behaviour, and nothing is selecting for it yet. That makes
 this metric exactly the instrument to watch when learning resumes — and the window was set to
 2000 ticks rather than 10000 because a threshold nothing can ever clear tells you nothing.
+
+---
+
+## 18. Terrain
+
+One more particle type, `WALL`: immovable, with no chemistry, excluding everything by its core
+(`r_wall` = 10) alone. It is never integrated, so it is the only thing in the world that stays
+exactly where it was put — and therefore the only thing an organism can have a shape *against*.
+
+Four layouts, chosen on the start screen: `none`, `pillars` (a regular grid), `maze` (straight
+runs at right angles) and `ring`. Walls are allocated once at init, between the matter slots and
+the food slots, so nothing else in the world has to know about them.
+
+Note what this is **not**: a "universal repeller" type would have added nothing, because the
+matrix can already make a type that repels everything — set its row negative. What was missing
+was something that does not *move*, and that is what this is.
+
+---
+
+## 19. Inspecting one organism
+
+Click an organism in the world and a panel shows its age, generation, children, reserve, each
+limb's quadrant, type and reserve, and its weight counts. From there it can be **saved** or
+**copied** as JSON, **re-seeded** (a copy placed into the running world), or a saved one
+**loaded** back in.
+
+An imported file is repaired rather than trusted: quadrants and types are clamped, duplicate
+quadrants dropped, weight vectors padded or truncated to this world's shapes, and a file with no
+body at all still yields something placeable. Imported organisms take free matter of the right
+types and a clear spot, and their energy is counted as injected, like a spawn's.
+
+This is the beginning of a library of organisms — which is what we will want the moment anything
+starts selecting between them.

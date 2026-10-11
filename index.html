@@ -66,6 +66,12 @@
   #controls .sep { width:1px; height:18px; background:var(--line); margin:0 4px; }
   #b-rate { min-width:78px; text-align:center; color:var(--dim); }
   #b-seek { width:120px; accent-color:var(--accent); }
+  #inspect { position:absolute; right:14px; top:12px; width:260px; max-height:88vh; overflow:auto; padding:10px 12px; background:rgba(11,14,20,.9); border:1px solid var(--line); border-radius:8px; font-size:12px; }
+  #inspect h3 { margin:0 0 6px; font-size:12px; font-weight:600; }
+  #inspect .kv { display:grid; grid-template-columns:auto 1fr; gap:1px 10px; color:var(--dim); font-size:11px; margin-bottom:8px; }
+  #inspect .kv b { color:var(--fg); font-weight:400; }
+  #inspect .row { gap:5px; margin:0; flex-wrap:wrap; }
+  #inspect button { padding:4px 7px; font-size:11px; white-space:nowrap; }
   #help { position:absolute; left:14px; bottom:12px; color:var(--dim); pointer-events:none; }
 </style>
 </head>
@@ -75,6 +81,7 @@
 <div id="world" hidden>
   <canvas id="c"></canvas>
   <div id="stats"></div>
+  <div id="inspect" hidden></div>
   <div id="controls">
     <button id="b-play" title="start / resume (space)">▶ Start</button>
     <button id="b-pause" title="pause (space)">❚❚ Pause</button>
@@ -87,7 +94,7 @@
     <span id="b-rate">1 tick/s</span>
     <button id="b-fast" title="double speed (→)">2×</button>
   </div>
-  <div id="help">fill level = energy · red = starving · . single-step · ◀◀ rewind · shift-drag to drop food</div>
+  <div id="help">fill level = energy · red = starving · . single-step · ◀◀ rewind · shift-drag to drop food · click an organism to inspect</div>
 </div>
 <script type="module" src="/src/main.ts"></script>
 </body>

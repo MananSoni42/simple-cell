@@ -1,4 +1,4 @@
-import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX } from './types'
+import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX, WALL } from './types'
 
 /**
  * Everything the pair-force kernel reads or writes. The `p*` arrays hold the live
@@ -30,6 +30,8 @@ export interface KernelParams {
   r_brain_core: number // ... when one of the pair is a brain
   r_brain: number // ... when both are
   K_brain: number
+  r_wall: number
+  K_wall: number
   nc: number
   /** Skip food as a target: its force is never used while food is static. */
   skipFood: boolean
@@ -45,11 +47,12 @@ const MIDX = Int8Array.from(MATRIX_INDEX)
  */
 export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: KernelParams): void {
   const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, ffx, ffy, A } = a
-  const { SIZE: S, r_c: rc, K_core: K, r_0, r_brain_core, r_brain, K_brain, nc, skipFood } = p
+  const { SIZE: S, r_c: rc, K_core: K, r_0, r_brain_core, r_brain, K_brain, r_wall, K_wall, nc, skipFood } = p
   const rc2 = rc * rc
   const half = S / 2
   for (let k0 = lo; k0 < hi; k0++) {
     const ti = ptype[k0]
+    if (ti === WALL) continue // terrain feels nothing; it only excludes
     if (skipFood && ti === FOOD) continue
     const xi = px[k0]
     const yi = py[k0]
@@ -87,7 +90,10 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
           // brains carry a body radius, so organisms can only ever touch through their limbs
           let core = r_0
           let kcore = K
-          if (iAmBrain || jIsBrain) {
+          if (tj === WALL) {
+            core = r_wall
+            kcore = K_wall
+          } else if (iAmBrain || jIsBrain) {
             core = iAmBrain && jIsBrain ? r_brain : r_brain_core
             kcore = K_brain
           }

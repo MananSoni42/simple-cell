@@ -1,5 +1,5 @@
 import type { Perf } from '../compute/select'
-import { type Init, type FoodMode, FOOD_MODES, clamp11, initFromSeed } from '../core/params'
+import { type Init, type FoodMode, FOOD_MODES, WALL_LAYOUTS, type WallLayout, clamp11, initFromSeed } from '../core/params'
 import { N_MATRIX } from '../core/types'
 
 export const CONFIG_VERSION = 1
@@ -63,6 +63,8 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     foodMoves: bool(src.foodMoves, base.foodMoves),
     repro: bool(src.repro, base.repro),
     bonds: bool(src.bonds, base.bonds),
+    walls: WALL_LAYOUTS.includes(src.walls as WallLayout) ? (src.walls as WallLayout) : base.walls,
+    n_wall: Math.round(num(src.n_wall, base.n_wall, 0, 2e5)),
     repro_mut: num(src.repro_mut, base.repro_mut, 0, 5),
     decay_free: num(src.decay_free, base.decay_free, 0, 1),
     food_life: Math.round(num(src.food_life, base.food_life, 0, 1e7)),

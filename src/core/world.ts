@@ -7,7 +7,7 @@ import { OrderTracker } from './orders'
 import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
 import { type Init, type Laws, LAWS, applyQuantization, bondRange } from './params'
 import { Rng } from './rng'
-import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX } from './types'
+import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX, WALL } from './types'
 
 const HALF_PI = Math.PI / 2
 const TAU = Math.PI * 2
@@ -150,6 +150,7 @@ export class World {
   readonly rng: Rng
   readonly A: Float64Array // flattened symmetric chemistry matrix
   readonly continuous: boolean
+  readonly nWall: number
   readonly nIntr: number
   readonly nMatter: number
   readonly cap: number
@@ -240,11 +241,12 @@ export class World {
       }
     }
 
+    this.nWall = init.walls === 'none' ? 0 : init.n_wall
     this.continuous = init.inflow
     const brainCap = this.continuous ? init.n_brain * 3 : init.n_brain
     this.nIntr = init.n_intrinsic + (this.continuous ? 4 * brainCap : 0)
     this.nMatter = this.nIntr + brainCap
-    this.cap = this.nMatter + (opts.maxFood ?? init.max_food)
+    this.cap = this.nMatter + this.nWall + (opts.maxFood ?? init.max_food)
     const n = this.cap
     const sh = opts.shared ?? false
     this.x = new Float64Array(buffer(8 * n, sh))
@@ -291,7 +293,8 @@ export class World {
       this.energy[i] = active ? L.E_init : 0
       this.wasLive[i] = active ? 1 : 0
     }
-    for (let i = this.cap - 1; i >= this.nMatter; i--) this.freeFood.push(i)
+    this.placeWalls()
+    for (let i = this.cap - 1; i >= this.nMatter + this.nWall; i--) this.freeFood.push(i)
 
     this.grid = new Grid(L.SIZE, L.r_c, n, this.nMatter, this, sh)
     const g = this.grid
@@ -303,6 +306,7 @@ export class World {
     this.kernelParams = {
       SIZE: L.SIZE, r_c: L.r_c, K_core: L.K_core, r_0: L.beta * L.r_c,
       r_brain_core: L.r_brain_core, r_brain: L.r_brain, K_brain: L.K_brain,
+      r_wall: L.r_wall, K_wall: L.K_wall,
       nc: g.nc, skipFood: !init.foodMoves,
     }
     this.field = new Float64Array(L.fieldN * L.fieldN)
@@ -338,7 +342,52 @@ export class World {
   }
 
   get nFood(): number {
-    return this.cap - this.nMatter - this.freeFood.length
+    return this.cap - this.nMatter - this.nWall - this.freeFood.length
+  }
+
+  /** First food slot; wall slots sit between the matter and the food. */
+  get foodStart(): number {
+    return this.nMatter + this.nWall
+  }
+
+  /**
+   * Immovable terrain. Walls never move and have no chemistry — they exclude by their core
+   * alone — so they are the one thing in the world that an organism can have a shape *against*.
+   */
+  private placeWalls(): void {
+    const { L, init } = this
+    const S = L.SIZE
+    for (let k = 0; k < this.nWall; k++) {
+      const i = this.nMatter + k
+      let px = 0
+      let py = 0
+      if (init.walls === 'pillars') {
+        const per = Math.max(2, Math.round(Math.sqrt(this.nWall)))
+        const cell = S / per
+        px = (k % per) * cell + cell / 2
+        py = Math.floor(k / per) * cell + cell / 2
+      } else if (init.walls === 'ring') {
+        const a = (k / this.nWall) * TAU
+        px = S / 2 + S * 0.35 * Math.cos(a)
+        py = S / 2 + S * 0.35 * Math.sin(a)
+      } else {
+        // maze: a few straight runs at right angles, placed by the seeded stream
+        const runs = Math.max(1, Math.round(this.nWall / 12))
+        const run = Math.floor(k / Math.max(1, Math.round(this.nWall / runs)))
+        const step = 2 * L.r_wall
+        const horizontal = run % 2 === 0
+        const base = ((run + 1) / (runs + 1)) * S
+        const along = (k % Math.max(1, Math.round(this.nWall / runs))) * step + S * 0.1
+        px = horizontal ? along : base
+        py = horizontal ? base : along
+      }
+      this.x[i] = this.wrap(px)
+      this.y[i] = this.wrap(py)
+      this.type[i] = WALL
+      this.alive[i] = 1
+      this.energy[i] = 0
+      this.owner[i] = -1
+    }
   }
 
   totalEnergy(): number {
@@ -545,7 +594,9 @@ export class World {
     const foodMoves = this.init.foodMoves
     for (let i = 0; i < this.cap; i++) {
       if (!alive[i] || owner[i] !== -1) continue
-      if (!foodMoves && this.type[i] === FOOD) continue
+      const t = this.type[i]
+      if (t === WALL) continue // terrain does not move
+      if (!foodMoves && t === FOOD) continue
       const [sx, sy] = this.clampStep(mu * fx[i] + sn * this.kick(), mu * fy[i] + sn * this.kick())
       x[i] = this.wrap(x[i] + sx)
       y[i] = this.wrap(y[i] + sy)
@@ -640,7 +691,7 @@ export class World {
     const re2 = L.r_eat * L.r_eat
     const S = L.SIZE
     const half = S / 2
-    for (let f = this.nMatter; f < this.cap; f++) {
+    for (let f = this.foodStart; f < this.cap; f++) {
       if (!alive[f]) continue
       const c = cellOf[f]
       const cx = c % nc
@@ -786,7 +837,7 @@ export class World {
   private spoilFood(): void {
     const life = this.init.food_life
     if (life <= 0) return
-    for (let f = this.nMatter; f < this.cap; f++) {
+    for (let f = this.foodStart; f < this.cap; f++) {
       if (!this.alive[f] || this.tick - this.bornAt[f] < life) continue
       this.burned += this.energy[f]
       this.energy[f] = 0
@@ -1204,6 +1255,80 @@ export class World {
     if (add > 0) this.beginLife(i)
     this.energy[i] += add
     this.injected += add
+  }
+
+  /** The organism whose body is nearest (px, py), within `within`, or -1. */
+  pickOrganism(px: number, py: number, within = this.L.L_rod + 6): number {
+    let best = -1
+    let bestD = within * within
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      if (!this.alive[b] || !this.isBrain(b)) continue
+      const dx = this.minImage(this.x[b] - px)
+      const dy = this.minImage(this.y[b] - py)
+      const d2 = dx * dx + dy * dy
+      if (d2 < bestD) {
+        bestD = d2
+        best = b
+      }
+    }
+    return best
+  }
+
+  /**
+   * Places a saved organism: a free brain, free particles of the right types, somewhere clear.
+   * Its energy is injected, like a spawn's, so the ledger still closes.
+   */
+  placeSaved(spec: {
+    reserve: number
+    limbs: { quad: number; type: number; angle: number; reserve: number }[]
+    wLimb: number[]
+    wBrain: number[]
+  }): number {
+    const { L } = this
+    const open = (i: number) => (this.continuous ? !this.alive[i] : this.owner[i] === -1)
+    let brain = -1
+    for (let b = this.nIntr; b < this.nMatter && brain < 0; b++) if (open(b)) brain = b
+    if (brain < 0) return -1
+
+    const taken = new Set<number>()
+    const limbs: OrganismSpec['limbs'] = []
+    for (const want of spec.limbs) {
+      let pick = -1
+      for (let i = 0; i < this.nIntr && pick < 0; i++) {
+        if (taken.has(i) || !open(i) || this.cool[i] > 0) continue
+        if (!this.continuous && this.type[i] !== want.type) continue
+        pick = i
+      }
+      if (pick < 0) continue
+      taken.add(pick)
+      if (this.continuous) this.type[pick] = want.type
+      limbs.push({ idx: pick, quad: want.quad, angle: Math.min(this.quadHi(want.quad), Math.max(this.quadLo(want.quad), want.angle)) })
+    }
+    if (limbs.length === 0) return -1
+
+    const [sx, sy] = this.freeSpot()
+    for (const { idx } of limbs) {
+      this.alive[idx] = 1
+      this.beginLife(idx)
+      const want = spec.limbs.find((l) => limbs.find((x) => x.idx === idx)!.quad === l.quad)
+      const give = Math.min(L.E_cap, Math.max(0, want?.reserve ?? L.E_birth))
+      this.injected += Math.max(0, give - this.energy[idx])
+      this.energy[idx] = give
+    }
+    this.alive[brain] = 1
+    this.beginLife(brain)
+    const bgive = Math.min(L.E_cap, Math.max(1, spec.reserve))
+    this.injected += Math.max(0, bgive - this.energy[brain])
+    this.energy[brain] = bgive
+    this.placeOrganism({
+      brain,
+      x: sx,
+      y: sy,
+      limbs,
+      wLimb: Float64Array.from(spec.wLimb),
+      wBrain: Float64Array.from(spec.wBrain),
+    })
+    return brain
   }
 
   /** Spawns one organism at a random place with 1-4 random limbs. Returns false if matter is short. */

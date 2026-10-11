@@ -1,5 +1,5 @@
 import { MAX_THREADS, type Perf, canShare, gpuAvailable } from '../compute/select'
-import { type Init, QUANTA, clamp11, initFromSeed, quantize, stability, substepsFor } from '../core/params'
+import { type Init, QUANTA, WALL_LAYOUTS, type WallLayout, clamp11, initFromSeed, quantize, stability, substepsFor } from '../core/params'
 import { MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
 import { PRESETS } from './presets'
@@ -78,6 +78,10 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
           <button id="autoSub">auto</button>
         </div>
         <div id="stab" class="stab"></div>
+        <div class="row">
+          <label>terrain <select id="walls">${WALL_LAYOUTS.map((l) => `<option value="${l}">${l}</option>`).join('')}</select></label>
+          <label>wall pieces <input type="number" id="nWall" min="0" max="20000" style="width:80px" /></label>
+        </div>
         <div class="row">
           <label>free decay <input type="number" id="decay" min="0" max="10" step="0.05" style="width:70px" /> %/tick</label>
           <label>food lasts <input type="number" id="foodLife" min="0" max="100000" step="10" style="width:80px" /> ticks <span class="dim">(0 = forever)</span></label>
@@ -189,6 +193,12 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     init.substeps = Math.max(1, substepsFor(init) || 16)
     render()
   })
+  const wallsEl = q<HTMLSelectElement>('#walls')
+  wallsEl.addEventListener('change', () => {
+    init.walls = wallsEl.value as WallLayout
+    render()
+  })
+  const nWallEl = numField('#nWall', (v) => (init.n_wall = Math.max(0, Math.round(v))))
   const threadsEl = q<HTMLInputElement>('#threads')
   threadsEl.addEventListener('input', () => (perf.threads = Math.min(MAX_THREADS, Math.max(1, Math.round(Number(threadsEl.value)) || 1))))
   const gpuEl = q<HTMLInputElement>('#gpu')
@@ -266,6 +276,8 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     if (document.activeElement !== subEl) subEl.value = String(init.substeps)
     if (document.activeElement !== decayEl) decayEl.value = (init.decay_free * 100).toFixed(2)
     if (document.activeElement !== foodLifeEl) foodLifeEl.value = String(init.food_life)
+    wallsEl.value = init.walls
+    if (document.activeElement !== nWallEl) nWallEl.value = String(init.n_wall)
     threadsEl.value = String(perf.threads)
     gpuEl.checked = perf.gpu
     renderStability()

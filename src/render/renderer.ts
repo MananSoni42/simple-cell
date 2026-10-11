@@ -1,8 +1,8 @@
 import type { RenderState } from '../sim/frames'
-import { BRAIN, FOOD } from '../core/types'
+import { BRAIN, FOOD, WALL } from '../core/types'
 
 const BG = '#0b0e14'
-const COLORS = ['#ff6b81', '#ffc145', '#3ddc97', '#5b8def', '#f4f6fb', '#a3e635']
+const COLORS = ['#ff6b81', '#ffc145', '#3ddc97', '#5b8def', '#f4f6fb', '#a3e635', '#394155']
 const LOW = '#ff4d4d'
 const R_PARTICLE = 2.7 // world units
 const R_BRAIN = 4
@@ -253,6 +253,14 @@ export class Renderer {
       }
     }
 
+    // terrain first: it is the only thing that never moves
+    ctx.fillStyle = COLORS[WALL]
+    for (let i = 0; i < w.cap; i++) {
+      if (!w.alive[i] || w.type[i] !== WALL || !vis(i)) continue
+      const r = 5 * k
+      for (const [ox, oy] of tiles(X[i], Y[i])) ctx.fillRect(X[i] + ox - r, Y[i] + oy - r, 2 * r, 2 * r)
+    }
+
     // bonds: the joins that persist, drawn under everything else
     const bondsOn = w.bonds
     if (bondsOn) {
@@ -279,7 +287,7 @@ export class Renderer {
 
     // food, then free matter
     for (let i = w.nMatter; i < w.cap; i++) {
-      if (!w.alive[i] || !vis(i)) continue
+      if (!w.alive[i] || w.type[i] !== FOOD || !vis(i)) continue
       for (const [ox, oy] of tiles(X[i], Y[i])) this.diamond(X[i] + ox, Y[i] + oy, R_FOOD * k, COLORS[FOOD])
     }
     ctx.globalAlpha = 0.6

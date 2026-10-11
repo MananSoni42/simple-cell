@@ -4,6 +4,7 @@ import { Renderer } from './render/renderer'
 import { H, type FrameBuffers, type FrameLayout, type RenderState, frameState } from './sim/frames'
 import type { FromSim, StatsSnapshot, ToSim } from './sim/protocol'
 import { explainHTML } from './ui/explain'
+import { InspectPanel } from './ui/inspect'
 import { mountStart } from './ui/start'
 import { StatsPanel } from './ui/stats'
 
@@ -16,6 +17,7 @@ const explainEl = $('explain')
 const worldEl = $('world')
 const renderer = new Renderer($<HTMLCanvasElement>('c'))
 const stats = new StatsPanel($('stats'))
+const inspect = new InspectPanel($('inspect'), (o) => send({ kind: 'placeSaved', organism: o }))
 const bPlay = $('b-play')
 const bPause = $('b-pause')
 const bRate = $('b-rate')
@@ -75,6 +77,7 @@ function rewind(): void {
 }
 
 function stop(): void {
+  inspect.hide()
   link?.worker.terminate() // also ends its force workers
   link = null
   latest = null
@@ -119,6 +122,7 @@ const start = mountStart(startEl, (init: Init, perf: Perf) => {
       worldEl.hidden = false
       syncControls()
     } else if (m.kind === 'stats') latest = m.stats
+    else if (m.kind === 'organism') inspect.show(m.organism)
     else console.error('simulation error:', m.message)
   }
   worker.postMessage({ kind: 'start', init, perf } satisfies ToSim)
@@ -136,6 +140,11 @@ const feedAt = (e: PointerEvent): void => {
   send({ kind: 'feed', x, y, n: 3, radius: 14 })
 }
 const l0 = (): Link => link as Link
+canvas.addEventListener('click', (e) => {
+  if (e.shiftKey || !link) return
+  const [x, y] = renderer.toWorld(e.clientX, e.clientY, l0().layout.SIZE)
+  send({ kind: 'inspect', x, y })
+})
 canvas.addEventListener('pointerdown', (e) => {
   if (!e.shiftKey && e.button === 0) return
   e.preventDefault()
@@ -165,7 +174,10 @@ $('b-slow').addEventListener('click', () => setRate(rate / 2))
 
 addEventListener('keydown', (e) => {
   if (!link) return
-  if (e.key === 'Escape') stop()
+  if (e.key === 'Escape') {
+    if (inspect.open) inspect.hide()
+    else stop()
+  }
   else if (e.key === ' ') {
     e.preventDefault()
     paused ? play() : pause()

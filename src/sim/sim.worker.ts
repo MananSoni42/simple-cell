@@ -1,6 +1,7 @@
 import { makeBackend, canShare } from '../compute/select'
 import { census, lifeStats } from '../core/metrics'
 import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, writeSnapshot } from '../core/snapshot'
+import { exportOrganism } from '../core/organism'
 import { World } from '../core/world'
 import { H, N_FRAMES, allocFrame, layoutOf, writeFrame, type FrameBuffers } from './frames'
 import type { FromSim, StatsSnapshot, ToSim } from './protocol'
@@ -236,6 +237,18 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       const w = world
       if (w) {
         for (let k = 0; k < m.n; k++) w.feedAt(m.x, m.y, m.radius)
+        publish(w)
+      }
+    } else if (m.kind === 'inspect') {
+      const w = world
+      if (w) {
+        const b = w.pickOrganism(m.x, m.y)
+        post({ kind: 'organism', organism: b >= 0 ? exportOrganism(w, b) : null })
+      }
+    } else if (m.kind === 'placeSaved') {
+      const w = world
+      if (w) {
+        w.placeSaved(m.organism)
         publish(w)
       }
     } else if (m.kind === 'rate') {
