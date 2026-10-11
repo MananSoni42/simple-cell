@@ -153,6 +153,7 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   w.setFreeFoodSlots(snap.freeFood.subarray(0, snap.freeFoodCount))
   w.lineageCounter = snap.lineageCounter
   w.aggregates.reset()
+  w.orders.reset()
   w.grid.build()
   return w
 }

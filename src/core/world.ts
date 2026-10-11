@@ -3,6 +3,7 @@ import { type KernelArrays, type KernelParams } from './forcekernel'
 import { AggregateTracker } from './aggregates'
 import { Bonds, bondForce } from './bonds'
 import { LifeTracker, RollingMean } from './lifestats'
+import { OrderTracker } from './orders'
 import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
 import { type Init, type Laws, LAWS, applyQuantization, bondRange } from './params'
 import { Rng } from './rng'
@@ -174,6 +175,7 @@ export class World {
   readonly lifeParticles = new LifeTracker()
   readonly lifeOrganisms = new LifeTracker()
   readonly aggregates = new AggregateTracker()
+  readonly orders = new OrderTracker()
   readonly lifeParticlesWindow: RollingMean
   readonly lifeOrganismsWindow: RollingMean
   /** Lineage: a spawned organism founds one; its descendants inherit the id. */
@@ -414,6 +416,7 @@ export class World {
     this.stepField()
     this.stepPatches()
     this.aggregates.observe(this)
+    this.orders.observe(this)
     this.tick++
     if (this.tick % this.init.T_food === 0) for (let k = 0; k < this.init.food_batch; k++) this.injectFood()
     if (this.tick % this.init.T_spawn === 0) for (let k = 0; k < this.init.spawn_batch; k++) this.spawnRandom()

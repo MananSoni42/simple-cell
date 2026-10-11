@@ -679,3 +679,32 @@ chemistry should decide. Bonds are drawn as faint dashed lines, and the stats pa
 This is the mechanism multicellularity needs, and it is what the aggregate metrics in §13
 ultimately want to be built on: a group joined by bonds is a real object, not a coincidence of
 proximity.
+
+---
+
+## 17. Compound organisms: the n-order metric
+
+How many objects of each **order** are holding together, and for how long.
+
+```
+order 1 = one organism
+order 2 = two organisms bonded into one object
+order n = n of them
+```
+
+Groups are found through **bonds** (R16), not proximity, so an order-n object is a real thing
+rather than n organisms that happen to be near each other. An object **counts as surviving** at
+order n only once it has held for `holdFrac` (25%) of the trailing `windowTicks` (2000) — anything
+can touch for a moment, and the question is what stays. Breaking apart and re-forming restarts
+the clock, because the re-formed group is a different object.
+
+The panel shows the live count at each order, how many have survived, and the best order ever
+reached with how long it lasted.
+
+**Measured, and worth knowing:** compounds do form — order 2 and 3 are routinely alive in the
+Membrane preset, which briefly reached order 5 — but almost nothing survives long. The best
+measured is an order-2 pair holding for **430 ticks**. The reason is not the bond: it is that
+organisms with *random* brains wander off and tear their own bonds apart within a couple of
+hundred ticks. Staying together is a behaviour, and nothing is selecting for it yet. That makes
+this metric exactly the instrument to watch when learning resumes — and the window was set to
+2000 ticks rather than 10000 because a threshold nothing can ever clear tells you nothing.

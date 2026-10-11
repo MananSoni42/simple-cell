@@ -2,6 +2,7 @@ import type { Perf } from '../compute/select'
 import type { Init } from '../core/params'
 import type { AggregateStats } from '../core/aggregates'
 import type { Census, LifeStats } from '../core/metrics'
+import type { OrderStats } from '../core/orders'
 import type { FrameBuffers, FrameLayout } from './frames'
 
 export type ToSim =
@@ -27,6 +28,7 @@ export interface StatsSnapshot {
   life: LifeStats
   aggregates: AggregateStats
   bondCount: number
+  orders: OrderStats
   clampedPct: number
   /** Ticks of history held, and the oldest tick we can rewind to. */
   historyTicks: number
