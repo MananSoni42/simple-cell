@@ -1,14 +1,17 @@
 import type { OrganismFile } from '../core/organism'
-import { TYPE_NAMES } from '../core/types'
+import { portrait, weightMap } from './portrait'
+import { fmt } from './theme'
 
-/** Side panel for one organism: what it is, and buttons to save or re-seed it. */
+/** The right rail: one organism, drawn, with the buttons to save or re-seed it. */
 export class InspectPanel {
   private current: OrganismFile | null = null
 
   constructor(
     private root: HTMLElement,
     private onPlace: (o: OrganismFile) => void,
-  ) {}
+  ) {
+    this.hide()
+  }
 
   get open(): boolean {
     return this.current !== null
@@ -17,9 +20,10 @@ export class InspectPanel {
   /** The rail is always present, so "nothing selected" is a hint rather than an empty box. */
   hide(): void {
     this.current = null
-    this.root.innerHTML = `<div class="hd"><span>Organism</span></div>
+    this.root.innerHTML = `
+      <div class="hd"><span>Organism</span></div>
       <div class="empty-hint">click an organism in the world to look inside it<br><br>
-      you will see its age, lineage and limbs, and can save it or drop a copy back in</div>`
+        you will see its body as it stands, what each part is holding, and the weights it inherited</div>`
   }
 
   show(o: OrganismFile | null): void {
@@ -28,29 +32,28 @@ export class InspectPanel {
       return
     }
     this.current = o
-    const limbs = o.limbs.map((l) => `q${l.quad} ${TYPE_NAMES[l.type]} ${l.reserve.toFixed(0)}`).join(' · ') || 'none'
-    const rows: [string, string][] = [
-      ['age', `${Math.round(o.age)} ticks`],
-      ['generation', String(o.generation)],
-      ['children', String(o.children)],
-      ['reserve', o.reserve.toFixed(1)],
-      ['limbs', `${o.limbs.length} — ${limbs}`],
-      ['weights', `${o.wLimb.length} limb, ${o.wBrain.length} brain`],
-    ]
+    const chip = (k: string, v: string): string => `<span class="chip"><i>${k}</i>${v}</span>`
     this.root.innerHTML = `
-      <div class="hd"><span>Organism</span><span class="dim">gen ${o.generation}</span></div>
-      <div class="kv">${rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('')}</div>
-      <div class="row">
+      <div class="hd"><span>Organism</span><span class="dim">gen ${fmt.n(o.generation)}</span></div>
+      ${portrait(o)}
+      <div class="chips-row">
+        ${chip('age', fmt.n(o.age) + 't')}
+        ${chip('limbs', `${o.limbs.length}/4`)}
+        ${chip('children', fmt.n(o.children))}
+      </div>
+      <div class="blk"><div class="row-k"><b>Inherited weights</b></div>${weightMap(o)}</div>
+      <div class="row" style="gap:5px;margin-top:12px">
         <button id="o-save">save</button>
         <button id="o-copy">copy</button>
         <button id="o-clone">re-seed</button>
         <button id="o-load">load…</button>
       </div>
       <input type="file" id="o-file" accept="application/json" hidden />
-      <div class="dim" id="o-note" style="margin-top:6px"></div>`
-    const q = <T extends HTMLElement>(sel: string) => this.root.querySelector<T>(sel)!
+      <div class="note" id="o-note" style="margin-top:6px"></div>`
+
+    const q = <T extends HTMLElement>(sel: string): T => this.root.querySelector<T>(sel)!
     const note = q('#o-note')
-    const text = () => JSON.stringify(this.current, null, 2)
+    const text = (): string => JSON.stringify(this.current, null, 2)
     q('#o-save').addEventListener('click', () => {
       const url = URL.createObjectURL(new Blob([text()], { type: 'application/json' }))
       const a = document.createElement('a')
@@ -79,13 +82,12 @@ export class InspectPanel {
       try {
         const { parseOrganism } = await import('../core/organism')
         const parsed = parseOrganism(await f.text())
-        this.current = parsed
+        this.show(parsed)
         this.onPlace(parsed)
-        note.textContent = 'loaded and placed'
+        this.root.querySelector<HTMLElement>('#o-note')!.textContent = 'loaded and placed'
       } catch (err) {
         note.textContent = `could not read that: ${(err as Error).message}`
       }
     })
-    this.root.hidden = false
   }
 }

@@ -26,6 +26,15 @@ export const SERIES = [CHART.blue, CHART.mint, CHART.amber, CHART.coral] as cons
 /** Sequential, for magnitude with a natural ranking (compound order). One hue, light to dark. */
 export const RAMP = ['#cde2fb', '#86b6ef', '#3987e5', '#1c5cab', '#184f95'] as const
 
+/**
+ * The canvas palette: glowing marks on near-black, indexed by particle type
+ * (P1–P4, brain, food, wall). Chosen for visibility there, not as chart colours — see CHART.
+ */
+export const WORLD = ['#ff6b81', '#ffc145', '#3ddc97', '#5b8def', '#f4f6fb', '#a3e635', '#394155'] as const
+
+/** Bonds have their own look everywhere they are drawn: white and dashed. */
+export const BOND = '#ffffff'
+
 export const INK = {
   primary: '#e8edf6',
   secondary: '#aab4c6',

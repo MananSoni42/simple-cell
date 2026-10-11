@@ -667,9 +667,9 @@ forces: `F_form` to make one, `F_break` to undo it.
 
 Measured across the presets: switching bonding on takes standing bonds from 0 to 20–60 in the
 dense worlds and leaves the sparse ones (Grazers, Desert) largely unbonded, which is what the
-chemistry should decide. Bonds are drawn in their own colour — a cyan line over a soft halo, so a join reads clearly
-against both the empty field and a dense cluster, and is never mistaken for a rod. They tile across
-the seam like everything else, and the stats panel counts them.
+chemistry should decide. Bonds are drawn as **white dashed lines**, which distinguishes them from a rod (solid, in its
+limb's colour) at a glance. They tile across the seam like everything else, and the stats panel
+counts them.
 
 This is the mechanism multicellularity needs, and it is what the aggregate metrics in §13
 ultimately want to be built on: a group joined by bonds is a real object, not a coincidence of
@@ -724,8 +724,21 @@ was something that does not *move*, and that is what this is.
 
 ## 19. Inspecting one organism
 
-Click an organism in the world and a panel shows its age, generation, children, reserve, each
-limb's quadrant, type and reserve, and its weight counts. From there it can be **saved** or
+Click an organism and the right-hand rail **draws** it rather than describing it:
+
+- its **body** as it actually stands — real rod angles, limb types in their world colours, the
+  quadrant guides and gap, a brain that fills from the bottom and a limb whose bright core grows
+  with its reserve, exactly as on the canvas;
+- its **reserves** as bars against a common scale, so a starving part is obvious. The bar is
+  neutral and turns red only when genuinely low, with a coloured dot carrying the particle's type —
+  the type colour must not be the bar's colour, or a P1 limb (coral) reads as starving when it is
+  not;
+- its **inherited weights** as a heatmap, one row per brain output. Nobody can read 290 numbers,
+  and they are not meant to be read: the *pattern* gives an organism a face, so a parent and child
+  visibly resemble each other and an unrelated organism does not. It is also the only part of an
+  organism that is actually inherited.
+
+Age, limb count and children sit alongside as chips. From there it can be **saved** or
 **copied** as JSON, **re-seeded** (a copy placed into the running world), or a saved one
 **loaded** back in.
 
