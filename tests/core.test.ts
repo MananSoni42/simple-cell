@@ -215,3 +215,67 @@ describe('continuous inflow', () => {
     for (let i = 0; i < w.cap; i++) if (!w.alive[i]) expect(w.energy[i]).toBe(0)
   })
 })
+
+describe('static food', () => {
+  it('stays put until eaten when foodMoves is off, and drifts when it is on', () => {
+    const run = (foodMoves: boolean) => {
+      const w = new World(smallInit({ foodMoves, T: 20, n_intrinsic: 4, n_brain: 1, n_food0: 20, T_food: 1e9, T_spawn: 1e9, n_start: 0 }), SMALL)
+      const start = new Map<number, [number, number]>()
+      for (let i = w.nMatter; i < w.cap; i++) if (w.alive[i]) start.set(i, [w.x[i], w.y[i]])
+      for (let t = 0; t < 50; t++) w.step()
+      let moved = 0
+      for (const [i, [x, y]] of start) if (w.alive[i] && (w.x[i] !== x || w.y[i] !== y)) moved++
+      return moved
+    }
+    expect(run(false)).toBe(0)
+    expect(run(true)).toBeGreaterThan(0)
+  })
+})
+
+describe('budding reproduction', () => {
+  const rich = (over: Partial<Init> = {}) => {
+    const init = smallInit({ repro: true, n_brain: 4, T_spawn: 1e9, T_food: 1, n_start: 1, T: 2, ...over })
+    const w = new World(init, SMALL)
+    return w
+  }
+
+  it('moves energy from parent to child without creating any, and records lineage', () => {
+    const w = rich()
+    const b = [...Array(w.nMatter - w.nIntr).keys()].map((k) => k + w.nIntr).find((i) => w.isBrain(i))!
+    w.energy[b] = 90
+    w.repCool[b] = 0
+    const births = w.nBirths
+    const e0 = w.totalEnergy() + w.burned - w.injected
+    w.step()
+    expect(w.nBirths).toBeGreaterThan(births)
+    expect(w.nBudded).toBeGreaterThan(0)
+    expect(w.totalEnergy() + w.burned - w.injected).toBeCloseTo(e0, 6)
+    const child = [...Array(w.nMatter).keys()].find((i) => w.isBrain(i) && w.parent[i] === b)!
+    expect(w.gen[child]).toBe(1)
+    expect(w.energy[b]).toBeGreaterThanOrEqual(w.L.E_hold - 1e-9)
+  })
+
+  it('with zero mutation the child inherits the parent weights exactly', () => {
+    const w = rich({ repro_mut: 0 })
+    const b = [...Array(w.nMatter).keys()].find((i) => w.isBrain(i))!
+    w.energy[b] = 90
+    w.repCool[b] = 0
+    w.step()
+    const child = [...Array(w.nMatter).keys()].find((i) => w.isBrain(i) && w.parent[i] === b)!
+    expect(Array.from(w.wBrain[child]!)).toEqual(Array.from(w.wBrain[b]!))
+    expect(Array.from(w.wLimb[child]!)).toEqual(Array.from(w.wLimb[b]!))
+  })
+
+  it('never buds when switched off, and keeps the ledger closed over a long run when on', () => {
+    const off = rich({ repro: false })
+    for (let t = 0; t < 500; t++) off.step()
+    expect(off.nBudded).toBe(0)
+
+    const on = rich({ inflow: true, n_start: 2, T_food: 1 })
+    for (let t = 0; t < 2000; t++) {
+      on.step()
+      if (t % 100 === 0) expect(on.totalEnergy() + on.burned).toBeCloseTo(on.initialEnergy + on.injected, 6)
+    }
+    expect(on.nBirths - on.nDeaths).toBe(census(on).organisms)
+  })
+})

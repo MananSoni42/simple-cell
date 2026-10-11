@@ -18,8 +18,8 @@ preferred spacing, structures that hold a chemical gradient, bodies that heal, b
 
 ## Status
 
-**v0 implemented.** Headless core, test suite (invariants + phenomenology), start
-screen, and world view. Not yet explored: what the random chemistries actually produce.
+**v0 implemented**, plus budding reproduction, static/drifting food, world scaling, and
+optional multi-thread / GPU force computation. Learning is paused.
 
 ## Quick start
 
@@ -28,6 +28,8 @@ npm install
 npm run dev        # world at http://localhost:5173
 npm test           # headless core test suite
 npm run typecheck
+# benchmark the force backends (serial / threads / GPU) in your browser:
+#   http://localhost:5173/bench.html?scale=16&ticks=20
 ```
 
 ## Design constraints worth knowing before reading code

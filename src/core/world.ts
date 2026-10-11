@@ -1,7 +1,8 @@
-import { pairForce } from './forces'
+import { type ForceBackend, serialBackend } from './backend'
+import { type KernelArrays, type KernelParams } from './forcekernel'
 import { type Init, type Laws, LAWS } from './params'
 import { Rng } from './rng'
-import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX } from './types'
+import { BRAIN, FOOD, N_MATRIX } from './types'
 
 const HALF_PI = Math.PI / 2
 const TAU = Math.PI * 2
@@ -12,6 +13,8 @@ export interface WorldOpts {
   laws?: Partial<Laws>
   autoSpawn?: boolean
   maxFood?: number
+  /** Allocate state in SharedArrayBuffers so worker threads can read and write it. */
+  shared?: boolean
 }
 
 export interface OrganismSpec {
@@ -19,6 +22,15 @@ export interface OrganismSpec {
   x: number
   y: number
   limbs: { idx: number; quad: number; angle: number }[]
+  /** Inherited brain weights; fresh random ones are drawn when absent. */
+  wLimb?: Float64Array
+  wBrain?: Float64Array
+  parent?: number
+  gen?: number
+}
+
+function buffer(bytes: number, shared: boolean): ArrayBufferLike {
+  return shared ? new SharedArrayBuffer(bytes) : new ArrayBuffer(bytes)
 }
 
 /** Spatial hash over the torus. Cell size >= r_c, so a 3x3 block covers every interaction. */
@@ -31,13 +43,13 @@ export class Grid {
   readonly buf: Int32Array
   private fill: Int32Array
 
-  constructor(size: number, rc: number, cap: number) {
+  constructor(size: number, rc: number, cap: number, shared = false) {
     this.nc = Math.max(3, Math.floor(size / rc))
     this.cs = size / this.nc
-    this.start = new Int32Array(this.nc * this.nc + 1)
+    this.start = new Int32Array(buffer(4 * (this.nc * this.nc + 1), shared))
     this.fill = new Int32Array(this.nc * this.nc)
-    this.items = new Int32Array(cap)
-    this.cellOf = new Int32Array(cap)
+    this.items = new Int32Array(buffer(4 * cap, shared))
+    this.cellOf = new Int32Array(buffer(4 * cap, shared))
     this.buf = new Int32Array(cap)
   }
 
@@ -99,9 +111,13 @@ export class World {
   burned = 0
   injected = 0
   nBirths = 0
+  nBudded = 0
   nDeaths = 0
   recordAge = 0
   readonly bornAt: Int32Array
+  readonly gen: Int32Array // generation: 0 for spawned organisms, parent + 1 for budded ones
+  readonly parent: Int32Array
+  readonly repCool: Int16Array
   readonly initialEnergy: number
 
   // particle state (struct of arrays)
@@ -128,6 +144,9 @@ export class World {
   readonly wBrain: (Float64Array | undefined)[]
 
   readonly grid: Grid
+  readonly kernelArrays: KernelArrays
+  readonly kernelParams: KernelParams
+  backend: ForceBackend = serialBackend
   readonly field: Float64Array
   private fieldTmp: Float64Array
   private freeFood: number[] = []
@@ -138,11 +157,11 @@ export class World {
 
   constructor(init: Init, opts: WorldOpts = {}) {
     this.init = init
-    this.L = { ...LAWS, ...opts.laws }
+    this.L = { ...LAWS, SIZE: init.size, fieldN: Math.min(256, Math.round((LAWS.fieldN * init.size) / LAWS.SIZE)), ...opts.laws }
     this.rng = new Rng((init.seed ^ 0x9e3779b9) | 0)
     const L = this.L
 
-    this.A = new Float64Array(N_MATRIX * N_MATRIX)
+    this.A = new Float64Array(buffer(8 * N_MATRIX * N_MATRIX, opts.shared ?? false))
     for (let i = 0; i < N_MATRIX; i++) for (let j = 0; j < N_MATRIX; j++) this.A[i * N_MATRIX + j] = init.A[i][j]
 
     this.continuous = init.inflow
@@ -151,21 +170,25 @@ export class World {
     this.nMatter = this.nIntr + brainCap
     this.cap = this.nMatter + (opts.maxFood ?? init.max_food)
     const n = this.cap
-    this.x = new Float64Array(n)
-    this.y = new Float64Array(n)
-    this.fx = new Float64Array(n)
-    this.fy = new Float64Array(n)
+    const sh = opts.shared ?? false
+    this.x = new Float64Array(buffer(8 * n, sh))
+    this.y = new Float64Array(buffer(8 * n, sh))
+    this.fx = new Float64Array(buffer(8 * n, sh))
+    this.fy = new Float64Array(buffer(8 * n, sh))
     this.energy = new Float64Array(n)
-    this.type = new Uint8Array(n).fill(FOOD)
-    this.alive = new Uint8Array(n)
-    this.owner = new Int32Array(n).fill(-1)
+    this.type = new Uint8Array(buffer(n, sh)).fill(FOOD)
+    this.alive = new Uint8Array(buffer(n, sh))
+    this.owner = new Int32Array(buffer(4 * n, sh)).fill(-1)
     this.socket = new Int8Array(n).fill(-1)
     this.theta = new Float64Array(n)
     this.sig = new Float64Array(n)
     this.msg = new Float64Array(n)
-    this.foodNear = new Float32Array(n)
+    this.foodNear = new Float32Array(buffer(4 * n, sh))
     this.cool = new Int16Array(n)
     this.bornAt = new Int32Array(n)
+    this.gen = new Int32Array(n)
+    this.parent = new Int32Array(n).fill(-1)
+    this.repCool = new Int16Array(n)
     this.limbs = new Int32Array(n * 4).fill(-1)
     this.mvx = new Float64Array(n)
     this.mvy = new Float64Array(n)
@@ -184,7 +207,13 @@ export class World {
     }
     for (let i = this.cap - 1; i >= this.nMatter; i--) this.freeFood.push(i)
 
-    this.grid = new Grid(L.SIZE, L.r_c, n)
+    this.grid = new Grid(L.SIZE, L.r_c, n, sh)
+    this.kernelArrays = {
+      x: this.x, y: this.y, fx: this.fx, fy: this.fy, type: this.type, owner: this.owner,
+      alive: this.alive, foodNear: this.foodNear, cellStart: this.grid.start,
+      cellItems: this.grid.items, cellOf: this.grid.cellOf, A: this.A,
+    }
+    this.kernelParams = { SIZE: L.SIZE, r_c: L.r_c, beta: L.beta, K_core: L.K_core, nc: this.grid.nc }
     this.field = new Float64Array(L.fieldN * L.fieldN)
     this.fieldTmp = new Float64Array(L.fieldN * L.fieldN)
     for (let p = 0; p < init.n_patch; p++) {
@@ -243,9 +272,24 @@ export class World {
 
   // ---------------------------------------------------------------- tick
 
+  /** Advances one tick. Only valid with a synchronous force backend. */
   step(): void {
+    this.prepare()
+    if (this.backend.compute(this)) throw new Error(`backend "${this.backend.name}" is async; use stepAsync()`)
+    this.finish()
+  }
+
+  async stepAsync(): Promise<void> {
+    this.prepare()
+    await this.backend.compute(this)
+    this.finish()
+  }
+
+  private prepare(): void {
     this.grid.build(this.x, this.y, this.alive, this.cap)
-    this.computeForces()
+  }
+
+  private finish(): void {
     this.integrate()
     this.grid.build(this.x, this.y, this.alive, this.cap)
     this.uptake()
@@ -253,46 +297,16 @@ export class World {
     this.costs()
     if (this.continuous) this.freeMatterDecay()
     this.deaths()
+    if (this.init.repro) this.reproduce()
     this.captures()
     this.stepField()
     this.stepPatches()
     this.tick++
-    if (this.tick % this.init.T_food === 0) this.injectFood()
-    if (this.tick % this.init.T_spawn === 0) this.spawnRandom()
-    for (let i = 0; i < this.nMatter; i++) if (this.cool[i] > 0) this.cool[i]--
-  }
-
-  private computeForces(): void {
-    const { L, x, y, fx, fy, type, owner, alive, grid, A, foodNear } = this
-    fx.fill(0)
-    fy.fill(0)
-    foodNear.fill(0)
-    const rc2 = L.r_c * L.r_c
-    for (let i = 0; i < this.cap; i++) {
-      if (!alive[i]) continue
-      const n = grid.near(x[i], y[i])
-      const ti = type[i]
-      const mi = MATRIX_INDEX[ti]
-      for (let k = 0; k < n; k++) {
-        const j = grid.buf[k]
-        if (j <= i) continue
-        const tj = type[j]
-        if (owner[i] >= 0 && owner[i] === owner[j] && (ti === BRAIN || tj === BRAIN)) continue
-        const dx = this.minImage(x[j] - x[i])
-        const dy = this.minImage(y[j] - y[i])
-        const r2 = dx * dx + dy * dy
-        if (r2 >= rc2 || r2 < 1e-18) continue
-        const r = Math.sqrt(r2)
-        const mj = MATRIX_INDEX[tj]
-        const a = mi >= 0 && mj >= 0 ? A[mi * N_MATRIX + mj] : 0
-        const f = pairForce(r, a, L) / r
-        fx[i] += f * dx
-        fy[i] += f * dy
-        fx[j] -= f * dx
-        fy[j] -= f * dy
-        if (tj === FOOD) foodNear[i]++
-        if (ti === FOOD) foodNear[j]++
-      }
+    if (this.tick % this.init.T_food === 0) for (let k = 0; k < this.init.food_batch; k++) this.injectFood()
+    if (this.tick % this.init.T_spawn === 0) for (let k = 0; k < this.init.spawn_batch; k++) this.spawnRandom()
+    for (let i = 0; i < this.nMatter; i++) {
+      if (this.cool[i] > 0) this.cool[i]--
+      if (this.repCool[i] > 0) this.repCool[i]--
     }
   }
 
@@ -301,8 +315,10 @@ export class World {
     const mu = L.mu
     const sn = Math.sqrt(2 * mu * this.init.T)
 
+    const foodMoves = this.init.foodMoves
     for (let i = 0; i < this.cap; i++) {
       if (!alive[i] || owner[i] !== -1) continue
+      if (!foodMoves && this.type[i] === FOOD) continue
       x[i] = this.wrap(x[i] + mu * fx[i] + sn * rng.gauss())
       y[i] = this.wrap(y[i] + mu * fy[i] + sn * rng.gauss())
     }
@@ -349,22 +365,31 @@ export class World {
   }
 
   private uptake(): void {
-    const { L, x, y, grid, owner, energy } = this
+    const { L, x, y, grid, owner, energy, alive } = this
+    const { nc, start, items, cellOf } = grid
     const re2 = L.r_eat * L.r_eat
     for (let f = this.nMatter; f < this.cap; f++) {
-      if (!this.alive[f]) continue
-      const n = grid.near(x[f], y[f])
+      if (!alive[f]) continue
+      const c = cellOf[f]
+      const cx = c % nc
+      const cy = (c - cx) / nc
       let best = -1
       let bestD = re2
-      for (let k = 0; k < n; k++) {
-        const j = grid.buf[k]
-        if (!this.canEat(j)) continue
-        const dx = this.minImage(x[j] - x[f])
-        const dy = this.minImage(y[j] - y[f])
-        const d2 = dx * dx + dy * dy
-        if (d2 < bestD) {
-          bestD = d2
-          best = j
+      for (let dy = -1; dy <= 1; dy++) {
+        const row = ((cy + dy + nc) % nc) * nc
+        for (let dx = -1; dx <= 1; dx++) {
+          const cc = row + ((cx + dx + nc) % nc)
+          for (let k = start[cc]; k < start[cc + 1]; k++) {
+            const j = items[k]
+            if (j >= this.nMatter) continue // only matter eats
+            const ex = this.minImage(x[j] - x[f])
+            const ey = this.minImage(y[j] - y[f])
+            const d2 = ex * ex + ey * ey
+            if (d2 < bestD && this.canEat(j)) {
+              bestD = d2
+              best = j
+            }
+          }
         }
       }
       if (best < 0) continue
@@ -621,8 +646,11 @@ export class World {
     this.y[b] = this.wrap(spec.y)
     this.mvx[b] = 0
     this.mvy[b] = 0
-    this.wLimb[b] = Float64Array.from({ length: 8 }, () => rng.gauss())
-    this.wBrain[b] = Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
+    this.wLimb[b] = spec.wLimb ?? Float64Array.from({ length: 8 }, () => rng.gauss())
+    this.wBrain[b] = spec.wBrain ?? Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
+    this.gen[b] = spec.gen ?? 0
+    this.parent[b] = spec.parent ?? -1
+    this.repCool[b] = this.L.repro_cooldown
     for (const { idx, quad, angle } of spec.limbs) {
       this.owner[idx] = b
       this.socket[idx] = quad
@@ -630,6 +658,75 @@ export class World {
       this.limbs[b * 4 + quad] = idx
     }
     this.placeLimbs(b)
+  }
+
+  /**
+   * Budding: a brain holding at least E_repro pays for a child's body (every particle
+   * topped up to E_init) and keeps at least E_hold. The child copies the parent's limb
+   * types and angles, inherits its brain weights plus Gaussian noise, and appears
+   * `repro_dist` away. Energy only moves from parent to child, so nothing is injected.
+   */
+  private reproduce(): void {
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      if (!this.isBrain(b) || this.repCool[b] > 0 || this.energy[b] < this.L.E_repro) continue
+      this.bud(b)
+    }
+  }
+
+  private bud(b: number): void {
+    const { L, rng } = this
+    const want: { quad: number; type: number; angle: number }[] = []
+    for (let s = 0; s < 4; s++) {
+      const l = this.limbs[b * 4 + s]
+      if (l >= 0) want.push({ quad: s, type: this.type[l], angle: this.theta[l] })
+    }
+    if (want.length === 0) return
+
+    // find room: an open brain slot and one open particle per wanted limb
+    let childBrain = -1
+    for (let i = this.nIntr; i < this.nMatter && childBrain < 0; i++) {
+      if (this.continuous ? !this.alive[i] : this.owner[i] === -1) childBrain = i
+    }
+    if (childBrain < 0) return
+    const taken = new Set<number>()
+    const limbs: OrganismSpec['limbs'] = []
+    let cost = Math.max(0, L.E_init - this.energy[childBrain])
+    for (const w of want) {
+      let pick = -1
+      for (let i = 0; i < this.nIntr && pick < 0; i++) {
+        if (taken.has(i)) continue
+        const open = this.continuous ? !this.alive[i] : this.owner[i] === -1 && this.type[i] === w.type && this.cool[i] === 0
+        if (open) pick = i
+      }
+      if (pick < 0) continue
+      taken.add(pick)
+      cost += Math.max(0, L.E_init - this.energy[pick])
+      limbs.push({ idx: pick, quad: w.quad, angle: w.angle })
+      if (this.continuous) this.type[pick] = w.type
+    }
+    if (limbs.length === 0 || this.energy[b] < cost + L.E_hold) return
+
+    const a = rng.next() * TAU
+    const sigma = this.init.repro_mut
+    const mutate = (w: Float64Array) => Float64Array.from(w, (v) => v + sigma * rng.gauss())
+    for (const idx of [childBrain, ...limbs.map((l) => l.idx)]) {
+      this.alive[idx] = 1
+      const add = Math.max(0, L.E_init - this.energy[idx])
+      this.energy[idx] += add
+      this.energy[b] -= add
+    }
+    this.placeOrganism({
+      brain: childBrain,
+      x: this.x[b] + L.repro_dist * Math.cos(a),
+      y: this.y[b] + L.repro_dist * Math.sin(a),
+      limbs,
+      wLimb: mutate(this.wLimb[b]!),
+      wBrain: mutate(this.wBrain[b]!),
+      parent: b,
+      gen: this.gen[b] + 1,
+    })
+    this.nBudded++
+    this.repCool[b] = L.repro_cooldown
   }
 
   /** Tops a particle's reserve up to E_init. Energy created here is counted as injected. */

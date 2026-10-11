@@ -22,6 +22,7 @@ export class StatsPanel {
     root.innerHTML = `
       <div class="hd"><span id="s-tick"></span><span id="s-rate"></span></div>
       <div class="dim" id="s-world"></div>
+      <div class="dim" id="s-perf"></div>
       ${this.block('Organisms', 'orgs', '#f4f6fb')}
       <div class="sub" id="s-orgs-sub"></div>
       ${this.block('Food', 'food', '#a3e635')}
@@ -29,7 +30,7 @@ export class StatsPanel {
       <div class="sub" id="s-energy-sub"></div>
       <div class="blk"><div class="row"><b>Largest connected</b><i id="s-max"></i></div>
       <div class="sub" id="s-cluster-sub"></div></div>`
-    for (const id of ['s-tick', 's-rate', 's-world', 's-orgs-sub', 's-energy-sub', 's-max', 's-cluster-sub', 's-orgs', 's-food', 's-energy']) {
+    for (const id of ['s-tick', 's-rate', 's-world', 's-perf', 's-orgs-sub', 's-energy-sub', 's-max', 's-cluster-sub', 's-orgs', 's-food', 's-energy']) {
       this.el[id] = root.querySelector<HTMLElement>('#' + id)!
     }
     for (const [key, color] of [['orgs', '#f4f6fb'], ['food', '#a3e635'], ['energy', '#ffc145']] as const) {
@@ -47,7 +48,7 @@ export class StatsPanel {
     this.clusterAt = 0
   }
 
-  update(w: World, rateLabel: string): void {
+  update(w: World, rateLabel: string, perf = ''): void {
     const c = census(w)
     const now = performance.now()
     if (now - this.clusterAt > 700) {
@@ -67,9 +68,10 @@ export class StatsPanel {
     const set = (id: string, text: string) => (this.el[id].textContent = text)
     set('s-tick', `tick ${w.tick}`)
     set('s-rate', rateLabel)
-    set('s-world', `seed ${i.seed} · food ${i.foodMode} · T ${i.T}`)
+    set('s-world', `seed ${i.seed} · ${i.size}² · food ${i.foodMode}${i.foodMoves ? ' (drifting)' : ' (static)'} · T ${i.T}`)
+    set('s-perf', perf)
     set('s-orgs', `${c.organisms} alive`)
-    set('s-orgs-sub', `born ${w.nBirths} · died ${w.nDeaths} · oldest ${c.oldest} · record ${Math.max(w.recordAge, c.oldest)} · limbs/org ${c.organisms ? (c.limbs / c.organisms).toFixed(1) : '–'}`)
+    set('s-orgs-sub', `born ${w.nBirths} (${w.nBudded} budded) · died ${w.nDeaths} · max gen ${c.maxGen} · oldest ${c.oldest} · record ${Math.max(w.recordAge, c.oldest)} · limbs/org ${c.organisms ? (c.limbs / c.organisms).toFixed(1) : '–'}`)
     set('s-food', `${c.food}`)
     set('s-energy', `${(c.eOrganisms + c.eFree + c.eFood).toFixed(0)}`)
     set('s-energy-sub', `organisms ${c.eOrganisms.toFixed(0)} · free ${c.eFree.toFixed(0)} · food ${c.eFood.toFixed(0)} · burned ${w.burned.toFixed(0)}`)

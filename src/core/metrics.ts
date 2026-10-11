@@ -115,10 +115,11 @@ export interface Census {
   eFree: number
   eFood: number
   oldest: number
+  maxGen: number
 }
 
 export function census(w: World): Census {
-  const c: Census = { organisms: 0, limbs: 0, freeMatter: 0, food: w.nFood, eOrganisms: 0, eFree: 0, eFood: 0, oldest: 0 }
+  const c: Census = { organisms: 0, limbs: 0, freeMatter: 0, food: w.nFood, eOrganisms: 0, eFree: 0, eFood: 0, oldest: 0, maxGen: 0 }
   for (let i = 0; i < w.cap; i++) {
     if (!w.alive[i]) continue
     if (w.type[i] === FOOD) c.eFood += w.energy[i]
@@ -127,6 +128,7 @@ export function census(w: World): Census {
       if (w.owner[i] === i) {
         c.organisms++
         c.oldest = Math.max(c.oldest, w.tick - w.bornAt[i])
+        c.maxGen = Math.max(c.maxGen, w.gen[i])
       } else c.limbs++
     } else {
       c.eFree += w.energy[i]

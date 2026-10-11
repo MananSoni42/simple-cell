@@ -1,3 +1,4 @@
+import { type Perf, canShare, makeBackend } from './compute/select'
 import type { Init } from './core/params'
 import { World } from './core/world'
 import { Renderer } from './render/renderer'
@@ -5,7 +6,7 @@ import { mountStart } from './ui/start'
 import { StatsPanel } from './ui/stats'
 
 const MIN_RATE = 0.125
-const MAX_RATE = 512
+const MAX_RATE = 65536
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 const startEl = $('start')
@@ -17,15 +18,16 @@ const bPause = $('b-pause')
 const bRate = $('b-rate')
 
 let world: World | null = null
-let rate = 1 // ticks per second
+let rate = 1 // requested ticks per second
 let paused = false
 let acc = 0
 let last = 0
-
-function step(w: World): void {
-  renderer.snapshot(w)
-  w.step()
-}
+let session = 0
+let busy = false
+let perfNote = ''
+let tps = 0 // achieved ticks per second
+let tpsCount = 0
+let tpsSince = 0
 
 const rateLabel = () => (paused ? 'paused' : `${rate} tick/s`)
 
@@ -34,7 +36,6 @@ function syncControls(): void {
   bPause.classList.toggle('on', paused)
   bRate.textContent = `${rate} tick/s`
 }
-
 function play(): void {
   paused = false
   last = performance.now()
@@ -53,16 +54,27 @@ function slower(): void {
   syncControls()
 }
 function stop(): void {
+  session++
+  world?.backend.dispose?.()
   world = null
   worldEl.hidden = true
   start.show()
 }
 
-const start = mountStart(startEl, (init: Init) => {
-  world = new World(init)
-  renderer.snapshot(world)
+const start = mountStart(startEl, async (init: Init, perf: Perf) => {
+  session++
+  busy = false
+  const w = new World(init, { shared: canShare })
+  const { backend, note } = await makeBackend(w, perf)
+  w.backend = backend
+  perfNote = note
+  world = w
+  renderer.reset()
+  renderer.snapshot(w)
   rate = 1
   acc = 0
+  tps = tpsCount = 0
+  tpsSince = performance.now()
   stats.reset()
   start.hide()
   worldEl.hidden = false
@@ -83,30 +95,47 @@ addEventListener('keydown', (e) => {
     paused ? play() : pause()
   } else if (e.key === 'ArrowRight') faster()
   else if (e.key === 'ArrowLeft') slower()
-  else if (e.key === '.') {
+  else if (e.key === '.' && !busy) {
     pause()
     acc = 0
-    step(world)
+    renderer.snapshot(world)
+    void world.stepAsync()
   }
 })
+
+async function advance(w: World, mine: number): Promise<void> {
+  busy = true
+  const deadline = performance.now() + 12
+  try {
+    while (mine === session && acc >= 1 && performance.now() < deadline) {
+      renderer.snapshot(w)
+      await w.stepAsync()
+      acc -= 1
+      tpsCount++
+    }
+  } finally {
+    if (mine === session) busy = false
+  }
+}
 
 function frame(now: number): void {
   requestAnimationFrame(frame)
   if (!world) return
   const dt = Math.min(0.25, (now - last) / 1000)
   last = now
-  if (!paused) {
-    const deadline = performance.now() + 12
-    acc += dt * rate
-    while (acc >= 1 && performance.now() < deadline) {
-      step(world)
-      acc -= 1
-    }
-    if (acc > 3) acc = 0
+  if (!paused && !busy) {
+    acc = Math.min(acc + dt * rate, Math.max(3, rate * 0.05))
+    void advance(world, session)
+  }
+  if (now - tpsSince > 1000) {
+    tps = (tpsCount * 1000) / (now - tpsSince)
+    tpsCount = 0
+    tpsSince = now
   }
   // glide between ticks only when ticks are slow enough to see
   const smooth = !paused && rate <= 10
   renderer.draw(world, smooth ? Math.min(1, acc) : 1)
-  stats.update(world, rateLabel())
+  const w = world
+  stats.update(w, rateLabel(), `${w.backend.name} · ${tps.toFixed(tps < 10 ? 1 : 0)} tick/s achieved · ${w.cap} slots${perfNote ? ' · ' + perfNote : ''}`)
 }
 requestAnimationFrame(frame)

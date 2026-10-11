@@ -27,10 +27,58 @@ export class Renderer {
   private X = new Float32Array(0)
   private Y = new Float32Array(0)
 
+  // camera: wheel zooms about the cursor, drag pans, double-click resets
+  private zoom = 1
+  private ox = 0
+  private oy = 0
+
   constructor(private canvas: HTMLCanvasElement) {
     this.ctx = canvas.getContext('2d')!
     this.resize()
     addEventListener('resize', () => this.resize())
+    const toCanvas = (e: MouseEvent) => {
+      const r = canvas.getBoundingClientRect()
+      return [((e.clientX - r.left) * canvas.width) / r.width, ((e.clientY - r.top) * canvas.height) / r.height]
+    }
+    canvas.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault()
+        const [mx, my] = toCanvas(e)
+        const z = Math.min(80, Math.max(1, this.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)))
+        this.ox = mx - ((mx - this.ox) * z) / this.zoom
+        this.oy = my - ((my - this.oy) * z) / this.zoom
+        this.zoom = z
+        this.clampPan()
+      },
+      { passive: false },
+    )
+    let drag: [number, number] | null = null
+    canvas.addEventListener('pointerdown', (e) => {
+      drag = toCanvas(e) as [number, number]
+      canvas.setPointerCapture(e.pointerId)
+    })
+    canvas.addEventListener('pointermove', (e) => {
+      if (!drag) return
+      const [mx, my] = toCanvas(e)
+      this.ox += mx - drag[0]
+      this.oy += my - drag[1]
+      drag = [mx, my]
+      this.clampPan()
+    })
+    canvas.addEventListener('pointerup', () => (drag = null))
+    canvas.addEventListener('dblclick', () => this.reset())
+  }
+
+  reset(): void {
+    this.zoom = 1
+    this.ox = this.oy = 0
+  }
+
+  private clampPan(): void {
+    const lim = this.px * (1 - this.zoom)
+    this.ox = Math.min(0, Math.max(lim, this.ox))
+    this.oy = Math.min(0, Math.max(lim, this.oy))
   }
 
   private resize(): void {
@@ -93,20 +141,30 @@ export class Renderer {
 
   /** alpha in [0,1]: how far we are from the last snapshot to the current state. */
   draw(w: World, alpha: number): void {
-    const { ctx, px, X, Y } = this
+    const { ctx, px, X, Y, zoom: z } = this
     const k = px / w.L.SIZE
     this.place(w, alpha)
 
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.globalAlpha = 1
     ctx.fillStyle = BG
     ctx.fillRect(0, 0, px, px)
+    ctx.setTransform(z, 0, 0, z, this.ox, this.oy)
     this.drawField(w)
+    // visible window in unzoomed pixel coordinates, with a margin for shape sizes
+    const m = 12 * k * z
+    const x0 = -this.ox / z - m / z
+    const x1 = (px - this.ox) / z + m / z
+    const y0 = -this.oy / z - m / z
+    const y1 = (px - this.oy) / z + m / z
+    const vis = (i: number) => X[i] >= x0 && X[i] <= x1 && Y[i] >= y0 && Y[i] <= y1
 
     const brains: number[] = []
     for (let b = w.nIntr; b < w.nMatter; b++) if (w.alive[b] && w.isBrain(b)) brains.push(b)
 
     // organism footprints, then rods
     for (const b of brains) {
+      if (!vis(b)) continue
       ctx.beginPath()
       ctx.arc(X[b], Y[b], (w.L.L_rod + 5) * k, 0, Math.PI * 2)
       ctx.fillStyle = 'rgba(244,246,251,0.045)'
@@ -118,6 +176,7 @@ export class Renderer {
     ctx.lineCap = 'round'
     ctx.lineWidth = Math.max(2, 1.5 * k)
     for (const b of brains) {
+      if (!vis(b)) continue
       for (let s = 0; s < 4; s++) {
         const l = w.limbs[b * 4 + s]
         if (l < 0) continue
@@ -130,16 +189,16 @@ export class Renderer {
     }
 
     // food, then free matter
-    for (let i = w.nMatter; i < w.cap; i++) if (w.alive[i]) this.diamond(X[i], Y[i], R_FOOD * k, COLORS[FOOD])
+    for (let i = w.nMatter; i < w.cap; i++) if (w.alive[i] && vis(i)) this.diamond(X[i], Y[i], R_FOOD * k, COLORS[FOOD])
     ctx.globalAlpha = 0.6
     for (let i = 0; i < w.nIntr; i++) {
-      if (w.alive[i] && w.owner[i] < 0) this.circle(X[i], Y[i], R_PARTICLE * 0.8 * k, COLORS[w.type[i]])
+      if (w.alive[i] && w.owner[i] < 0 && vis(i)) this.circle(X[i], Y[i], R_PARTICLE * 0.8 * k, COLORS[w.type[i]])
     }
     ctx.globalAlpha = 1
 
     // bound limbs: dim disc + bright core sized by energy
     for (let i = 0; i < w.nIntr; i++) {
-      if (!w.alive[i] || w.owner[i] < 0) continue
+      if (!w.alive[i] || w.owner[i] < 0 || !vis(i)) continue
       const e = clamp01(w.energy[i] / w.L.E_ref)
       const r = R_PARTICLE * k
       ctx.globalAlpha = 0.28
@@ -155,6 +214,7 @@ export class Renderer {
 
     // brains: gauge filling from the bottom
     for (const b of brains) {
+      if (!vis(b)) continue
       const e = clamp01(w.energy[b] / w.L.E_ref)
       const r = R_BRAIN * k
       const x0 = X[b] - r
@@ -172,16 +232,22 @@ export class Renderer {
     ctx.strokeStyle = '#8b94a8'
     ctx.lineWidth = 1.5
     for (let b = w.nIntr; b < w.nMatter; b++) {
-      if (!w.alive[b] || w.isBrain(b)) continue
+      if (!w.alive[b] || w.isBrain(b) || !vis(b)) continue
       const r = R_BRAIN * 0.8 * k
       ctx.strokeRect(X[b] - r, Y[b] - r, 2 * r, 2 * r)
     }
     ctx.globalAlpha = 1
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
   }
 
   private circle(x: number, y: number, r: number, color: string): void {
     const { ctx } = this
     ctx.fillStyle = color
+    if (r * this.zoom < 1.2) {
+      const m = 1.6 / this.zoom // sub-pixel: a small square is far cheaper than an arc
+      ctx.fillRect(x - m / 2, y - m / 2, m, m)
+      return
+    }
     ctx.beginPath()
     ctx.arc(x, y, r, 0, Math.PI * 2)
     ctx.fill()
@@ -190,6 +256,11 @@ export class Renderer {
   private diamond(x: number, y: number, r: number, color: string): void {
     const { ctx } = this
     ctx.fillStyle = color
+    if (r * this.zoom < 1.2) {
+      const m = 1.2 / this.zoom
+      ctx.fillRect(x - m / 2, y - m / 2, m, m)
+      return
+    }
     ctx.beginPath()
     ctx.moveTo(x, y - r)
     ctx.lineTo(x + r, y)

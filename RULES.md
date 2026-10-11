@@ -71,7 +71,7 @@ terms with two distinct jobs:
   strongest. Spacing and membrane-like structure come from *mixed signs* — types
   that attract each other but repel their own kind.
 
-**R2.2 — Integration.** Free particles (including Food), every tick. `T` is a true
+**R2.2 — Integration.** Free particles, every tick. Food is included only when `foodMoves` is on; otherwise it sits where it landed (it still pulls and pushes others). `T` is a true
 temperature in potential-energy units (Einstein relation, `D = μT`):
 
 ```
@@ -265,6 +265,17 @@ particle whose reserve reaches 0 vanishes (its slot returns to the pool, residue
 burned). Organisms therefore keep arriving and keep dying, instead of the world
 filling up and freezing once every brain is in use.
 
+**R7.7 — Budding (option, on by default).** A brain with reserve `≥ E_repro` and no
+cooldown may reproduce, if it can pay and there is room. The child gets one limb per
+limb the parent currently has, of the same type and angle, taken from free particles of
+that type (pool mode) or from fresh slots (continuous inflow). Every particle of the
+child is topped up to `E_init`, and **that energy is taken from the parent**, who must
+keep at least `E_hold`. Nothing is injected. The child appears `repro_dist` away,
+inherits the parent's brain weights plus Gaussian noise of std `repro_mut`, and
+records `parent` and `generation = parent + 1`. Parent and child wait `repro_cooldown`
+ticks. In pool mode the supply of free brains and free limbs of the right type limits
+the population; reproduction is decoupled from everything else and costs nothing when off.
+
 **R7.5 — Matter is conserved** *(default, `inflow` off).* Intrinsic and brain particles are allocated once at
 init and never created or destroyed. Birth and death only change `owner` and
 `socket`. Scarcity of free particles therefore creates competition for limbs with no
@@ -306,7 +317,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 
 | | | |
 |---|---|---|
-| `SIZE` | 300 | world edge length (small and dense on purpose: everything is visible) |
+| `SIZE` | 300 × scale | world edge length. Counts and rates below scale with area, so density is constant |
 | `dt` | 1 | tick |
 | `mu` | 0.5 | mobility |
 | `r_c` | 40 | interaction cutoff |
@@ -329,7 +340,9 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `F_max` | 1.0 | max brain move force |
 | `lambda` | 0.05 | signal decay |
 | `D_sig` | 0.2 | signal diffusion |
-| `fieldN` | 64 | signal grid resolution |
+| `fieldN` | 64 × scale (max 256) | signal grid resolution |
+| `E_repro` · `E_hold` | 60 · 20 | budding threshold; reserve a parent must keep |
+| `repro_cooldown` · `repro_dist` | 80 · 42 | ticks between buds; child placement distance |
 
 ### Initial conditions — derived from the seed
 
@@ -345,6 +358,9 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `n_start` | 1 … 2 | organisms present at tick 0. **Editable** |
 | `n_food0` | 30 | food present at tick 0. **Editable** |
 | `max_food` | 120 | the sun pauses while this much food is in the world |
+| `scale` | 1 | world edge multiplier (1, 2, 4 … 32). Counts × scale², and each injection / spawn event repeats scale² times. **Editable** |
+| `foodMoves` | off | food drifts and responds to forces. **Editable** |
+| `repro` · `repro_mut` | on · 0.05 | budding (R7.7) and mutation std. **Editable** (on/off) |
 | `inflow` | off | continuous organism inflow (R7.6). **Editable** |
 | `n_patch, r_patch, v_patch` | 1…3, 35…65, 0.05…0.2 | only for `patchy` |
 
@@ -372,6 +388,11 @@ all read-only: the chemistry is frozen. Two kinds of input:
 - the **starting population** — particles, brains, organisms at start, food at start.
   These default from the seed and can be overridden; changing the seed resets them.
 
+**World options** (all editable): scale, reproduction, food drifts, continuous inflow.
+
+**Compute** (editable): thread count (1 … cores) and **GPU forces**. They change only
+*where* pair forces are computed, never what the world does (see below).
+
 **`Enter` enters the world.**
 
 **World screen.**
@@ -379,7 +400,10 @@ all read-only: the chemistry is frozen. Two kinds of input:
 - **Controls** (buttons along the bottom, with keys): **Start** resumes, **Pause** holds
   (`Space` toggles), **Stop** discards the world and returns to the start screen (`Esc`),
   **0.5×** / **2×** halve or double the speed (`←` / `→`) between 1/8 and 512 ticks/s.
-  The default is **1 tick / second**. `.` single-steps.
+  The default is **1 tick / second**; the panel also shows the rate actually achieved.
+  `.` single-steps.
+- **Camera:** wheel zooms about the cursor (up to 80×), drag pans, double-click resets.
+  Only what is on screen is drawn, and particles smaller than a pixel become dots.
 - **Stats panel** with sparklines for organisms, food and total energy, plus: born /
   died / oldest / record lifespan, limbs per organism, the energy split (in organisms,
   in free particles, in food) and cumulative burned, and the largest connected cluster
@@ -401,9 +425,36 @@ Each of these is a deferred decision with a reason, not an oversight.
 
 | Not in v0 | Why, and the trigger to add it |
 |---|---|
-| **Learning, evolution, mutation, reproduction** | v0 is world-building. Brain weights are random per organism so that nothing about a brain is designed |
+| **Learning and selection design** | Paused. Budding with mutation exists so lineages can be watched, but nothing steers it: no learning rules, no recombination, no evolved reproduction timing |
 | **Organism condensation** | Organisms spawn whole (R7.1) rather than assembling from the soup. R7.3 already contains the mechanism — promoting it to full birth is a small change once the world is stable |
 | **Corpse food** | Dissolved organisms leave their limbs' energy in free particles instead of dropping Food. Add it when trophic levels are wanted |
 | **Evolvable morphology** | Socket count is fixed at 4 and quadrants are fixed in size. Fill count (1–4), tip types, and rod angles already vary |
 | **Multiple signal channels** | One channel until something needs two |
 | **Brain chemistry (`B` in `A`)** | Would let bodies bind to bodies through existing physics — the cheapest route to multicellularity, and therefore worth trying early |
+
+---
+
+## 12. Compute backends
+
+Pair forces are the only part of a tick that grows with the number of particles times
+their neighbours, so they alone are pluggable (`ForceBackend`). Everything else — grid
+build, integration, energy, organisms — runs on the main thread.
+
+| Backend | How | Notes |
+|---|---|---|
+| serial | one loop over all particles | default; bit-exact; used by the test suite |
+| threads | Web Workers share the world's memory (`SharedArrayBuffer`); the main thread computes one slice | identical results to serial; needs the page to be cross-origin isolated (the dev server sets the headers) |
+| GPU | WebGPU compute kernel; the CPU uploads positions and cell grid, reads back one force per particle | single precision: matches serial to ~1e-4 relative, not bit-exact |
+
+All three run the same per-particle kernel (`forcekernel.ts` and its WGSL port), where
+each particle sums over *all* its neighbours. That is what makes the work splittable
+with no write conflicts. Measured on an Apple M4 Pro (14 cores), see `bench.html`:
+
+| World | Particles + food | serial | 14 threads | GPU |
+|---|---|---|---|---|
+| 8× (2400²) | ~11k slots | 597 tick/s | 920 tick/s | 625 tick/s |
+| 16× (4800²) | ~44k slots | 145 tick/s | 292 tick/s | 186 tick/s |
+| 32× (9600²) | ~176k slots | 35 tick/s | 71 tick/s | 68 tick/s |
+
+Speedup is about 2×, not 14×: the non-force part of a tick (about half the time) is
+still serial. Small worlds are faster on the serial backend.
