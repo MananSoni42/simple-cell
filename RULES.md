@@ -210,8 +210,56 @@ One Food particle carries `E_food`. Every particle has a reserve, capped at `E_c
 The ledger must close exactly: `Σ reserves + Σ food in world + total burned` equals
 `initial + total injected`, every tick.
 
-**R4.1 — Sun.** Every `T_food` ticks, one Food particle appears at a uniformly
-random position.
+**R4.1 — Sun.** Food arrives on an **accumulator**, not a fixed interval: the sun owes
+`rate(tick)` particles each tick and pays whole ones as they add up. So any rate works — a tenth
+of a particle a tick through a famine, nine a tick through a bloom — and the rate can change
+continuously without the arrival pattern stuttering. The fractional remainder is part of the
+world's state and travels in snapshots.
+
+The rate is three independent dials, which compose:
+
+```
+rate(tick) = level × sustenance × regime(tick)        and the pattern decides *where* it lands
+```
+
+**R4.1a — Pattern: where food lands.**
+
+| | |
+|---|---|
+| `random` | uniform over the torus. Standing still is as good as moving |
+| `patchy` | a few slowly drifting hot-spots, so following the food pays |
+| `gradient` | one sunlit band; the rest is desert |
+| `converging` | 2–4 colonies spread evenly round the world that migrate together over `converge_ticks` and **merge into one** — isolation first, contact later |
+| `breathing` | the same colonies, but they merge and part again **for ever**, one full breath every `converge_ticks`. Populations meet and mix, then are pulled apart to drift on their own |
+| `spring` | a single small fixed source everything must come to: the most contested world there is |
+| `comet` | one fast source crossing the world, so food is a target to be chased rather than a place |
+| `ring` | a closed band around the middle — a circuit rather than a field |
+
+**R4.1b — Level: how much.** `scarce` / `average` / `abundant`, as multiples of
+`sustenanceRate` — what the world spends per tick on upkeep and on loose matter bleeding away.
+Expressing it this way means a level means the same thing at any world size.
+
+The multipliers (0.12 / 0.4 / 2) were **calibrated by what they produce, not by the budget on
+paper**, because most food is never reached: break-even on paper is already a glut in practice.
+Measured over 5000 ticks across three seeds, mean standing food out of a 120 cap: scarce ≈ 20 with
+barely one organism alive, average ≈ 45 with five, abundant pinned at the cap with the population
+at its own cap.
+
+Worth knowing from the same measurement: of what a default world spends, **loose matter decaying
+outweighs the upkeep of every organism by about seven to one**. Most of the energy budget goes on
+matter that never joined a body.
+
+**R4.1c — Regime: how it changes.** A multiplier on the rate, a pure function of the tick, so a
+world stays reproducible and the regime never disturbs the random stream.
+
+| | |
+|---|---|
+| `steady` | the same rate for ever |
+| `cycle` | famine to feast and back: 0.15× at the trough, 2.5× at the peak |
+| `bloom` | a long famine at 0.12× broken by brief, enormous blooms at 9× |
+| `decline` | a world running down: 1.8× at the start, nothing by the end of the period |
+| `rising` | a world filling up, 0.1× to 1.8× |
+| `noisy` | wanders with no pattern to learn — summed sines, so still deterministic |
 
 **R4.1b — Food spoils.** An uneaten food particle expires after `food_life` ticks and its energy
 is burned. Without this the sun simply fills the world to `max_food` and leaves it there:
@@ -457,7 +505,10 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `A` | uniform in `[-1, 1]`, symmetric, `Food×Food = 0` | the chemistry; the main dial |
 | `T` | log-uniform `1 … 4` | temperature. Capped by the R2.4 budget: `sqrt(2·μ·T)` must stay under a fifth of `r_0`. Hotter worlds can be typed in and are flagged on the start screen; a true gas phase needs sub-stepping, which we have not built |
 | `foodMode` | `random` · `patchy` · `gradient` | see below |
-| `T_food` | 2 … 6 | ticks between food injections |
+| `foodLevel` · `foodRegime` | from the seed | how much food, and how it changes (R4.1b, R4.1c). **Editable** |
+| `regime_period` | 1500 … 5000 × scale | one cycle, bloom interval or ramp |
+| `converge_ticks` | 2000 … 8000 × scale | how long colonies take to meet, or one full breath |
+| `T_food` · `food_batch` | set by the level | the base arrival rate |
 | `T_spawn` | 60 … 140 | ticks between organism spawns |
 | `n_intrinsic` | 30 … 50 | conserved matter pool (types assigned uniformly at random). **Editable** |
 | `n_brain` | 4 | conserved brain pool, hence the cap on live organisms. **Editable** |

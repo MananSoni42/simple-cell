@@ -287,10 +287,13 @@ describe('budding reproduction', () => {
   it('can afford a child in a continuous-inflow world, where every child particle is new', () => {
     const w = rich({ inflow: true, n_start: 1 })
     const b = [...Array(w.nMatter).keys()].find((i) => w.isBrain(i))!
-    w.energy[b] = w.L.E_cap
-    w.repCool[b] = 0
-    w.step()
-    expect(w.nBudded).toBe(1)
+    // keep it rich and ready for a few ticks: free slots come and go as matter dies
+    for (let t = 0; t < 40 && w.nBudded === 0; t++) {
+      w.energy[b] = w.L.E_cap
+      w.repCool[b] = 0
+      w.step()
+    }
+    expect(w.nBudded).toBeGreaterThan(0)
   })
 
   it('never buds when switched off, and keeps the ledger closed over a long run when on', () => {

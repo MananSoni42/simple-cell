@@ -22,6 +22,11 @@ preferred spacing, structures that hold a chemical gradient, bodies that heal, b
 multi-thread / GPU force computation, discrete-time guardrails, organism-aggregate and lifetime
 metrics, rewind, and config export/import. Learning is paused.
 
+Food is three independent dials — a **pattern** (where it lands: uniform, patches, a sunlit band,
+converging or breathing colonies, a fixed spring, a moving comet, a ring), a **level** (scarce,
+average or abundant, as a multiple of what the world actually spends) and a **regime** (steady,
+cycle, bloom, decline, rising, noisy). Nine presets combine them.
+
 The app has four screens: a **title** page, **setup** (grouped into physics / chemistry / food /
 life / compute, with sliders that say what each value *means*), the **world** (stats rail, canvas,
 organism inspector, controls), and a **run summary** when you stop — hero numbers, observations

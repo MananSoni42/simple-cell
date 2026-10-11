@@ -72,8 +72,26 @@ export const LAWS = {
 }
 export type Laws = { [K in keyof typeof LAWS]: number }
 
-export type FoodMode = 'random' | 'patchy' | 'gradient'
-export const FOOD_MODES: readonly FoodMode[] = ['random', 'patchy', 'gradient']
+/** Where food lands. */
+export type FoodMode = 'random' | 'patchy' | 'gradient' | 'converging' | 'breathing' | 'spring' | 'comet' | 'ring'
+export const FOOD_MODES: readonly FoodMode[] = [
+  'random',
+  'patchy',
+  'gradient',
+  'converging',
+  'breathing',
+  'spring',
+  'comet',
+  'ring',
+]
+
+/** How much arrives, as a multiple of what the world costs to run. */
+export type FoodLevel = 'scarce' | 'average' | 'abundant'
+export const FOOD_LEVELS: readonly FoodLevel[] = ['scarce', 'average', 'abundant']
+
+/** How that amount changes over time. */
+export type FoodRegime = 'steady' | 'cycle' | 'bloom' | 'decline' | 'rising' | 'noisy'
+export const FOOD_REGIMES: readonly FoodRegime[] = ['steady', 'cycle', 'bloom', 'decline', 'rising', 'noisy']
 
 /** Bond strengths the quantized chemistry can take. */
 export const QUANTA = [-1, -0.5, -0.25, 0, 0.25, 0.5, 1]
@@ -112,6 +130,12 @@ export interface Init {
   decay_free: number // fraction of its reserve a free particle loses each tick (burned)
   inflow: boolean // continuous organism inflow: new matter is created for each spawn, and all matter is mortal
   foodMode: FoodMode
+  foodLevel: FoodLevel
+  foodRegime: FoodRegime
+  /** Length of one cycle / bloom interval / ramp, in ticks. */
+  regime_period: number
+  /** How long converging colonies take to meet — and, for breathing colonies, one full cycle. */
+  converge_ticks: number
   T_food: number
   T_spawn: number
   n_patch: number
@@ -185,6 +209,10 @@ function seedWorld(seed: number, scale = 1): Init {
     decay_free: 0.002,
     inflow: false,
     foodMode: FOOD_MODES[rng.int(FOOD_MODES.length)],
+    foodLevel: FOOD_LEVELS[rng.int(FOOD_LEVELS.length)],
+    foodRegime: FOOD_REGIMES[rng.int(FOOD_REGIMES.length)],
+    regime_period: (1500 + rng.int(3501)) * scale,
+    converge_ticks: (2000 + rng.int(6001)) * scale,
     T_food: 2 + rng.int(5),
     T_spawn: 60 + rng.int(81),
     n_patch: (1 + rng.int(3)) * area,
@@ -193,11 +221,79 @@ function seedWorld(seed: number, scale = 1): Init {
   }
 }
 
-/** A seeded world, already sub-stepped enough to be numerically safe. */
+/**
+ * Food a world needs each tick simply to break even, in food particles.
+ *
+ * Two sinks: the upkeep of a full population (a brain and four limbs each), and the slow bleed
+ * of loose matter. Measured at the defaults, the second dominates the first by about 7 to 1 —
+ * most of a world's energy budget goes on matter that never joined a body. `E_init` stands in for
+ * the average reserve of a loose particle, which is rough but the right order.
+ */
+export function sustenanceRate(init: Init, L: Laws = LAWS): number {
+  const bodies = 5 * L.c_up * init.n_brain * (init.inflow ? 3 : 1)
+  const loose = init.n_intrinsic * L.E_init * init.decay_free
+  return (bodies + loose) / L.E_food
+}
+
+/**
+ * Multiples of `sustenanceRate`, calibrated by what they actually produce rather than by the
+ * budget on paper — most food is never reached, so break-even on paper is already plenty in
+ * practice. Measured over 5000 ticks across three seeds: 0.12x leaves about 20 food standing and
+ * barely one organism alive, 0.4x about 45 food and five organisms, and 2x pins both at the cap.
+ */
+export const LEVEL_MULTIPLIER: Record<FoodLevel, number> = { scarce: 0.12, average: 0.4, abundant: 2 }
+
+/** Sets the base arrival rate so a level means the same thing at any world size. */
+export function applyFoodLevel(init: Init, L: Laws = LAWS): Init {
+  const want = sustenanceRate(init, L) * LEVEL_MULTIPLIER[init.foodLevel]
+  // one particle per T_food ticks, batched when a single particle a tick is not enough
+  init.food_batch = Math.max(1, Math.round(want))
+  init.T_food = Math.max(1, Math.round(init.food_batch / Math.max(1e-6, want)))
+  return init
+}
+
+/** Food particles a tick this world is set to deliver, before the regime scales it. */
+export function baseFoodRate(init: Init): number {
+  return init.food_batch / Math.max(1, init.T_food)
+}
+
+/**
+ * How the arrival rate is scaled at a given tick. Deterministic in every regime — "noisy" is a
+ * sum of sines rather than a random draw, so a world stays reproducible from its seed and the
+ * regime never disturbs the random stream.
+ */
+export function regimeMultiplier(init: Init, tick: number): number {
+  const p = Math.max(1, init.regime_period)
+  const phase = (tick % p) / p
+  switch (init.foodRegime) {
+    case 'cycle':
+      // famine to feast and back: 0.15x at the trough, 2.5x at the peak
+      return 0.15 + 1.175 * (1 - Math.cos(2 * Math.PI * phase))
+    case 'bloom': {
+      // a long famine broken by a brief, enormous bloom
+      const width = 0.08
+      return phase < width ? 9 : 0.12
+    }
+    case 'decline':
+      // a world running down: full at the start, nothing by the end of the period
+      return Math.max(0, 1.8 * (1 - Math.min(1, tick / p)))
+    case 'rising':
+      return 0.1 + 1.7 * Math.min(1, tick / p)
+    case 'noisy': {
+      const t = tick / p
+      const n = Math.sin(6.283 * t) + 0.7 * Math.sin(15.1 * t + 1.3) + 0.45 * Math.sin(37.7 * t + 2.9)
+      return Math.max(0.05, 1 + 0.55 * n)
+    }
+    default:
+      return 1
+  }
+}
+
+/** A seeded world, already sub-stepped enough to be numerically safe and fed to its level. */
 export function initFromSeed(seed: number, scale = 1): Init {
   const init = seedWorld(seed, scale)
   init.substeps = Math.max(1, substepsFor(init) || LAWS.substeps_max)
-  return init
+  return applyFoodLevel(init)
 }
 
 /** Smallest sub-step count that brings a world inside its budget, or 0 if none within the cap. */

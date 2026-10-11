@@ -16,7 +16,7 @@ export interface Snapshot {
   wLimb: Float64Array
   wBrain: Float64Array
   wHas: Uint8Array
-  patches: Float64Array // x, y, h per patch
+  patches: Float64Array // x, y, h, ox, oy per patch
   patchCount: number
   rng: [number, number | null]
   field: Float64Array
@@ -57,11 +57,11 @@ export function allocSnapshot(w: World): Snapshot {
   return {
     tick: 0,
     bytes: new ArrayBuffer(total),
-    scalars: new Float64Array(8),
+    scalars: new Float64Array(9),
     wLimb: new Float64Array(brains * N_WLIMB),
     wBrain: new Float64Array(brains * w.brainWeightCount),
     wHas: new Uint8Array(brains * 2),
-    patches: new Float64Array(Math.max(1, w.patches.length) * 3),
+    patches: new Float64Array(Math.max(1, w.patches.length) * 5),
     patchCount: 0,
     rng: [0, null],
     field: new Float64Array(w.field.length),
@@ -89,6 +89,7 @@ export function writeSnapshot(w: World, snap: Snapshot): Snapshot {
   snap.scalars[5] = w.recordAge
   snap.scalars[6] = w.nClamped
   snap.scalars[7] = w.nSteps
+  snap.scalars[8] = w.foodOwed
   const nb = w.brainWeightCount
   for (let i = 0; i < w.nMatter - w.nIntr; i++) {
     const b = w.nIntr + i
@@ -101,9 +102,12 @@ export function writeSnapshot(w: World, snap: Snapshot): Snapshot {
   }
   snap.patchCount = w.patches.length
   for (let i = 0; i < w.patches.length; i++) {
-    snap.patches[i * 3] = w.patches[i].x
-    snap.patches[i * 3 + 1] = w.patches[i].y
-    snap.patches[i * 3 + 2] = w.patches[i].h
+    const p = w.patches[i]
+    snap.patches[i * 5] = p.x
+    snap.patches[i * 5 + 1] = p.y
+    snap.patches[i * 5 + 2] = p.h
+    snap.patches[i * 5 + 3] = p.ox
+    snap.patches[i * 5 + 4] = p.oy
   }
   snap.rng = w.rng.state()
   snap.field.set(w.field)
@@ -129,7 +133,7 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
     off += v.byteLength
   }
   w.tick = snap.tick
-  const [burned, injected, births, budded, deaths, recordAge, clamped, steps] = snap.scalars
+  const [burned, injected, births, budded, deaths, recordAge, clamped, steps, owed] = snap.scalars
   w.burned = burned
   w.injected = injected
   w.nBirths = births
@@ -138,6 +142,7 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   w.recordAge = recordAge
   w.nClamped = clamped
   w.nSteps = steps
+  w.foodOwed = owed
   const nb = w.brainWeightCount
   for (let i = 0; i < w.nMatter - w.nIntr; i++) {
     const b = w.nIntr + i
@@ -146,7 +151,10 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   }
   w.patches.length = 0
   for (let i = 0; i < snap.patchCount; i++) {
-    w.patches.push({ x: snap.patches[i * 3], y: snap.patches[i * 3 + 1], h: snap.patches[i * 3 + 2] })
+    w.patches.push({
+      x: snap.patches[i * 5], y: snap.patches[i * 5 + 1], h: snap.patches[i * 5 + 2],
+      ox: snap.patches[i * 5 + 3], oy: snap.patches[i * 5 + 4],
+    })
   }
   w.rng.setState(snap.rng)
   w.field.set(snap.field)

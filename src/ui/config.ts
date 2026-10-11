@@ -1,5 +1,17 @@
 import type { Perf } from '../compute/select'
-import { type Init, type FoodMode, FOOD_MODES, WALL_LAYOUTS, type WallLayout, clamp11, initFromSeed } from '../core/params'
+import {
+  type FoodLevel,
+  FOOD_LEVELS,
+  type FoodMode,
+  FOOD_MODES,
+  type FoodRegime,
+  FOOD_REGIMES,
+  type Init,
+  WALL_LAYOUTS,
+  type WallLayout,
+  clamp11,
+  initFromSeed,
+} from '../core/params'
 import { N_MATRIX } from '../core/types'
 
 export const CONFIG_VERSION = 1
@@ -70,6 +82,10 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     food_life: Math.round(num(src.food_life, base.food_life, 0, 1e7)),
     inflow: bool(src.inflow, base.inflow),
     foodMode: mode,
+    foodLevel: FOOD_LEVELS.includes(src.foodLevel as FoodLevel) ? (src.foodLevel as FoodLevel) : base.foodLevel,
+    foodRegime: FOOD_REGIMES.includes(src.foodRegime as FoodRegime) ? (src.foodRegime as FoodRegime) : base.foodRegime,
+    regime_period: Math.max(1, Math.round(num(src.regime_period, base.regime_period, 1, 1e8))),
+    converge_ticks: Math.max(1, Math.round(num(src.converge_ticks, base.converge_ticks, 1, 1e8))),
     T_food: Math.max(1, Math.round(num(src.T_food, base.T_food, 1, 1e6))),
     T_spawn: Math.max(1, Math.round(num(src.T_spawn, base.T_spawn, 1, 1e6))),
     n_patch: Math.round(num(src.n_patch, base.n_patch, 0, 1e4)),

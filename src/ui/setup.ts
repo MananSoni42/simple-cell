@@ -1,14 +1,20 @@
 import { MAX_THREADS, type Perf, canShare, gpuAvailable } from '../compute/select'
 import {
+  type FoodLevel,
   type FoodMode,
+  type FoodRegime,
   type Init,
+  LEVEL_MULTIPLIER,
   QUANTA,
   type WallLayout,
+  applyFoodLevel,
+  baseFoodRate,
   clamp11,
   initFromSeed,
   quantize,
   stability,
   substepsFor,
+  sustenanceRate,
 } from '../core/params'
 import { MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
@@ -313,6 +319,11 @@ export function mountSetup(
           { value: 'random', label: 'uniform', hint: 'everywhere equally — standing still is as good as moving' },
           { value: 'patchy', label: 'patches', hint: 'a few drifting hot-spots, so following the food pays' },
           { value: 'gradient', label: 'sunlit band', hint: 'one bright stripe; the rest is desert' },
+          { value: 'converging', label: 'colonies', hint: 'separate colonies that slowly migrate together and merge into one — isolation, then contact' },
+          { value: 'breathing', label: 'breathing', hint: 'colonies that merge and separate again, for ever — populations meet, mix, and are pulled apart to drift on their own' },
+          { value: 'spring', label: 'spring', hint: 'a single small fixed source everything must come to; the most contested world there is' },
+          { value: 'comet', label: 'comet', hint: 'one fast-moving source: food is a target you follow or starve' },
+          { value: 'ring', label: 'ring', hint: 'a closed band of food around the middle — a circuit rather than a field' },
         ],
         onChange: (v) => {
           init.foodMode = v
@@ -329,6 +340,56 @@ export function mountSetup(
         },
       }).el,
     )
+    if (init.foodMode === 'converging' || init.foodMode === 'breathing') {
+      const breathing = init.foodMode === 'breathing'
+      fieldsOf(where).append(
+        new Slider({
+          label: 'colonies',
+          min: 2,
+          max: 4,
+          step: 1,
+          value: Math.max(2, Math.min(4, init.n_patch)),
+          hint: (v) => `${v} colonies, spread evenly round the world to begin with`,
+          onChange: (v) => {
+            init.n_patch = v
+            refresh()
+          },
+        }).el,
+        new Slider({
+          label: breathing ? 'one full breath' : 'meet after',
+          min: 200,
+          max: 40000,
+          step: 100,
+          value: init.converge_ticks,
+          curve: 'log',
+          format: (v) => `${Math.round(v)}t`,
+          hint: (v) =>
+            breathing
+              ? `merged every ${Math.round(v)} ticks and fully apart again halfway between`
+              : `apart until roughly tick ${Math.round(v * 0.3)}, fully merged by ${Math.round(v)}`,
+          onChange: (v) => {
+            init.converge_ticks = Math.round(v)
+            sync()
+          },
+        }).el,
+      )
+    }
+    if (init.foodMode !== 'random' && init.foodMode !== 'gradient') {
+      fieldsOf(where).append(
+        new Slider({
+          label: 'source radius',
+          min: 10,
+          max: 200,
+          step: 5,
+          value: init.r_patch,
+          hint: (v) => `${Math.round((100 * Math.PI * v * v * Math.max(1, init.n_patch)) / (init.size * init.size))}% of the world is within reach of food`,
+          onChange: (v) => {
+            init.r_patch = v
+            refresh()
+          },
+        }).el,
+      )
+    }
     if (init.foodMode === 'patchy') {
       fieldsOf(where).append(
         new Slider({
@@ -342,22 +403,41 @@ export function mountSetup(
             sync()
           },
         }).el,
-        new Slider({
-          label: 'patch radius',
-          min: 10,
-          max: 200,
-          step: 5,
-          value: init.r_patch,
-          hint: (v) => `${Math.round((100 * Math.PI * v * v * init.n_patch) / (init.size * init.size))}% of the world is within reach of food`,
-          onChange: (v) => {
-            init.r_patch = v
-            refresh()
-          },
-        }).el,
       )
     }
 
+    const sus = sustenanceRate(init)
     fieldsOf(how).append(
+      new Chips<FoodLevel>({
+        label: 'how much',
+        value: init.foodLevel,
+        options: [
+          { value: 'scarce', label: 'scarce', hint: 'about a fifth of what the world spends — most things starve, and position decides who does not' },
+          { value: 'average', label: 'average', hint: 'enough for a contested population well below the cap' },
+          { value: 'abundant', label: 'abundant', hint: 'more than can be eaten; food piles up to the cap' },
+        ],
+        onChange: (v) => {
+          init.foodLevel = v
+          applyFoodLevel(init)
+          refresh()
+        },
+      }).el,
+      new Chips<FoodRegime>({
+        label: 'over time',
+        value: init.foodRegime,
+        options: [
+          { value: 'steady', label: 'steady', hint: 'the same rate forever' },
+          { value: 'cycle', label: 'cycle', hint: 'famine to feast and back again — 0.15× at the trough, 2.5× at the peak' },
+          { value: 'bloom', label: 'bloom', hint: 'a long famine broken by brief, enormous blooms at 9×' },
+          { value: 'decline', label: 'decline', hint: 'a world running down: full at the start, nothing by the end' },
+          { value: 'rising', label: 'rising', hint: 'a world filling up, from almost nothing to plenty' },
+          { value: 'noisy', label: 'noisy', hint: 'wanders unpredictably, with no pattern to learn' },
+        ],
+        onChange: (v) => {
+          init.foodRegime = v
+          refresh()
+        },
+      }).el,
       new Slider({
         label: 'arrives every',
         min: 1,
@@ -366,7 +446,10 @@ export function mountSetup(
         value: init.T_food,
         curve: 'log',
         format: (v) => `${Math.round(v)}t`,
-        hint: (v) => `${(init.food_batch / v).toFixed(2)} particles a tick, worth ${((init.food_batch * 10) / v).toFixed(1)} energy`,
+        hint: (v) => {
+          const r = init.food_batch / v
+          return `${r.toFixed(2)} particles a tick — ${(r / Math.max(1e-6, sus)).toFixed(2)}× what this world spends`
+        },
         onChange: (v) => {
           init.T_food = v
           refresh()
@@ -402,6 +485,24 @@ export function mountSetup(
           refresh()
         },
       }).el,
+      ...(init.foodRegime === 'steady'
+        ? []
+        : [
+            new Slider({
+              label: init.foodRegime === 'cycle' || init.foodRegime === 'bloom' ? 'cycle length' : 'over',
+              min: 200,
+              max: 100000,
+              step: 100,
+              value: init.regime_period,
+              curve: 'log',
+              format: (v) => `${Math.round(v)}t`,
+              hint: () => `at ${baseFoodRate(init).toFixed(2)} a tick on average, ${LEVEL_MULTIPLIER[init.foodLevel]}× sustenance`,
+              onChange: (v) => {
+                init.regime_period = Math.round(v)
+                refresh()
+              },
+            }).el,
+          ]),
       new Slider({
         label: 'at the start',
         min: 0,

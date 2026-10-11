@@ -5,7 +5,7 @@ import { Bonds, bondForce } from './bonds'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
 import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
-import { type Init, type Laws, LAWS, applyQuantization, bondRange } from './params'
+import { type Init, type Laws, LAWS, applyQuantization, bondRange, regimeMultiplier } from './params'
 import { Rng } from './rng'
 import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX, WALL } from './types'
 
@@ -219,7 +219,12 @@ export class World {
   readonly field: Float64Array
   private fieldTmp: Float64Array
   private freeFood: number[] = []
-  readonly patches: { x: number; y: number; h: number }[] = []
+  /** Food patches. `ox, oy` is where a patch started, which converging colonies travel from. */
+  readonly patches: { x: number; y: number; h: number; ox: number; oy: number }[] = []
+  /** Fractional food owed by the sun, so any arrival rate works, including less than one a tick. */
+  /** Fractional food the sun still owes; part of the state, so a snapshot must carry it. */
+  foodOwed = 0
+  private spring: [number, number] = [0, 0]
 
   private xin = new Float64Array(N_IN)
   private yout = new Float64Array(N_OUT)
@@ -312,9 +317,18 @@ export class World {
     }
     this.field = new Float64Array(L.fieldN * L.fieldN)
     this.fieldTmp = new Float64Array(L.fieldN * L.fieldN)
-    for (let p = 0; p < init.n_patch; p++) {
-      this.patches.push({ x: this.rng.next() * L.SIZE, y: this.rng.next() * L.SIZE, h: this.rng.next() * TAU })
+    const colonyModes = init.foodMode === 'converging' || init.foodMode === 'breathing'
+    const colonies = colonyModes ? Math.max(2, Math.min(4, init.n_patch)) : init.n_patch
+    const nPatch = init.foodMode === 'comet' || init.foodMode === 'spring' ? 1 : colonies
+    for (let p = 0; p < nPatch; p++) {
+      // colony modes start spread evenly round the world, so they really are apart
+      const even = colonyModes
+      const a = (p / Math.max(1, nPatch)) * TAU
+      const x = even ? this.wrap(L.SIZE / 2 + L.SIZE * 0.33 * Math.cos(a)) : this.rng.next() * L.SIZE
+      const y = even ? this.wrap(L.SIZE / 2 + L.SIZE * 0.33 * Math.sin(a)) : this.rng.next() * L.SIZE
+      this.patches.push({ x, y, h: this.rng.next() * TAU, ox: x, oy: y })
     }
+    this.spring = [this.rng.next() * L.SIZE, this.rng.next() * L.SIZE]
 
     this.lifeParticlesWindow = new RollingMean(L.life_window, L.life_buckets)
     this.lifeOrganismsWindow = new RollingMean(L.life_window, L.life_buckets)
@@ -471,7 +485,7 @@ export class World {
     this.aggregates.observe(this)
     this.orders.observe(this)
     this.tick++
-    if (this.tick % this.init.T_food === 0) for (let k = 0; k < this.init.food_batch; k++) this.injectFood()
+    this.shine()
     if (this.tick % this.init.T_spawn === 0) for (let k = 0; k < this.init.spawn_batch; k++) this.spawnRandom()
     for (let i = 0; i < this.nMatter; i++) {
       if (this.cool[i] > 0) this.cool[i]--
@@ -1056,7 +1070,36 @@ export class World {
   }
 
   private stepPatches(): void {
-    const v = this.init.v_patch
+    const { init, L } = this
+    if (init.foodMode === 'converging' || init.foodMode === 'breathing') {
+      // How far along the walk to the middle each colony is. Converging goes one way and stays;
+      // breathing goes in and back out again, for ever, so isolation and contact keep alternating.
+      const period = Math.max(1, init.converge_ticks)
+      let f: number
+      if (init.foodMode === 'converging') {
+        const t = Math.min(1, this.tick / period)
+        f = t * t * (3 - 2 * t) // slow at both ends, so the meeting is gradual
+      } else {
+        f = (1 - Math.cos((TAU * this.tick) / period)) / 2 // 0 apart, 1 merged, 0 again
+      }
+      for (const p of this.patches) {
+        p.x = this.wrap(p.ox + (L.SIZE / 2 - p.ox) * f)
+        p.y = this.wrap(p.oy + (L.SIZE / 2 - p.oy) * f)
+      }
+      return
+    }
+    if (init.foodMode === 'comet') {
+      // one fast source: food is a moving target, and standing still means starving
+      const p = this.patches[0]
+      if (!p) return
+      p.h += 0.012 * this.rng.gauss()
+      const v = Math.max(1.5, init.v_patch * 12)
+      p.x = this.wrap(p.x + v * Math.cos(p.h))
+      p.y = this.wrap(p.y + v * Math.sin(p.h))
+      return
+    }
+    if (init.foodMode === 'spring' || init.foodMode === 'ring' || init.foodMode === 'gradient') return // fixed
+    const v = init.v_patch
     for (const p of this.patches) {
       p.h += 0.1 * this.rng.gauss()
       p.x = this.wrap(p.x + v * Math.cos(p.h))
@@ -1069,11 +1112,27 @@ export class World {
   private samplePoint(): [number, number] {
     const { rng, init, L } = this
     const S = L.SIZE
-    if (init.foodMode === 'patchy' && this.patches.length > 0) {
-      const p = this.patches[rng.int(this.patches.length)]
-      const r = init.r_patch * Math.sqrt(rng.next())
+    const inPatch = (p: { x: number; y: number }, radius: number): [number, number] => {
+      const r = radius * Math.sqrt(rng.next())
       const a = rng.next() * TAU
       return [this.wrap(p.x + r * Math.cos(a)), this.wrap(p.y + r * Math.sin(a))]
+    }
+    if (
+      (init.foodMode === 'patchy' || init.foodMode === 'converging' || init.foodMode === 'breathing' || init.foodMode === 'comet') &&
+      this.patches.length > 0
+    ) {
+      const p = this.patches[rng.int(this.patches.length)]
+      const radius = init.foodMode === 'comet' ? init.r_patch * 0.45 : init.r_patch
+      return inPatch(p, radius)
+    }
+    if (init.foodMode === 'spring') {
+      // one small fixed source: everything has to come here, so position is everything
+      return inPatch({ x: this.spring[0], y: this.spring[1] }, init.r_patch * 0.22)
+    }
+    if (init.foodMode === 'ring') {
+      const a = rng.next() * TAU
+      const rr = S * 0.33 + (rng.next() - 0.5) * init.r_patch * 0.6
+      return [this.wrap(S / 2 + rr * Math.cos(a)), this.wrap(S / 2 + rr * Math.sin(a))]
     }
     if (init.foodMode === 'gradient') {
       for (;;) {
@@ -1120,6 +1179,28 @@ export class World {
       }
     }
     return [bx, by] // crowded world: take the roomiest spot we saw
+  }
+
+  /** Food particles the sun owes per tick right now: the base rate scaled by the regime. */
+  foodRateNow(): number {
+    const base = this.init.food_batch / Math.max(1, this.init.T_food)
+    return base * regimeMultiplier(this.init, this.tick)
+  }
+
+  /**
+   * The sun. An accumulator rather than "every N ticks", so any rate works — a tenth of a
+   * particle a tick during a famine, nine a tick during a bloom — and the regime can change it
+   * continuously without the arrival pattern stuttering.
+   */
+  private shine(): void {
+    this.foodOwed = Math.min(this.foodOwed + this.foodRateNow(), 64)
+    while (this.foodOwed >= 1) {
+      this.foodOwed -= 1
+      if (!this.injectFood()) {
+        this.foodOwed = 0 // the world is full; the rest of this tick's light is wasted
+        break
+      }
+    }
   }
 
   /** Drops one food particle near (px, py). Used by the pointer, so a world can be hand-fed. */
@@ -1340,19 +1421,24 @@ export class World {
     if (limbs.length === 0) return -1
 
     const [sx, sy] = this.freeSpot()
-    for (const { idx } of limbs) {
+    // Setting a reserve has to be booked both ways: energy added is injected, energy the chosen
+    // particle already held and no longer needs is burned. Only crediting the shortfall silently
+    // destroyed energy whenever the particle was richer than the saved organism.
+    const setReserve = (idx: number, give: number): void => {
+      const delta = give - this.energy[idx]
+      if (delta > 0) this.injected += delta
+      else this.burned += -delta
+      this.energy[idx] = give
+    }
+    for (const { idx, quad } of limbs) {
       this.alive[idx] = 1
       this.beginLife(idx)
-      const want = spec.limbs.find((l) => limbs.find((x) => x.idx === idx)!.quad === l.quad)
-      const give = Math.min(L.E_cap, Math.max(0, want?.reserve ?? L.E_birth))
-      this.injected += Math.max(0, give - this.energy[idx])
-      this.energy[idx] = give
+      const want = spec.limbs.find((l) => l.quad === quad)
+      setReserve(idx, Math.min(L.E_cap, Math.max(0, want?.reserve ?? L.E_birth)))
     }
     this.alive[brain] = 1
     this.beginLife(brain)
-    const bgive = Math.min(L.E_cap, Math.max(1, spec.reserve))
-    this.injected += Math.max(0, bgive - this.energy[brain])
-    this.energy[brain] = bgive
+    setReserve(brain, Math.min(L.E_cap, Math.max(1, spec.reserve)))
     this.placeOrganism({
       brain,
       x: sx,
