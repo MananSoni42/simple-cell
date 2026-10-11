@@ -81,8 +81,10 @@ r > r_c     →   F = 0
 Positive `F` attracts. Force acts along the minimum-image separation vector. Two
 terms with two distinct jobs:
 
-- The **hard core** is universal and not in the matrix. Without it, any attracting
-  pair collapses to a point and chemistry can only produce dust.
+- The **hard core** is universal and not in the matrix, and it **diverges as `r → 0`**. That
+  matters: a *bounded* core can be out-pulled by enough attracting neighbours, and particles then
+  end up squeezed into the same point. Measured — with a linear core, free particles reached 0.01
+  units apart; with this one they hold about 2 units on a 10-unit core.
 - The **tent** is where the matrix acts. Note that for `A > 0` the potential minimum
   is at contact (`r_0`), not at the tent's peak: the peak is only where the pull is
   strongest. Spacing and membrane-like structure come from *mixed signs* — types
