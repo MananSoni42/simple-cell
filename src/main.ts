@@ -3,6 +3,7 @@ import type { Init } from './core/params'
 import { Renderer } from './render/renderer'
 import { H, type FrameBuffers, type FrameLayout, type RenderState, frameState } from './sim/frames'
 import type { FromSim, StatsSnapshot, ToSim } from './sim/protocol'
+import { explainHTML } from './ui/explain'
 import { mountStart } from './ui/start'
 import { StatsPanel } from './ui/stats'
 
@@ -11,12 +12,14 @@ const MAX_RATE = 65536
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 const startEl = $('start')
+const explainEl = $('explain')
 const worldEl = $('world')
 const renderer = new Renderer($<HTMLCanvasElement>('c'))
 const stats = new StatsPanel($('stats'))
 const bPlay = $('b-play')
 const bPause = $('b-pause')
 const bRate = $('b-rate')
+const bSeek = $<HTMLInputElement>('b-seek')
 
 /**
  * The page only draws. The world runs in a worker (sim/sim.worker.ts) and publishes
@@ -63,6 +66,14 @@ function setRate(r: number): void {
   send({ kind: 'rate', rate })
   syncControls()
 }
+/** Rewind by a visible amount: a few seconds of world time at the current rate. */
+function rewind(): void {
+  const ticks = Math.max(1, Math.round(Math.min(rate, 240) * 3))
+  send({ kind: 'rewind', ticks })
+  paused = true
+  syncControls()
+}
+
 function stop(): void {
   link?.worker.terminate() // also ends its force workers
   link = null
@@ -71,6 +82,25 @@ function stop(): void {
   worldEl.hidden = true
   start.show()
 }
+
+function showExplain(): void {
+  if (!explainEl.innerHTML) explainEl.innerHTML = explainHTML()
+  explainEl.hidden = false
+  startEl.hidden = true
+}
+
+function hideExplain(): void {
+  explainEl.hidden = true
+  startEl.hidden = false
+}
+
+addEventListener('keydown', (e) => {
+  if (explainEl.hidden) return
+  if (e.key === 'Escape' || e.key === 'Enter') {
+    e.preventDefault()
+    hideExplain()
+  }
+})
 
 const start = mountStart(startEl, (init: Init, perf: Perf) => {
   link?.worker.terminate()
@@ -92,11 +122,19 @@ const start = mountStart(startEl, (init: Init, perf: Perf) => {
     else console.error('simulation error:', m.message)
   }
   worker.postMessage({ kind: 'start', init, perf } satisfies ToSim)
-})
+}, showExplain)
 
 bPlay.addEventListener('click', play)
 bPause.addEventListener('click', pause)
 $('b-stop').addEventListener('click', stop)
+$('b-rewind').addEventListener('click', rewind)
+bSeek.addEventListener('input', () => {
+  if (!latest) return
+  const span = latest.tick - latest.oldestTick
+  send({ kind: 'seek', tick: Math.round(latest.oldestTick + (span * Number(bSeek.value)) / 1000) })
+  paused = true
+  syncControls()
+})
 $('b-fast').addEventListener('click', () => setRate(rate * 2))
 $('b-slow').addEventListener('click', () => setRate(rate / 2))
 
@@ -108,7 +146,10 @@ addEventListener('keydown', (e) => {
     paused ? play() : pause()
   } else if (e.key === 'ArrowRight') setRate(rate * 2)
   else if (e.key === 'ArrowLeft') setRate(rate / 2)
-  else if (e.key === '.') {
+  else if (e.key === 'Backspace' || e.key === 'j' || e.key === 'J') {
+    e.preventDefault()
+    rewind()
+  } else if (e.key === '.') {
     paused = true
     syncControls()
     send({ kind: 'step' })
@@ -144,6 +185,9 @@ function frame(now: number): void {
   // glide between ticks only when ticks are slow enough to see
   const smooth = !paused && rate <= 10
   renderer.draw(shown, smooth ? Math.min(1, (now - frameAt) / frameGap) : 1)
-  if (latest) stats.update(latest, rateLabel(), `${latest.backend} · ${latest.tps.toFixed(latest.tps < 10 ? 1 : 0)} tick/s achieved · ${latest.cap} slots${l.note ? ' · ' + l.note : ''}`)
+  if (latest) {
+    stats.update(latest, rateLabel(), `${latest.backend} · ${latest.tps.toFixed(latest.tps < 10 ? 1 : 0)} tick/s achieved · ${latest.cap} slots · ${latest.historyTicks}t history${l.note ? ' · ' + l.note : ''}`)
+    if (document.activeElement !== bSeek) bSeek.value = '1000'
+  }
 }
 requestAnimationFrame(frame)

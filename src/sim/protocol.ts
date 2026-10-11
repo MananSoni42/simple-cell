@@ -1,10 +1,13 @@
 import type { Perf } from '../compute/select'
 import type { Init } from '../core/params'
+import type { AggregateStats } from '../core/aggregates'
 import type { Census, LifeStats } from '../core/metrics'
 import type { FrameBuffers, FrameLayout } from './frames'
 
 export type ToSim =
   | { kind: 'start'; init: Init; perf: Perf }
+  | { kind: 'rewind'; ticks: number } // step back to the newest snapshot at least this far back
+  | { kind: 'seek'; tick: number }
   | { kind: 'rate'; rate: number }
   | { kind: 'pause'; paused: boolean }
   | { kind: 'step' }
@@ -21,7 +24,11 @@ export interface StatsSnapshot {
   tps: number
   census: Census
   life: LifeStats
-  clampedPct: number // how often the per-tick step guardrail bit
+  aggregates: AggregateStats
+  clampedPct: number
+  /** Ticks of history held, and the oldest tick we can rewind to. */
+  historyTicks: number
+  oldestTick: number // how often the per-tick step guardrail bit
   burned: number
   births: number
   budded: number

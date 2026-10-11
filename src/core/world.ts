@@ -1,5 +1,6 @@
 import { type ForceBackend, serialBackend } from './backend'
 import { type KernelArrays, type KernelParams } from './forcekernel'
+import { AggregateTracker } from './aggregates'
 import { LifeTracker, RollingMean } from './lifestats'
 import { type Init, type Laws, LAWS, applyQuantization } from './params'
 import { Rng } from './rng'
@@ -7,7 +8,9 @@ import { BRAIN, FOOD, N_MATRIX } from './types'
 
 const HALF_PI = Math.PI / 2
 const TAU = Math.PI * 2
-const N_IN = 27 // brain inputs: 4 sockets x 6 + 3
+// brain inputs: 4 sockets x [msg, type onehot x4, alive, food count] = 28, then
+// [reserve, signal, bias] = 31, then the body's food-gradient direction = 33
+const N_IN = 33
 const N_OUT = 6 // 4 food shares + 2 move
 
 export interface WorldOpts {
@@ -166,12 +169,13 @@ export class World {
   private wasLive: Uint8Array
   readonly lifeParticles = new LifeTracker()
   readonly lifeOrganisms = new LifeTracker()
+  readonly aggregates = new AggregateTracker()
   readonly lifeParticlesWindow: RollingMean
   readonly lifeOrganismsWindow: RollingMean
   /** Lineage: a spawned organism founds one; its descendants inherit the id. */
   readonly lineage: Int32Array
   readonly children: Int32Array
-  private nextLineage = 1
+  lineageCounter = 1
   nClamped = 0 // how often the per-tick step guardrail has had to bite
   nSteps = 0
   readonly initialEnergy: number
@@ -190,6 +194,8 @@ export class World {
   readonly sig: Float64Array
   readonly msg: Float64Array
   readonly foodNear: Float32Array
+  readonly ffx: Float64Array
+  readonly ffy: Float64Array
   readonly cool: Int16Array
 
   // organism state, indexed by brain particle
@@ -248,6 +254,8 @@ export class World {
     this.sig = new Float64Array(n)
     this.msg = new Float64Array(n)
     this.foodNear = new Float32Array(buffer(4 * n, sh))
+    this.ffx = new Float64Array(buffer(8 * n, sh))
+    this.ffy = new Float64Array(buffer(8 * n, sh))
     this.cool = new Int16Array(n)
     this.bornAt = new Int32Array(n)
     this.gen = new Int32Array(n)
@@ -280,7 +288,8 @@ export class World {
     const g = this.grid
     this.kernelArrays = {
       px: g.px, py: g.py, ptype: g.ptype, powner: g.powner, pcell: g.pcell, items: g.items,
-      cellStart: g.start, fx: this.fx, fy: this.fy, foodNear: this.foodNear, A: this.A,
+      cellStart: g.start, fx: this.fx, fy: this.fy, foodNear: this.foodNear,
+      ffx: this.ffx, ffy: this.ffy, A: this.A,
     }
     this.kernelParams = {
       SIZE: L.SIZE, r_c: L.r_c, K_core: L.K_core, r_0: L.beta * L.r_c,
@@ -303,6 +312,16 @@ export class World {
   }
 
   // ---------------------------------------------------------------- accessors
+
+  /** The food free-list, for snapshots. */
+  freeFoodSlots(): number[] {
+    return this.freeFood
+  }
+
+  setFreeFoodSlots(slots: ArrayLike<number>): void {
+    this.freeFood.length = 0
+    for (let i = 0; i < slots.length; i++) this.freeFood.push(slots[i])
+  }
 
   get nFood(): number {
     return this.cap - this.nMatter - this.freeFood.length
@@ -379,6 +398,7 @@ export class World {
     this.captures()
     this.stepField()
     this.stepPatches()
+    this.aggregates.observe(this)
     this.tick++
     if (this.tick % this.init.T_food === 0) for (let k = 0; k < this.init.food_batch; k++) this.injectFood()
     if (this.tick % this.init.T_spawn === 0) for (let k = 0; k < this.init.spawn_batch; k++) this.spawnRandom()
@@ -416,11 +436,12 @@ export class World {
 
   /** Guardrail: no particle may move further than d_max in one tick, whatever the forces say. */
   private clampStep(dx: number, dy: number): [number, number] {
+    const lim = this.L.d_max / Math.max(1, Math.round(this.init.substeps))
     const d = Math.hypot(dx, dy)
     this.nSteps++
-    if (d <= this.L.d_max) return [dx, dy]
+    if (d <= lim) return [dx, dy]
     this.nClamped++
-    const k = this.L.d_max / d
+    const k = lim / d
     return [dx * k, dy * k]
   }
 
@@ -431,9 +452,16 @@ export class World {
   }
 
   private integrate(): void {
+    // Sub-stepping splits one tick into n smaller moves that reuse the same forces. Brownian
+    // increments are independent, so each is sqrt(n) smaller and the total variance is unchanged;
+    // the force part is simply applied in n pieces. This is how a hot world stays stable.
+    const n = Math.max(1, Math.round(this.init.substeps))
+    for (let k = 0; k < n; k++) this.integrateOnce(this.L.mu / n, Math.sqrt((2 * this.L.mu * this.init.T) / n))
+    this.separateBrains()
+  }
+
+  private integrateOnce(mu: number, sn: number): void {
     const { L, x, y, fx, fy, owner, alive, theta } = this
-    const mu = L.mu
-    const sn = Math.sqrt(2 * mu * this.init.T)
 
     const foodMoves = this.init.foodMoves
     for (let i = 0; i < this.cap; i++) {
@@ -457,8 +485,9 @@ export class World {
         const tangent = -fx[l] * ey + fy[l] * ex
         bx += radial * ex // a rigid rod passes its radial load to the brain
         by += radial * ey
+        const dthLim = L.dth_max / Math.max(1, Math.round(this.init.substeps))
         let dth = (mu * tangent + sn * this.kick()) / L.L_rod
-        dth = Math.min(L.dth_max, Math.max(-L.dth_max, dth))
+        dth = Math.min(dthLim, Math.max(-dthLim, dth))
         theta[l] = Math.min(this.quadHi(s), Math.max(this.quadLo(s), theta[l] + dth))
       }
       const [bsx, bsy] = this.clampStep(mu * bx + sn * this.kick(), mu * by + sn * this.kick())
@@ -466,7 +495,6 @@ export class World {
       y[b] = this.wrap(y[b] + bsy)
       this.placeLimbs(b)
     }
-    this.separateBrains()
   }
 
   /**
@@ -587,6 +615,10 @@ export class World {
       const wl = this.wLimb[b]!
       const wb = this.wBrain[b]!
       xin.fill(0)
+      // the body's net pull toward food: the force pass already computed it, and it carries a
+      // direction, so chemotaxis is one weight away instead of something to infer from scalars
+      let gx = this.ffx[b]
+      let gy = this.ffy[b]
       for (let s = 0; s < 4; s++) {
         const l = this.limbs[b * 4 + s]
         if (l < 0) continue
@@ -595,14 +627,19 @@ export class World {
         const x2 = Math.min(1, this.foodNear[l] / 4)
         this.sig[l] = Math.tanh(wl[0] * x0 + wl[1] * x1 + wl[2] * x2 + wl[3])
         this.msg[l] = Math.tanh(wl[4] * x0 + wl[5] * x1 + wl[6] * x2 + wl[7])
-        const o = s * 6
+        gx += this.ffx[l]
+        gy += this.ffy[l]
+        const o = s * 7
         xin[o] = this.msg[l]
         xin[o + 1 + this.type[l]] = 1
         xin[o + 5] = 1
+        xin[o + 6] = x2 // food the brain can see directly, not only through the limb neuron
       }
-      xin[24] = energy[b] / L.E_ref
-      xin[25] = Math.min(1, field[this.fieldIndex(this.x[b], this.y[b])])
-      xin[26] = 1
+      xin[28] = energy[b] / L.E_ref
+      xin[29] = Math.min(1, field[this.fieldIndex(this.x[b], this.y[b])])
+      xin[30] = 1
+      xin[31] = Math.tanh(gx)
+      xin[32] = Math.tanh(gy)
       for (let k = 0; k < N_OUT; k++) {
         let sum = 0
         for (let m = 0; m < N_IN; m++) sum += wb[k * N_IN + m] * xin[m]
@@ -886,7 +923,7 @@ export class World {
     if (spec.parent !== undefined && spec.parent >= 0) {
       this.lineage[b] = this.lineage[spec.parent]
       this.children[spec.parent]++
-    } else this.lineage[b] = this.nextLineage++
+    } else this.lineage[b] = this.lineageCounter++
     this.repCool[b] = this.L.repro_cooldown
     for (const { idx, quad, angle } of spec.limbs) {
       this.owner[idx] = b

@@ -51,6 +51,7 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     ...base,
     A,
     quantized: bool(src.quantized, base.quantized),
+    substeps: Math.round(num(src.substeps, base.substeps, 1, 64)),
     T: num(src.T, base.T, 0, 1e4),
     n_intrinsic: Math.round(num(src.n_intrinsic, base.n_intrinsic, 1, 2e6)),
     n_brain: Math.round(num(src.n_brain, base.n_brain, 1, 2e5)),

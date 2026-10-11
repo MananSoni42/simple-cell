@@ -7,6 +7,16 @@ export class Rng {
     this.s = seed | 0
   }
 
+  /** Captures the generator's position so a snapshot can resume the same stream. */
+  state(): [number, number | null] {
+    return [this.s, this.spare]
+  }
+
+  setState([s, spare]: [number, number | null]): void {
+    this.s = s | 0
+    this.spare = spare
+  }
+
   next(): number {
     this.s = (this.s + 0x6d2b79f5) | 0
     let t = this.s

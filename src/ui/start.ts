@@ -1,5 +1,5 @@
 import { MAX_THREADS, type Perf, canShare, gpuAvailable } from '../compute/select'
-import { type Init, QUANTA, clamp11, initFromSeed, quantize, stability } from '../core/params'
+import { type Init, QUANTA, clamp11, initFromSeed, quantize, stability, substepsFor } from '../core/params'
 import { MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
 
@@ -30,7 +30,7 @@ function cellColor(a: number): string {
  * Start screen. The seed proposes a world; the matrix, population, options and compute
  * settings can all be edited, and the result can be exported, imported or shared as a link.
  */
-export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) => void): { show(): void; hide(): void } {
+export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) => void, onExplain?: () => void): { show(): void; hide(): void } {
   let init = initFromSeed(Math.floor(Math.random() * 1e9), 1)
   const perf: Perf = { threads: 1, gpu: false }
   const fromHash = readHash()
@@ -58,7 +58,9 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
       <div class="sub" style="margin-bottom:6px">starting population</div>
       <div class="counts" id="counts"></div>
       <div class="row"><label>temperature <input type="number" id="temp" min="0" max="200" step="0.1" style="width:80px" /></label>
-        <label>free decay <input type="number" id="decay" min="0" max="10" step="0.05" style="width:70px" /> %/tick</label></div>
+        <label>free decay <input type="number" id="decay" min="0" max="10" step="0.05" style="width:70px" /> %/tick</label>
+        <label>sub-steps <input type="number" id="substeps" min="1" max="16" style="width:60px" /></label>
+        <button id="autoSub">auto</button></div>
       <div id="stab" class="stab"></div>
       <label class="check"><input type="checkbox" id="repro" /> reproduction <span class="dim">— organisms holding enough energy bud off a mutated child</span></label>
       <label class="check"><input type="checkbox" id="foodMoves" /> food drifts <span class="dim">— off: food stays where it lands</span></label>
@@ -72,6 +74,7 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
         <button id="export">export config</button>
         <button id="copy">copy JSON</button>
         <button id="importBtn">import…</button>
+        <button id="explainBtn">how it works</button>
         <input type="file" id="file" accept="application/json" hidden />
         <span class="dim" id="io"></span>
       </div>
@@ -122,11 +125,23 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     const v = Number(tempEl.value)
     if (Number.isFinite(v) && tempEl.value !== '') {
       init.T = Math.min(200, Math.max(0, v))
+      // a hotter world needs shorter sub-steps to keep exclusion working; raise them to suit
+      init.substeps = Math.max(1, substepsFor(init) || 1)
+      subEl.value = String(init.substeps)
       renderStability()
     }
   })
   const decayEl = q<HTMLInputElement>('#decay')
   decayEl.addEventListener('input', () => (init.decay_free = Math.min(0.1, Math.max(0, (Number(decayEl.value) || 0) / 100))))
+  const subEl = q<HTMLInputElement>('#substeps')
+  subEl.addEventListener('input', () => {
+    init.substeps = Math.min(16, Math.max(1, Math.round(Number(subEl.value)) || 1))
+    renderStability()
+  })
+  q('#autoSub').addEventListener('click', () => {
+    init.substeps = Math.max(1, substepsFor(init) || 16)
+    render()
+  })
   const threadsEl = q<HTMLInputElement>('#threads')
   threadsEl.addEventListener('input', () => (perf.threads = Math.min(MAX_THREADS, Math.max(1, Math.round(Number(threadsEl.value)) || 1))))
   const gpuEl = q<HTMLInputElement>('#gpu')
@@ -199,6 +214,7 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     for (const key of checks) q<HTMLInputElement>('#' + key).checked = init[key]
     if (document.activeElement !== tempEl) tempEl.value = String(init.T)
     if (document.activeElement !== decayEl) decayEl.value = (init.decay_free * 100).toFixed(2)
+    if (document.activeElement !== subEl) subEl.value = String(init.substeps)
     threadsEl.value = String(perf.threads)
     gpuEl.checked = perf.gpu
     renderStability()
@@ -209,11 +225,14 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
   function renderStability(): void {
     const s = stability(init)
     const pct = (v: number) => `${Math.round(v * 100)}%`
+    const need = s.ok ? 0 : substepsFor(init)
+    const fix = s.ok ? '' : need > 1 ? ` — needs ${need} sub-steps, or a lower temperature` : ' — lower the temperature'
     q('#stab').innerHTML =
-      `<b class="${s.ok ? 'ok' : 'warn'}">${s.ok ? 'stable' : 'unstable'}</b> ` +
+      `<b class="${s.ok ? 'ok' : 'warn'}">${s.ok ? 'stable' : 'steps too long'}</b> ` +
       `<span class="dim">Brownian step ${s.sigma.toFixed(2)} = ${pct(s.sigmaRatio)} of a particle radius · ` +
-      `force step ${pct(s.forceRatio)} · temperature ${pct(s.tempRatio)} of one bond` +
-      (s.ok ? '' : ' — structures will not hold; lower the temperature') +
+      `force step ${pct(s.forceRatio)}${init.substeps > 1 ? ` · ${init.substeps} sub-steps` : ''} · ` +
+      `${s.structured ? 'cold enough for bonds' : 'melted: hotter than one bond'} (${pct(s.tempRatio)})` +
+      fix +
       '</span>'
   }
 
@@ -232,6 +251,7 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     if (Number.isFinite(n) && seedEl.value.trim() !== '') resetSeed(Math.floor(n))
   })
 
+  q('#explainBtn').addEventListener('click', () => onExplain?.())
   q('#export').addEventListener('click', () => {
     download(`cell-life-${init.seed}-${init.scale}x.json`, configText(init, perf))
     ioEl.textContent = 'downloaded'
@@ -280,6 +300,7 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
       ;(document.activeElement as HTMLElement | null)?.blur()
       onStart(init, { ...perf })
     } else if ((e.key === 'r' || e.key === 'R') && !typing) resetSeed(Math.floor(Math.random() * 1e9))
+    else if ((e.key === 'h' || e.key === '?') && !typing) onExplain?.()
   })
 
   render()

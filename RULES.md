@@ -65,7 +65,7 @@ are consequences of chemistry, not special-cased code.
 core fraction `β`:
 
 ```
-r < r_core  →   F = K · (r/r_core − 1)                            [always repulsive]
+r < r_core  →   F = K · (1 − r_core/r)                            [repulsive, diverges at contact]
 r_core ≤ r ≤ r_c → F = A[i][j] · (1 − |2u − 1 − β| / (1 − β))     [tent, u = r/r_c, β = r_core/r_c]
 r > r_c     →   F = 0
 ```
@@ -97,11 +97,18 @@ x ← x + μ·F·dt + sqrt(2·μ·T·dt)·N(0,1)    then wrap into [0, SIZE)
 
 Bound limbs are not integrated independently; see R3.3–R3.4.
 
+**R2.6 — Sub-stepping.** A tick may be split into `substeps` smaller moves that reuse the same
+forces. Brownian increments are independent, so each is `sqrt(n)` smaller while the total
+diffusion is unchanged, and the force is applied in `n` pieces. Seeded worlds pick the smallest
+count that satisfies R2.4's budget, and editing the temperature raises it to suit. This is how a
+hot world keeps working: exclusion needs each *move* to be small compared with a particle, not
+merely bounded.
+
 **R2.4 — Motion budget (discrete-time guardrail).** Time is discrete, so a step long enough to
 cross a particle would defeat exclusion entirely. Three hard bounds, every tick:
 
-- forces and noise move any particle at most `d_max = 5`, half a core radius — direction is kept,
-  only the length is cut;
+- forces and noise move any particle at most `d_max = 5` per tick, half a core radius (and
+  `d_max / substeps` per sub-step) — direction is kept, only the length is cut;
 - a Brownian draw is clamped to `z_max = 3` sigma, so no rare tail can teleport anything;
 - a rod swings at most `dth_max = 0.25` rad.
 
@@ -238,13 +245,19 @@ msg = out[1]     →  passed inward to the brain
 **R5.2 — Brain** (one per organism):
 
 ```
-x = for each of 4 sockets: [ msg_i , onehot4(type_i) , alive_i ]    // 24
-  ⧺ [ reserve/E_ref , signal_here , 1 ]                              //  3
-y = W_brain · x                                                      // 27 → 6
+x = for each of 4 sockets: [ msg_i , onehot4(type_i) , alive_i , food_i ]   // 28
+  ⧺ [ reserve/E_ref , signal_here , 1 ]                                     //  3
+  ⧺ [ tanh(food pull x) , tanh(food pull y) ]                               //  2
+y = W_brain · x                                                             // 33 → 6
 
 food split = softmax(y[0..3])        // how to divide releaseFrac among sockets
 F_move     = F_max · tanh(y[4..5])   // where to go
 ```
+
+**R5.4 — The brain can see food.** Two additions beyond the limb messages: each socket's own
+food count, and the **net pull toward food on the whole body** as a vector. The force pass
+already computes that pull, so it costs nothing, and it carries a *direction* — which makes
+chemotaxis one weight rather than something to infer from four scalars.
 
 **R5.3** There is no policy. A "feed the hungriest" brain is one point in weight space;
 when learning arrives, it is the baseline to beat, not a rule of the world.
@@ -364,7 +377,9 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `r_brain_core` · `r_brain` · `K_brain` | 8 · 16 · 12 | a brain's body radius against anything, against another brain, and its strength |
 | `food_coupling` | 0.5 | scales every Food row/column entry |
 | `d_max` · `dth_max` · `z_max` | 5 · 0.25 · 3 | motion budget (R2.4) |
+| `substeps_max` | 16 | cap on automatic sub-stepping (R2.6) |
 | `life_window` · `life_buckets` | 10000 · 100 | trailing window for mean-lifespan reporting |
+| aggregate sampling · stable age | every 10 ticks · 300 ticks | organism-contact sampling, and how old a bond must be to count as lasting (R8) |
 | `L_rod` | 16 | rod length |
 | `gap` | 0.12 rad | angular gap between quadrants (≈7°) |
 | `r_bind` | 6 | socket capture tolerance around the rod circle |
@@ -407,6 +422,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `repro` · `repro_mut` | on · 0.05 | budding (R7.7) and mutation std. **Editable** (on/off) |
 | `inflow` | off | continuous organism inflow (R7.6). **Editable** |
 | `quantized` | on | snap the 4×4 to the bond set (R1.4a). **Editable** |
+| `substeps` | from `T` | integration sub-steps (R2.6). **Editable**, with an auto button |
 | `n_patch, r_patch, v_patch` | 1…3, 35…65, 0.05…0.2 | only for `patchy` |
 
 **Food modes.** All three place one Food particle per injection; they differ only in
@@ -422,10 +438,19 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 three, amber when one is breached:
 
 ```
-noise step    sqrt(2·μ·T)   ≤ 0.2 · r_0     (T ≤ ~4)
-force step    μ·K_core      ≤ 0.35 · r_0
-structure     T             ≤ bond depth ≈ r_c·(1−β)/2 = 15
+noise step    sqrt(2·μ·T/n) ≤ 0.1 · r_0     (n = substeps)
+force step    μ·K_core/n     ≤ 0.35 · r_0
+structure     T              ≤ bond depth ≈ r_c·(1−β)/2 = 15
 ```
+
+The first two are about *numerical safety* — steps short enough that exclusion holds — and
+sub-stepping fixes them. The third is the melting point, which sub-stepping does **not** move: a
+world hotter than one bond is legitimately melted, not broken, so the start screen reports it as
+information rather than a fault.
+
+**Known limit.** The melting transition is weak in practice: measured mean cluster size falls
+only from 12 (T=3) to 6.7 (T=120) against an unbonded baseline of 2.4. A genuine gas phase is
+still missing.
 
 Before this was enforced, mid-range temperatures moved particles further than their own
 diameter on about half of all ticks: exclusion failed, brains sat 0.3 units apart, and nothing
@@ -527,3 +552,47 @@ with no write conflicts. Measured on an Apple M4 Pro (14 cores), see `bench.html
 
 Speedup is about 2×, not 14×: the non-force part of a tick (about half the time) is
 still serial. Small worlds are faster on the serial backend.
+
+---
+
+## 13. Organism aggregates
+
+Two organisms are **in contact** when any of their limbs are within `2.5·r_0`. Contacts are
+sampled every 10 ticks and the tick each pair first appeared is remembered, so a contact has an
+**age**. An **aggregate** is a connected group of two or more organisms; a **lasting** aggregate
+uses only bonds older than 300 ticks. That is what turns "always connected" into a tunable
+number instead of a word.
+
+Reported in the stats panel: groups now, the biggest group's sub-organism count, the mean,
+how many organisms are joined, total and lasting bonds, the biggest lasting group, and the oldest
+bond's age. Measured in a crowded world: 3 groups, biggest 5 sub-organisms, 2 lasting groups,
+oldest bond 870 ticks.
+
+Because brains are held `r_brain` apart (R2.5), every one of these is mediated by limbs — a
+genuine particle-to-particle join, not two bodies occupying the same place.
+
+---
+
+## 14. Rewind
+
+One primitive does the work: a **snapshot** is the complete world — every per-particle array, the
+scalars, the brain weights, the patches, the signal field, the food free-list, the RNG position
+and the lineage counter. Restoring one reproduces not just the same state but the **same
+future**, which is the test: a restored world and the original run 400 more ticks and still hash
+identically.
+
+The simulation worker keeps a ring of snapshots, with the interval and count chosen from the
+world's size against a fixed memory budget, so a small world keeps fine-grained history and a
+large one keeps coarse history. The world screen has a rewind button, a scrub slider over the
+held history, and `Backspace`/`J`; the panel shows how many ticks are held.
+
+The same primitive is what state save/load and long-run checkpointing will be built on.
+
+---
+
+## 15. The explainer page
+
+"How it works" on the start screen (`H`) draws the whole model on one page: the body plan and its
+quadrants, the chemistry matrix and the hard core, both neurons with every input and output
+labelled, the energy path, the life cycle, and why time is clamped. Everything on it is generated
+from the live constants, so it cannot drift away from the rules.

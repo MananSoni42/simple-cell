@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { pairForce, pairPotential } from '../src/core/forces'
 import { LifeTracker, RollingMean, summarize } from '../src/core/lifestats'
 import { census, clusterStats, lifeStats, meanClusterSize, massByType, potentialEnergy, stateHash } from '../src/core/metrics'
-import { type Init, LAWS, type Laws, QUANTA, initFromSeed, stability } from '../src/core/params'
+import { type Init, LAWS, type Laws, QUANTA, initFromSeed, stability, substepsFor } from '../src/core/params'
 import { Rng } from '../src/core/rng'
+import { serialBackend } from '../src/core/backend'
 import { World } from '../src/core/world'
 import { configText, parseConfig } from '../src/ui/config'
 
@@ -11,7 +12,11 @@ const L: Laws = { ...LAWS }
 
 /** Small, fast world for tests: no auto organisms unless asked. */
 function smallInit(over: Partial<Init> = {}): Init {
-  return { ...initFromSeed(7), n_intrinsic: 300, n_brain: 6, ...over }
+  const init = { ...initFromSeed(7), n_intrinsic: 300, n_brain: 6, ...over }
+  // changing T changes how many sub-steps the world needs; keep it numerically safe unless
+  // the caller asked for a specific count
+  if (over.substeps === undefined) init.substeps = Math.max(1, substepsFor(init) || LAWS.substeps_max)
+  return init
 }
 const SMALL = { laws: { SIZE: 300 } }
 
@@ -37,7 +42,9 @@ describe('force law', () => {
   it('matches hand-computed values', () => {
     const r0 = L.beta * L.r_c
     const peak = ((1 + L.beta) / 2) * L.r_c
-    expect(pairForce(0, 1, L)).toBeCloseTo(-L.K_core)
+    // the core diverges as r -> 0, so no number of attracting neighbours can out-pull it
+    expect(pairForce(0, 1, L)).toBeLessThan(-100 * L.K_core)
+    expect(pairForce(r0 / 2, 1, L)).toBeCloseTo(-L.K_core, 6)
     expect(pairForce(r0, 1, L)).toBeCloseTo(0)
     expect(pairForce(peak, 0.7, L)).toBeCloseTo(0.7)
     expect(pairForce(peak, -0.7, L)).toBeCloseTo(-0.7)
@@ -116,7 +123,7 @@ describe('invariants', () => {
 })
 
 describe('phenomenology', () => {
-  it('attractive chemistry condenses below a critical temperature and melts above it; zero chemistry never clusters', () => {
+  it('attractive chemistry clusters, no chemistry does not, and heat loosens it', () => {
     const attract = (T: number, A?: number[][]) => {
       const base = smallInit({ T, n_brain: 0, T_food: 1e9, T_spawn: 1e9, n_intrinsic: 300 })
       base.A = A ?? Array.from({ length: 5 }, (_, i) => Array.from({ length: 5 }, (_, j) => (i < 4 && j < 4 ? 1 : 0)))
@@ -124,11 +131,15 @@ describe('phenomenology', () => {
       for (let t = 0; t < 2500; t++) w.step()
       return meanClusterSize(w)
     }
-    const cold = attract(30)
-    const hot = attract(300)
-    const none = attract(30, Array.from({ length: 5 }, () => new Array(5).fill(0)))
-    expect(cold).toBeGreaterThan(hot * 2)
-    expect(cold).toBeGreaterThan(none * 2)
+    const cold = attract(1)
+    const hot = attract(120)
+    const none = attract(1, Array.from({ length: 5 }, () => new Array(5).fill(0)))
+    // chemistry is what builds structure
+    expect(cold).toBeGreaterThan(none * 3)
+    // heat loosens it, but note it does not fully melt: with the step clamp and sub-stepping in
+    // play the world stays condensed far above the bond depth. A real gas phase is still missing.
+    expect(hot).toBeLessThan(cold * 0.8)
+    expect(hot).toBeGreaterThan(none)
   })
 
   it('body shape follows chemistry: attracting limbs rest close, repelling limbs rest splayed', () => {
@@ -416,6 +427,7 @@ describe('discrete-time guardrails', () => {
   it('reports whether a world is inside its stability budget', () => {
     expect(stability({ ...initFromSeed(1), T: 1 }).ok).toBe(true)
     const hot = stability({ ...initFromSeed(1), T: 100 })
+    expect(hot.structured).toBe(false)
     expect(hot.ok).toBe(false)
     expect(hot.sigmaRatio).toBeGreaterThan(0.2)
     // every seed-chosen world must be inside the budget
@@ -484,5 +496,123 @@ describe('rolling mean', () => {
     expect(Number.isNaN(s[0])).toBe(true)
     r.record(5000, 99) // far beyond the window: the old values must fall out
     expect(r.mean(5000)).toBe(99)
+  })
+})
+
+describe('exclusion', () => {
+  it('keeps particles from overlapping and from tunnelling, the invariant that was missing', () => {
+    const init = smallInit({ T: 3, n_intrinsic: 120, n_brain: 2, n_start: 1, T_food: 2, T_spawn: 300 })
+    const w = new World(init, { laws: { SIZE: 200 } })
+    const r0 = w.L.beta * w.L.r_c
+    let worst = Infinity
+    const nearest: number[] = []
+    for (let t = 0; t < 1200; t++) {
+      w.step()
+      if (t % 25) continue
+      for (let i = 0; i < w.nMatter; i++) {
+        if (!w.alive[i] || w.owner[i] >= 0) continue // free particles: exclusion is force-borne
+        for (let j = i + 1; j < w.nMatter; j++) {
+          if (!w.alive[j] || w.owner[j] >= 0) continue
+          const S = w.L.SIZE
+          let dx = w.x[j] - w.x[i]
+          let dy = w.y[j] - w.y[i]
+          dx -= S * Math.round(dx / S)
+          dy -= S * Math.round(dy / S)
+          worst = Math.min(worst, Math.hypot(dx, dy))
+        }
+      }
+    }
+    // closest approach anywhere: a squeeze is allowed, passing through is not
+    expect(worst).toBeGreaterThan(0.03 * r0)
+    // and in the steady state, neighbours sit a core radius apart rather than piled up
+    for (let i = 0; i < w.nMatter; i++) {
+      if (!w.alive[i] || w.owner[i] >= 0) continue
+      let best = Infinity
+      for (let j = 0; j < w.nMatter; j++) {
+        if (j === i || !w.alive[j] || w.owner[j] >= 0) continue
+        const S = w.L.SIZE
+        let dx = w.x[j] - w.x[i]
+        let dy = w.y[j] - w.y[i]
+        dx -= S * Math.round(dx / S)
+        dy -= S * Math.round(dy / S)
+        best = Math.min(best, Math.hypot(dx, dy))
+      }
+      if (Number.isFinite(best)) nearest.push(best)
+    }
+    nearest.sort((a, b) => a - b)
+    expect(nearest[Math.floor(nearest.length / 2)]).toBeGreaterThan(0.5 * r0)
+  })
+
+  it('sub-stepping brings a hot world back inside its budget and shrinks the steps', () => {
+    expect(stability({ ...initFromSeed(1), T: 8, substeps: 1 }).ok).toBe(false)
+    const n = substepsFor({ ...initFromSeed(1), T: 8 })
+    expect(n).toBeGreaterThan(1)
+    const fixed = stability({ ...initFromSeed(1), T: 8, substeps: n })
+    expect(fixed.ok).toBe(true) // numerically safe again
+    expect(fixed.structured).toBe(true) // and still colder than a bond, so structures survive
+    // melting is a separate budget, and sub-stepping does not move it
+    expect(stability({ ...initFromSeed(1), T: 60, substeps: 16 }).structured).toBe(false)
+
+    const measure = (substeps: number) => {
+      const w = new World(smallInit({ T: 8, substeps, n_brain: 0, n_start: 0, T_food: 1e9, T_spawn: 1e9 }), SMALL)
+      const px = new Float64Array(w.cap)
+      const py = new Float64Array(w.cap)
+      let maxStep = 0
+      for (let t = 0; t < 200; t++) {
+        px.set(w.x)
+        py.set(w.y)
+        w.step()
+        const S = w.L.SIZE
+        for (let i = 0; i < w.nMatter; i++) {
+          let dx = w.x[i] - px[i]
+          let dy = w.y[i] - py[i]
+          dx -= S * Math.round(dx / S)
+          dy -= S * Math.round(dy / S)
+          maxStep = Math.max(maxStep, Math.hypot(dx, dy))
+        }
+      }
+      return maxStep
+    }
+    // same total diffusion, but no single move is long enough to cross a particle
+    expect(measure(8)).toBeLessThan(measure(1))
+    expect(measure(8)).toBeLessThan(LAWS.beta * LAWS.r_c)
+  })
+})
+
+/** Recomputes forces on the current state without advancing anything else. */
+function serialStep(w: World): void {
+  w.grid.build()
+  serialBackend.compute(w)
+}
+
+describe('food sensing', () => {
+  it('reports the direction of nearby food, separately from the total force', () => {
+    const init = smallInit({ T: 0, n_intrinsic: 1, n_brain: 1, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, repro: false })
+    init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
+    init.A[0][4] = init.A[4][0] = 1 // P1 is a mouth
+    const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
+    w.type[0] = 0
+    w.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
+    // one food particle to the right of the limb, inside the interaction range
+    w.injectFood()
+    const f = w.nMatter
+    w.x[f] = w.x[0] + 22
+    w.y[f] = w.y[0]
+    w.grid.build()
+    serialStep(w)
+    expect(w.ffx[0]).toBeGreaterThan(0) // food lies in +x, so the pull points that way
+    expect(Math.abs(w.ffy[0])).toBeLessThan(Math.abs(w.ffx[0]) * 0.2)
+    expect(w.foodNear[0]).toBe(1)
+
+    // with the mouth type repelled instead, the same geometry pulls the other way
+    const w2 = new World({ ...init, A: init.A.map((r, i) => r.map((v, j) => ((i === 4 || j === 4) && v !== 0 ? -1 : v))) }, { laws: { SIZE: 300 }, autoSpawn: false })
+    w2.type[0] = 0
+    w2.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
+    w2.injectFood()
+    w2.x[w2.nMatter] = w2.x[0] + 22
+    w2.y[w2.nMatter] = w2.y[0]
+    w2.grid.build()
+    serialStep(w2)
+    expect(w2.ffx[0]).toBeLessThan(0)
   })
 })

@@ -14,6 +14,7 @@ struct Params { n: u32, nc: u32, size: f32, rc: f32, r0: f32, K: f32, rBrainCore
 @group(0) @binding(5) var<storage, read> cellOf: array<i32>;
 @group(0) @binding(6) var<storage, read> A: array<f32>;
 @group(0) @binding(7) var<storage, read_write> outF: array<vec4<f32>>;
+@group(0) @binding(8) var<storage, read_write> outFood: array<vec2<f32>>;
 
 fn midx(t: i32) -> i32 {
   if (t == 4) { return -1; }
@@ -26,7 +27,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let i = gid.x;
   if (i >= P.n) { return; }
   let mi_ = minfo[i];
-  if (mi_.x < 0) { outF[i] = vec4<f32>(0.0); return; }
+  if (mi_.x < 0) { outF[i] = vec4<f32>(0.0); outFood[i] = vec2<f32>(0.0); return; }
   let ti = mi_.x;
   let oi = mi_.y;
   let mi = midx(ti);
@@ -36,6 +37,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let cx = c % nc;
   let cy = c / nc;
   var s = vec2<f32>(0.0);
+  var g = vec2<f32>(0.0);
   var near = 0.0;
   for (var dy = -1; dy <= 1; dy = dy + 1) {
     let row = ((cy + dy + nc) % nc) * nc;
@@ -59,7 +61,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         }
         var f = 0.0;
         if (r < core) {
-          f = kcore * (r / core - 1.0);
+          f = kcore * (1.0 - core / max(r, core * 1e-3));
         } else {
           let mjx = midx(mj.x);
           var a = 0.0;
@@ -69,11 +71,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
           f = a * (1.0 - abs(2.0 * u - 1.0 - beta) / (1.0 - beta));
         }
         s = s + d * (f / r);
-        if (mj.x == 5) { near = near + 1.0; }
+        if (mj.x == 5) { near = near + 1.0; g = g + d * (f / r); }
       }
     }
   }
   outF[i] = vec4<f32>(s, near, 0.0);
+  outFood[i] = g;
 }`
 
 const USAGE = { MAP_READ: 1, COPY_SRC: 4, COPY_DST: 8, UNIFORM: 64, STORAGE: 128 }
@@ -116,9 +119,11 @@ export class GpuBackend implements ForceBackend {
       cellOf: mk(4 * n, S),
       A: mk(4 * 25, S),
       out: mk(16 * n, USAGE.STORAGE | USAGE.COPY_SRC),
+      outFood: mk(8 * n, USAGE.STORAGE | USAGE.COPY_SRC),
       read: mk(16 * n, USAGE.MAP_READ | USAGE.COPY_DST),
+      readFood: mk(8 * n, USAGE.MAP_READ | USAGE.COPY_DST),
     }
-    const entries = ['params', 'pos', 'minfo', 'start', 'items', 'cellOf', 'A', 'out'].map((k, binding) => ({
+    const entries = ['params', 'pos', 'minfo', 'start', 'items', 'cellOf', 'A', 'out', 'outFood'].map((k, binding) => ({
       binding,
       resource: { buffer: this.bufs[k] },
     }))
@@ -178,16 +183,21 @@ export class GpuBackend implements ForceBackend {
     pass.dispatchWorkgroups(Math.ceil(n / 64))
     pass.end()
     enc.copyBufferToBuffer(bufs.out, 0, bufs.read, 0, 16 * n)
+    enc.copyBufferToBuffer(bufs.outFood, 0, bufs.readFood, 0, 8 * n)
     q.submit([enc.finish()])
 
-    await bufs.read.mapAsync(1)
+    await Promise.all([bufs.read.mapAsync(1), bufs.readFood.mapAsync(1)])
     const out = new Float32Array(bufs.read.getMappedRange(0, 16 * n))
+    const outFood = new Float32Array(bufs.readFood.getMappedRange(0, 8 * n))
     for (let i = 0; i < n; i++) {
       w.fx[i] = out[4 * i]
       w.fy[i] = out[4 * i + 1]
       w.foodNear[i] = out[4 * i + 2]
+      w.ffx[i] = outFood[2 * i]
+      w.ffy[i] = outFood[2 * i + 1]
     }
     bufs.read.unmap()
+    bufs.readFood.unmap()
   }
 
   dispose(): void {

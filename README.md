@@ -18,8 +18,12 @@ preferred spacing, structures that hold a chemical gradient, bodies that heal, b
 
 ## Status
 
-**v0 implemented**, plus budding reproduction, static/drifting food, world scaling, and
-optional multi-thread / GPU force computation. Learning is paused.
+**v0 implemented**, plus budding reproduction, static/drifting food, world scaling, optional
+multi-thread / GPU force computation, discrete-time guardrails, organism-aggregate and lifetime
+metrics, rewind, and config export/import. Learning is paused.
+
+Start with **"how it works"** on the start screen (or `H`) — one page explaining the whole model.
+[PLAN.md](PLAN.md) carries the staged backlog and the measurements behind it.
 
 ## Quick start
 

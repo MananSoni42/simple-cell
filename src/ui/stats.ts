@@ -27,12 +27,14 @@ export class StatsPanel {
       ${this.block('Food', 'food')}
       ${this.block('Energy', 'energy')}
       <div class="sub" id="s-energy-sub"></div>
+      <div class="blk"><div class="row"><b>Together</b><i id="s-agg"></i></div>
+      <div class="sub" id="s-agg-sub"></div></div>
       <div class="blk"><div class="row"><b>Lineages</b><i id="s-lineage"></i></div>
       <div class="sub" id="s-lineage-sub"></div></div>
       <div class="blk"><div class="row"><b>Mean lifespan</b><i id="s-life-head"></i></div>
       <canvas id="c-life" width="220" height="40"></canvas>
       <div class="sub" id="s-life"></div></div>`
-    for (const id of ['s-tick', 's-rate', 's-world', 's-perf', 's-orgs', 's-orgs-sub', 's-food', 's-energy', 's-energy-sub', 's-lineage', 's-lineage-sub', 's-life', 's-life-head']) {
+    for (const id of ['s-tick', 's-rate', 's-world', 's-perf', 's-orgs', 's-orgs-sub', 's-food', 's-energy', 's-energy-sub', 's-agg', 's-agg-sub', 's-lineage', 's-lineage-sub', 's-life', 's-life-head']) {
       this.el[id] = root.querySelector<HTMLElement>('#' + id)!
     }
     for (const [key, color] of [['orgs', '#f4f6fb'], ['food', '#a3e635'], ['energy', '#ffc145']] as const) {
@@ -70,6 +72,10 @@ export class StatsPanel {
     set('s-food', `${c.food}`)
     set('s-energy', `${(c.eOrganisms + c.eFree + c.eFood).toFixed(0)}`)
     set('s-energy-sub', `organisms ${c.eOrganisms.toFixed(0)} · free ${c.eFree.toFixed(0)} · food ${c.eFood.toFixed(0)} · burned ${st.burned.toFixed(0)}`)
+    const g = st.aggregates
+    set('s-agg', g.groups ? `${g.groups} group${g.groups > 1 ? 's' : ''}, biggest ${g.largest}` : 'none')
+    set('s-agg-sub', `${g.inGroups} organisms joined · mean ${g.meanSize ? g.meanSize.toFixed(1) : '–'} sub-organisms · bonds ${g.bonds}` +
+      ` · held ${g.stableBonds} (${g.stableGroups} lasting group${g.stableGroups === 1 ? '' : 's'}, biggest ${g.stableLargest}) · oldest bond ${g.oldestBond}t`)
     set('s-lineage', `${c.lineages} alive`)
     set('s-lineage-sub', `biggest ${c.biggestLineage} organisms · max gen ${c.maxGen} · children ${c.children} (most ${c.maxChildren}) · oldest ${c.oldest} · record ${Math.max(st.recordAge, c.oldest)}`)
 

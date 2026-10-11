@@ -16,6 +16,9 @@ export interface KernelArrays {
   fx: Float64Array // outputs, indexed by particle
   fy: Float64Array
   foodNear: Float32Array
+  /** The part of the force that came from food, so a brain can be told which way food lies. */
+  ffx: Float64Array
+  ffy: Float64Array
   A: Float64Array
 }
 
@@ -41,7 +44,7 @@ const MIDX = Int8Array.from(MATRIX_INDEX)
  * so equal-sized ranges carry equal work.
  */
 export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: KernelParams): void {
-  const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, A } = a
+  const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, ffx, ffy, A } = a
   const { SIZE: S, r_c: rc, K_core: K, r_0, r_brain_core, r_brain, K_brain, nc, skipFood } = p
   const rc2 = rc * rc
   const half = S / 2
@@ -59,6 +62,8 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
     let sx = 0
     let sy = 0
     let near = 0
+    let gx = 0
+    let gy = 0
     for (let dy = -1; dy <= 1; dy++) {
       const row = ((cy + dy + nc) % nc) * nc
       for (let dx = -1; dx <= 1; dx++) {
@@ -87,7 +92,7 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
             kcore = K_brain
           }
           let f: number
-          if (r < core) f = kcore * (r / core - 1)
+          if (r < core) f = kcore * (1 - core / Math.max(r, core * 1e-3))
           else {
             const mj = MIDX[tj]
             const beta = core / rc
@@ -97,7 +102,11 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
           f /= r
           sx += f * ddx
           sy += f * ddy
-          if (tj === FOOD) near++
+          if (tj === FOOD) {
+            near++
+            gx += f * ddx
+            gy += f * ddy
+          }
         }
       }
     }
@@ -105,5 +114,7 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
     fx[i] = sx
     fy[i] = sy
     foodNear[i] = near
+    ffx[i] = gx
+    ffy[i] = gy
   }
 }

@@ -43,6 +43,7 @@ export const LAWS = {
   repro_dist: 42, // how far from the parent a child appears
   E_birth: 15, // reserve each particle of a budded child starts with
   E_viable: 1, // minimum reserve for a free particle to be captured as a limb
+  substeps_max: 16, // integration sub-steps are capped here when a hot world needs them
   life_window: 10000, // lifetime averages are reported over this many trailing ticks
   life_buckets: 100,
 }
@@ -69,6 +70,7 @@ export interface Init {
   scale: number
   A: number[][] // N_MATRIX x N_MATRIX, symmetric, Food-Food = 0
   quantized: boolean // snap the non-food 4x4 to QUANTA
+  substeps: number // integration sub-steps per tick; >1 lets a hotter world stay stable
   T: number
   n_intrinsic: number
   n_brain: number
@@ -113,7 +115,7 @@ export function coreRadius(brainA: boolean, brainB: boolean, L: Laws): number {
 }
 
 /** `scale` multiplies the world edge; counts and rates scale with area so density stays constant. */
-export function initFromSeed(seed: number, scale = 1): Init {
+function seedWorld(seed: number, scale = 1): Init {
   const rng = new Rng(seed)
   const area = scale * scale
   const A = Array.from({ length: N_MATRIX }, () => new Array<number>(N_MATRIX).fill(0))
@@ -131,6 +133,7 @@ export function initFromSeed(seed: number, scale = 1): Init {
     scale,
     A: applyQuantization(A),
     quantized: true,
+    substeps: 1,
     // Stability budget: the Brownian step sqrt(2 mu T) must stay under a fifth of the core
     // radius r_0 = 10, which caps T near 4. Hotter worlds can be typed in, and the start screen
     // flags them; reaching a genuine gas phase needs sub-stepping (see PLAN.md section 1).
@@ -156,20 +159,38 @@ export function initFromSeed(seed: number, scale = 1): Init {
   }
 }
 
+/** A seeded world, already sub-stepped enough to be numerically safe. */
+export function initFromSeed(seed: number, scale = 1): Init {
+  const init = seedWorld(seed, scale)
+  init.substeps = Math.max(1, substepsFor(init) || LAWS.substeps_max)
+  return init
+}
+
+/** Smallest sub-step count that brings a world inside its budget, or 0 if none within the cap. */
+export function substepsFor(init: Init, L: Laws = LAWS): number {
+  for (let n = 1; n <= L.substeps_max; n++) if (stability({ ...init, substeps: n }, L).ok) return n
+  return 0
+}
+
 /** Diagnostics for the discrete-time budgets, shown on the start screen. */
 export interface Stability {
-  sigma: number // Brownian step per tick
+  sigma: number // Brownian step per sub-step
   sigmaRatio: number // ... as a fraction of the core radius
   forceRatio: number // worst single-pair force step, same units
   bondDepth: number // potential depth of one strongest bond
-  tempRatio: number // T / bond depth: structure needs this below ~1
+  tempRatio: number // T / bond depth
+  /** Numerically safe: steps are short enough that exclusion holds. Sub-stepping fixes this. */
   ok: boolean
+  /** Cold enough for bonds to survive. A melted world is legitimate physics, not an error. */
+  structured: boolean
 }
 
 export function stability(init: Init, L: Laws = LAWS): Stability {
   const r0 = L.beta * L.r_c
-  const sigma = Math.sqrt(2 * L.mu * init.T)
-  const forceStep = L.mu * L.K_core
+  const n = Math.max(1, Math.round(init.substeps))
+  // sub-stepping splits the tick: each Brownian increment is sqrt(n) smaller
+  const sigma = Math.sqrt((2 * L.mu * init.T) / n)
+  const forceStep = (L.mu * L.K_core) / n
   const bondDepth = (L.r_c * (1 - L.beta)) / 2
   const s: Stability = {
     sigma,
@@ -178,7 +199,8 @@ export function stability(init: Init, L: Laws = LAWS): Stability {
     bondDepth,
     tempRatio: init.T / bondDepth,
     ok: false,
+    structured: init.T <= bondDepth,
   }
-  s.ok = s.sigmaRatio <= 0.2 && s.forceRatio <= 0.35 && s.tempRatio <= 1
+  s.ok = s.sigmaRatio <= 0.1 && s.forceRatio <= 0.35
   return s
 }

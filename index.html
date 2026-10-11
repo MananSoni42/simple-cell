@@ -36,6 +36,13 @@
   .counts input { width:72px; }
   .check { color:var(--fg); margin-bottom:8px; } .check .dim { color:var(--dim); font-size:11px; }
   .go { color:var(--accent); letter-spacing:.06em; }
+  #explain { height:100%; overflow:auto; display:flex; justify-content:center; }
+  .explain { width:min(1100px, 96vw); }
+  .explain h2 { font-size:13px; font-weight:600; letter-spacing:.06em; color:var(--accent); margin:0 0 8px; }
+  .explain p { margin:0 0 9px; color:var(--fg); font-size:12px; line-height:1.6; }
+  .explain code { color:var(--dim); }
+  .ex-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px,1fr)); gap:26px 32px; margin-bottom:24px; }
+  .ex-svg { width:100%; height:auto; background:#0a0d14; border:1px solid var(--line); border-radius:8px; margin-bottom:10px; }
   #world { position:fixed; inset:0; }
   #c { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
   #stats { position:absolute; left:14px; top:12px; width:250px; padding:10px 12px; background:rgba(11,14,20,.78); border:1px solid var(--line); border-radius:8px; pointer-events:none; font-size:12px; }
@@ -50,11 +57,13 @@
   #controls button.on { border-color:var(--accent); color:var(--accent); }
   #controls .sep { width:1px; height:18px; background:var(--line); margin:0 4px; }
   #b-rate { min-width:78px; text-align:center; color:var(--dim); }
+  #b-seek { width:120px; accent-color:var(--accent); }
   #help { position:absolute; left:14px; bottom:12px; color:var(--dim); pointer-events:none; }
 </style>
 </head>
 <body>
 <div id="start"></div>
+<div id="explain" hidden></div>
 <div id="world" hidden>
   <canvas id="c"></canvas>
   <div id="stats"></div>
@@ -63,11 +72,14 @@
     <button id="b-pause" title="pause (space)">❚❚ Pause</button>
     <button id="b-stop" title="stop and return to the start screen (esc)">■ Stop</button>
     <span class="sep"></span>
+    <button id="b-rewind" title="rewind (backspace / J)">◀◀</button>
+    <input type="range" id="b-seek" min="0" max="1000" value="1000" title="scrub through held history" />
+    <span class="sep"></span>
     <button id="b-slow" title="half speed (←)">0.5×</button>
     <span id="b-rate">1 tick/s</span>
     <button id="b-fast" title="double speed (→)">2×</button>
   </div>
-  <div id="help">fill level = energy · red = starving · . single-step</div>
+  <div id="help">fill level = energy · red = starving · . single-step · ◀◀ rewind</div>
 </div>
 <script type="module" src="/src/main.ts"></script>
 </body>

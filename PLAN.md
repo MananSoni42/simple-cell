@@ -112,7 +112,12 @@ mandated 16.
 | 9 | **Children & lineage counters** (your 4, cheap half) | Per-organism children count; founder id inherited by offspring, so we can show lineages alive, largest lineage, max generation |
 | 10 | **Export / import config** (your 8) | JSON with a schema version: seed, scale, matrix, every editable field. Plus a URL hash, so a world is a link |
 
-## 4. Medium — clear enough, needs a design pass
+## 4. Medium — DONE
+
+All five shipped. Highlights: the hard core now diverges at contact (a bounded one is
+out-pullable by enough neighbours — free particles had been reaching 0.01 units apart), seeded
+worlds are automatically sub-stepped, and snapshot restore is verified by running the original
+and the restored world on for 400 more ticks and comparing hashes.
 
 | # | Item | Notes |
 |---|---|---|
