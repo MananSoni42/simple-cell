@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cell Life</title>
+<style>
+  :root { color-scheme: dark; --bg:#06080d; --fg:#cfd6e4; --dim:#6b7589; --line:#1b2230; --accent:#7aa2ff; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow:hidden; }
+  [hidden] { display:none !important; }
+  #start { height:100%; display:grid; place-items:center; }
+  .card { width:min(560px, 92vw); }
+  h1 { font-size:22px; font-weight:600; letter-spacing:.08em; margin:0 0 4px; }
+  .sub { color:var(--dim); margin-bottom:22px; }
+  .row { display:flex; gap:10px; align-items:center; margin-bottom:18px; }
+  input, button { background:#0d121b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 10px; font:inherit; }
+  input { width:150px; } input:focus { outline:1px solid var(--accent); }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  table.m { border-collapse:separate; border-spacing:3px; margin-bottom:6px; }
+  table.m td { width:58px; height:34px; text-align:center; border-radius:5px; font-size:12px; }
+  table.m th { color:var(--dim); font-weight:400; padding:0 4px; }
+  .legend { color:var(--dim); font-size:11px; margin-bottom:18px; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:2px 18px; margin:0 0 22px; }
+  dt { color:var(--dim); } dd { margin:0; }
+  .go { color:var(--accent); letter-spacing:.06em; }
+  #world { position:fixed; inset:0; }
+  canvas { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
+  #hud { position:absolute; left:14px; top:12px; pointer-events:none; white-space:pre; text-shadow:0 0 6px #000; }
+  #help { position:absolute; left:14px; bottom:12px; color:var(--dim); pointer-events:none; }
+</style>
+</head>
+<body>
+<div id="start"></div>
+<div id="world" hidden>
+  <canvas id="c"></canvas>
+  <div id="hud"></div>
+  <div id="help">space pause · ←/→ speed · . step · esc back</div>
+</div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -48,7 +48,7 @@ happens when the matrix gives a particle type a positive entry against Food.
   no inertia and no stored momentum:
 
   ```
-  x(t+1) = x(t) + μ·F(t)·dt  +  sqrt(2·T·dt)·N(0,1)
+  x(t+1) = x(t) + μ·F(t)·dt  +  sqrt(2·μ·T·dt)·N(0,1)
   ```
 
   This is the correct regime for cell-scale life (low Reynolds number: viscosity
@@ -139,9 +139,11 @@ This is the Particle-Life / Clusters force law, and it earns its place:
 - Piecewise linear → cheap, and its potential `U(r)` is piecewise quadratic and
   analytic, which gives us the strongest test in the suite (§11, monotone descent).
 - Compact support → spatial hashing is exact, not an approximation.
-- The tent peak sets a **preferred spacing** at `r ≈ r_c(1+β)/2`. This is precisely
-  what makes membranes have a *thickness* and a *lattice constant* rather than
-  being blobs.
+- The tent peak is where the pull is strongest, but for `A > 0` the potential
+  minimum is at contact (`r_0`). Spacing and membrane-like structure therefore come
+  from *mixed signs* (types that attract each other and repel their own kind), not
+  from a built-in lattice constant. Measured: `A = +1` condenses into dense droplets
+  below `T ≈ 50` and melts above it.
 
 ### The matrix
 
@@ -372,7 +374,7 @@ one's test passes.** The point is that if a layer's test fails we know the
 
 | L | Adds | Exit test |
 |---|---|---|
-| **0** | Particles, matrix, hard core, overdamped + Brownian motion, torus, spatial hash, renderer, matrix editor | A hand-tuned matrix produces a **membrane**: RDF has a sharp peak at the preferred spacing and mean cluster size ≫ 1. Raising `T` melts it; lowering `T` freezes it |
+| **0** | Particles, matrix, hard core, overdamped + Brownian motion, torus, spatial hash, renderer, matrix editor | A hand-tuned matrix produces a **membrane**: a mixed-sign matrix gives mean cluster size ≫ 1 with an RDF peak at a non-contact spacing. Raising `T` melts it; lowering `T` freezes it |
 | **1** | Food particles, patches, uptake, upkeep, reserves, starvation of free particles | **Energy ledger closes to 1e-9.** Free-particle population reaches a steady state set by `R_food`, and scales linearly with it |
 | **2** | Brain particles, sockets, scheduled spawn, rod physics, dissolution, socket capture | **Matter count by type is invariant** across 100k ticks of births and deaths; a 4-limb body loses limbs under starvation and **regains them** when free particles are available; a body with attracting tip types settles into parallel rods and one with repelling types into a cross — **from the matrix alone** |
 | **3** | Limb neurons, signal field, brain, hand-wired feed-the-hungriest | **Healing beats the control**: median body-integrity over 10 seeds is strictly higher for feed-the-hungriest than for even-split, under patchy food |

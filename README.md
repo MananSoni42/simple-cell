@@ -18,8 +18,8 @@ preferred spacing, structures that hold a chemical gradient, bodies that heal, b
 
 ## Status
 
-**v0 rules finalized, implementation pending.** Repo scaffolding and the headless
-core's module layout are in place.
+**v0 implemented.** Headless core, test suite (invariants + phenomenology), start
+screen, and world view. Not yet explored: what the random chemistries actually produce.
 
 ## Quick start
 
