@@ -128,23 +128,54 @@ brain sees food only through whatever the limb neuron chose to encode. Three lev
 
 ---
 
-## 6. Bugs and smells found while reading
+## 6. Bugs found
 
-Verified by measurement or by reading, not speculation:
+From measurement plus a full read of `src/core`, `src/compute`, `src/sim`, `src/render`, `src/ui`
+against RULES.md, fuzzed across pool/inflow, food modes, `foodMoves`, repro on/off,
+`decay_free` 0–10%, T 1–40, scale 1–2 and extreme densities.
 
-1. **Exclusion is defeated by the integrator** (§1). Closest brain-brain 0.3 units, closest
-   particle pair 0.5, against `r_0 = 4`. High severity: it undermines membranes, bodies and
-   feeding at once.
-2. **Overlapping decay mechanisms in continuous-inflow mode.** `world.ts` runs both
-   `decayFree()` (loses a fraction of reserve) and `freeMatterDecay()` (pays `c_up` and kills at
-   zero) against the same free particles every tick. The ledger stays exact, but free matter is
-   charged twice by two rules that were added for the same purpose. Consolidate on `decay_free`
-   and let `freeMatterDecay` only handle removal.
-3. **A measurement trap worth recording.** Food slots are recycled: a food particle eaten this
-   tick can be re-injected at a random position in the same tick, reusing its slot. Any probe
-   that diffs positions across a tick will see a "teleport" of hundreds of units. Our first
-   stability numbers were wrong for exactly this reason. If we add tracking by identity, slots
-   need a generation counter.
-4. **`DESIGN.md` promises two invariant tests we never implemented**: "no overlap" (min pair
-   distance > 0.5·`r_0`) and the max-displacement bound. Both would have caught §1 immediately.
-   Add them with §4's stability work — a failing test is how this should have surfaced.
+### Verified clean (worth knowing, so we stop re-checking)
+
+Energy ledger closes to ≤2e-7 over 4000-tick runs in every configuration — every transfer path
+is balanced. Index conventions never confuse particle index, packed grid slot, brain or socket
+(including the different `limbs` layouts in `world.ts` and `frames.ts`). Toroidal distance agrees
+across all four implementations, including the exact `d = ±S/2` tie. R2.3's who-feels-whom is
+exact. No stale `limbs` entries, orphan limbs, `owner`/`socket` mismatches, rod-length or
+out-of-quadrant violations in any run. No reachable NaN or Infinity; energy never goes negative.
+The triple-buffer frame handshake is race-free. Thread slicing covers the packed range exactly.
+
+### Needs fixing
+
+| # | What | Where | Severity |
+|---|---|---|---|
+| B1 | **Exclusion is defeated by the integrator** (§1). Nothing bounds the summed force: measured `μ·\|F\|` up to 5.6 on a free particle and **6.3 on a whole rigid body** at stock seed parameters, against `r_0 = 4`, so bodies jump more than a core diameter per tick. Two amplifiers §9 of RULES misses: a rod cannot yield radially, so a tip accumulates overlap a free particle would have relieved; and `integrate()` sums the brain's hard core + `F_move` + up to four limb radial loads into one unclamped step. At densities the start screen already allows, `μ·\|F\|` reaches 52 | `world.ts:377-403` | **high** |
+| B2 | **Brain food split is renormalized over filled sockets only**, so the whole released amount is always pushed out. Spec R5.2 softmaxes over all four outputs, and R4.5 lets only the `E_ref` cap return a share. With one limb and `y = [5,5,-5,5]` the spec gives it 0.005% of the release; the code gives it 100%. Since R5.2 deliberately feeds `alive_i` to the brain, "allocate to an empty socket to hoard" is a strategy the spec offers and the code removes. Affects every organism every tick, and most bodies are incomplete | `world.ts:510-525` | **medium** |
+| B3 | **Limb screen positions are never wrapped.** The renderer recomputes tips from the brain to keep rods rigid but omits the modulo, so a brain at `x = 297` of 300 draws its rod off the right edge and nothing at the left. Same for the footprint disc. `World.placeLimbs` does wrap — only the renderer does not. This is your item (1) | `renderer.ts:136-137,169` | medium-low |
+| B4 | **Interpolation glides across slot reuse**, so food visibly flies across the world while `foodMoves` is off. The guard only checks that the slot was alive before and after, but `freeFood` is LIFO, so an eaten slot is usually refilled within a few ticks at a fresh random position, and the half-world guard passes reuse distances up to 150 units. Needs a slot identity or generation check. *Same root cause as the measurement trap below* | `renderer.ts:118-124` | low-medium |
+| B5 | **Same-tick death and rebirth is invisible to the lifetime bookkeeping.** The liveness diff runs after `injectFood`/`spawnRandom`, so if a slot empties early in a tick and is re-endowed later in the same tick, the completed lifespan is never recorded and `since[i]` is never reset — the new particle inherits the previous occupant's entire age. Also `spawnRandom`'s pool test never checks `energy > 0`, so a particle that just ran dry is immediately eligible. Measured 1 occurrence per 4000 ticks in pool mode, 15 under inflow. Hits the stats added in the last commit | `world.ts:356-368` | low-medium |
+| B6 | **Signal cost uses `max(0, sig)` where R4.4 says `\|sig\|`**, so strongly negative limb signals ride free on the signal budget | `world.ts:545` | low |
+| B7 | **Capture accepts particles inside the inter-quadrant gap.** The test uses the raw quadrant, ignoring `gap`, so a particle in the gap is accepted and then clamped to the limit — the rod is born resting on its boundary instead of at the angle the particle had (R7.3) | `world.ts:636` | low |
+| B8 | **`bud()` ignores limb cooldown under continuous inflow.** `kill()` does not clear `cool`, and the inflow path tests only `!alive[i]`, so a limb that starved can become a child's limb next tick — while `spawnRandom` would still refuse it | `world.ts:781` vs `829` | low |
+| B9 | **A newly captured limb deposits a stale signal, for free.** `sig[]` is never cleared on unbind and `captures()` runs after `costs()` but before `stepField()`, so a fresh limb deposits the value left from its previous life having paid no `c_sig`, before `think()` has run for the new body. Measured 11 occurrences in 3000 ticks | `world.ts:354,654-659` | low |
+
+### Doc fixes (code is right, the spec is wrong)
+
+- RULES.md pipeline step 5 says food is consumed within `r_0`; R4.2 and the Laws table say `r_eat` (6). The code uses `r_eat`.
+- RULES.md §10 says the tick rate ranges to 512/s; `main.ts` allows 65536.
+- `metrics.ts:29` claims mass "must never change", which is false under `inflow` by design (R7.6).
+- `DESIGN.md` promises two invariant tests we never wrote — "no overlap" (min pair distance > 0.5·`r_0`) and a max-displacement bound. **Either one would have caught B1 immediately**, which is the real lesson: the stability budget needs to be a test, not a comment.
+
+### Consolidation, not a bug
+
+In continuous-inflow mode `decayFree()` (loses a fraction of reserve) and `freeMatterDecay()`
+(pays `c_up`, kills at zero) both charge the same free particles every tick. The ledger stays
+exact, but two rules added for the same purpose now overlap. Consolidate on `decay_free`, leaving
+`freeMatterDecay` to handle only removal.
+
+### A measurement trap worth recording
+
+Food slots are recycled, so a particle eaten this tick can be re-injected at a random position in
+the same tick reusing its slot. Any probe that diffs positions across a tick sees a "teleport" of
+hundreds of units — our first stability numbers were wrong for exactly this reason, and B4 is the
+same root cause showing up on screen. If we ever track particles by identity, slots need a
+generation counter.
