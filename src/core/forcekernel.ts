@@ -22,8 +22,11 @@ export interface KernelArrays {
 export interface KernelParams {
   SIZE: number
   r_c: number
-  beta: number
   K_core: number
+  r_0: number // exclusion radius for ordinary pairs
+  r_brain_core: number // ... when one of the pair is a brain
+  r_brain: number // ... when both are
+  K_brain: number
   nc: number
   /** Skip food as a target: its force is never used while food is static. */
   skipFood: boolean
@@ -39,7 +42,7 @@ const MIDX = Int8Array.from(MATRIX_INDEX)
  */
 export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: KernelParams): void {
   const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, A } = a
-  const { SIZE: S, r_c: rc, beta, K_core: K, nc, skipFood } = p
+  const { SIZE: S, r_c: rc, K_core: K, r_0, r_brain_core, r_brain, K_brain, nc, skipFood } = p
   const rc2 = rc * rc
   const half = S / 2
   for (let k0 = lo; k0 < hi; k0++) {
@@ -49,6 +52,7 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
     const yi = py[k0]
     const mi = MIDX[ti]
     const oi = powner[k0]
+    const iAmBrain = ti === BRAIN
     const c = pcell[k0]
     const cx = c % nc
     const cy = (c - cx) / nc
@@ -62,7 +66,8 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
         for (let k = cellStart[cc], e = cellStart[cc + 1]; k < e; k++) {
           if (k === k0) continue
           const tj = ptype[k]
-          if (oi >= 0 && oi === powner[k] && (ti === BRAIN || tj === BRAIN)) continue
+          const jIsBrain = tj === BRAIN
+          if (oi >= 0 && oi === powner[k] && (iAmBrain || jIsBrain)) continue
           let ddx = px[k] - xi
           if (ddx >= half) ddx -= S
           else if (ddx < -half) ddx += S
@@ -74,11 +79,21 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
           const r2 = ax + ddy * ddy
           if (r2 >= rc2 || r2 < 1e-18) continue
           const r = Math.sqrt(r2)
-          const mj = MIDX[tj]
-          const u = r / rc
+          // brains carry a body radius, so organisms can only ever touch through their limbs
+          let core = r_0
+          let kcore = K
+          if (iAmBrain || jIsBrain) {
+            core = iAmBrain && jIsBrain ? r_brain : r_brain_core
+            kcore = K_brain
+          }
           let f: number
-          if (u < beta) f = K * (u / beta - 1)
-          else f = (mi >= 0 && mj >= 0 ? A[mi * N_MATRIX + mj] : 0) * (1 - Math.abs(2 * u - 1 - beta) / (1 - beta))
+          if (r < core) f = kcore * (r / core - 1)
+          else {
+            const mj = MIDX[tj]
+            const beta = core / rc
+            const u = r / rc
+            f = (mi >= 0 && mj >= 0 ? A[mi * N_MATRIX + mj] : 0) * (1 - Math.abs(2 * u - 1 - beta) / (1 - beta))
+          }
           f /= r
           sx += f * ddx
           sy += f * ddy

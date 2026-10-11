@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { pairForce, pairPotential } from '../src/core/forces'
-import { LifeTracker, summarize } from '../src/core/lifestats'
+import { LifeTracker, RollingMean, summarize } from '../src/core/lifestats'
 import { census, clusterStats, lifeStats, meanClusterSize, massByType, potentialEnergy, stateHash } from '../src/core/metrics'
-import { type Init, LAWS, type Laws, initFromSeed } from '../src/core/params'
+import { type Init, LAWS, type Laws, QUANTA, initFromSeed, stability } from '../src/core/params'
 import { Rng } from '../src/core/rng'
 import { World } from '../src/core/world'
+import { configText, parseConfig } from '../src/ui/config'
 
 const L: Laws = { ...LAWS }
 
@@ -150,7 +151,9 @@ describe('phenomenology', () => {
       for (let t = 0; t < 600; t++) w.step()
       return w.theta[1] - w.theta[0]
     }
-    expect(rest(+1)).toBeLessThan(0.6)
+    // attracting tips come to rest a core radius apart: separation ~ r_0 / L_rod
+    const touching = (LAWS.beta * LAWS.r_c) / LAWS.L_rod
+    expect(rest(+1)).toBeLessThan(touching * 1.3)
     expect(rest(-1)).toBeGreaterThan(2.5)
   })
 
@@ -348,5 +351,138 @@ describe('free particle decay', () => {
     expect(s.particlesNow.min).toBeLessThanOrEqual(s.particlesNow.median)
     expect(s.particlesNow.median).toBeLessThanOrEqual(s.particlesNow.max)
     expect(s.organismsNow.n).toBe(census(w).organisms)
+  })
+})
+
+describe('discrete-time guardrails', () => {
+  it('never moves a particle further than d_max, nor swings a rod past dth_max', () => {
+    const w = new World(smallInit({ T: 200, T_spawn: 40, T_food: 1 }), SMALL) // absurd temperature on purpose
+    const px = new Float64Array(w.cap)
+    const py = new Float64Array(w.cap)
+    const pth = new Float64Array(w.cap)
+    for (let t = 0; t < 400; t++) {
+      px.set(w.x)
+      py.set(w.y)
+      pth.set(w.theta)
+      const owner = Int32Array.from(w.owner)
+      const births = w.nBirths
+      w.step()
+      if (w.nBirths !== births) continue // a spawn places particles outright
+      const S = w.L.SIZE
+      for (let i = 0; i < w.nMatter; i++) {
+        if (owner[i] !== w.owner[i]) continue
+        let dx = w.x[i] - px[i]
+        let dy = w.y[i] - py[i]
+        dx -= S * Math.round(dx / S)
+        dy -= S * Math.round(dy / S)
+        // Motion budget: forces and noise move anything at most d_max. A brain may then be
+        // pushed apart by up to d_max more to keep organisms separated, and a limb additionally
+        // swings with its rod. Only the integrated movers (free particles) must beat the core
+        // radius to rule out tunnelling, and they do.
+        const d = Math.hypot(dx, dy)
+        const isBrain = w.owner[i] === i
+        const isLimb = w.owner[i] >= 0 && !isBrain
+        const budget = isLimb ? 2 * w.L.d_max + w.L.L_rod * w.L.dth_max : isBrain ? 2 * w.L.d_max : w.L.d_max
+        expect(d).toBeLessThanOrEqual(budget + 1e-9)
+        if (isLimb) expect(Math.abs(w.theta[i] - pth[i])).toBeLessThanOrEqual(w.L.dth_max + 1e-9)
+        if (!isLimb && !isBrain) expect(d).toBeLessThan(w.L.beta * w.L.r_c) // cannot tunnel
+      }
+    }
+    expect(w.nClamped).toBeGreaterThan(0) // at T=200 the guardrail must actually be biting
+  })
+
+  it('keeps brains apart so organisms can only touch through their limbs', () => {
+    const w = new World(smallInit({ T: 4, n_brain: 6, n_start: 4, T_spawn: 50 }), SMALL)
+    let closest = Infinity
+    for (let t = 0; t < 2000; t++) {
+      w.step()
+      if (t % 10) continue
+      for (let a = w.nIntr; a < w.nMatter; a++) {
+        if (!w.alive[a] || !w.isBrain(a)) continue
+        for (let b = a + 1; b < w.nMatter; b++) {
+          if (!w.alive[b] || !w.isBrain(b)) continue
+          const S = w.L.SIZE
+          let dx = w.x[b] - w.x[a]
+          let dy = w.y[b] - w.y[a]
+          dx -= S * Math.round(dx / S)
+          dy -= S * Math.round(dy / S)
+          closest = Math.min(closest, Math.hypot(dx, dy))
+        }
+      }
+    }
+    expect(closest).toBeGreaterThan(w.L.r_brain * 0.5)
+  })
+
+  it('reports whether a world is inside its stability budget', () => {
+    expect(stability({ ...initFromSeed(1), T: 1 }).ok).toBe(true)
+    const hot = stability({ ...initFromSeed(1), T: 100 })
+    expect(hot.ok).toBe(false)
+    expect(hot.sigmaRatio).toBeGreaterThan(0.2)
+    // every seed-chosen world must be inside the budget
+    for (let seed = 1; seed < 40; seed++) expect(stability(initFromSeed(seed)).ok).toBe(true)
+  })
+})
+
+describe('chemistry', () => {
+  it('quantizes the 4x4 but leaves the food row continuous, and halves food coupling', () => {
+    const init = initFromSeed(12345)
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) expect(QUANTA).toContain(init.A[i][j])
+    init.A[0][4] = init.A[4][0] = 0.8
+    init.A[0][1] = init.A[1][0] = 0.5
+    const w = new World(init, { autoSpawn: false })
+    expect(w.A[0 * 5 + 4]).toBeCloseTo(0.8 * LAWS.food_coupling, 9)
+    expect(w.A[0 * 5 + 1]).toBeCloseTo(0.5, 9)
+  })
+
+  it('keeps the matrix symmetric and in range through a config round-trip', () => {
+    const init = initFromSeed(777, 2)
+    init.A[1][3] = 0.5
+    init.A[3][1] = 0.5
+    const text = configText(init, { threads: 3, gpu: false })
+    const back = parseConfig(text)
+    expect(back.init.A).toEqual(init.A)
+    expect(back.init.seed).toBe(init.seed)
+    expect(back.init.scale).toBe(2)
+    expect(back.perf).toEqual({ threads: 3, gpu: false })
+
+    const hostile = parseConfig(JSON.stringify({ init: { seed: 5, A: [[9, -9]], T: 'x', n_brain: -3 } }))
+    expect(hostile.init.A[0][0]).toBe(1)
+    expect(hostile.init.A[0][1]).toBe(-1)
+    expect(hostile.init.A[1][0]).toBe(-1) // symmetry repaired
+    expect(hostile.init.T).toBe(initFromSeed(5).T)
+    expect(hostile.init.n_brain).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('lineage', () => {
+  it('gives each spawned organism its own lineage and passes it to descendants', () => {
+    const w = new World(smallInit({ repro: true, n_brain: 6, n_start: 1, T_spawn: 1e9, T_food: 1 }), SMALL)
+    const b = [...Array(w.nMatter).keys()].find((i) => w.isBrain(i))!
+    w.energy[b] = 95
+    w.repCool[b] = 0
+    w.step()
+    const child = [...Array(w.nMatter).keys()].find((i) => w.isBrain(i) && w.parent[i] === b)!
+    expect(w.lineage[child]).toBe(w.lineage[b])
+    expect(w.children[b]).toBe(1)
+    expect(w.children[child]).toBe(0)
+    const c = census(w)
+    expect(c.lineages).toBe(1)
+    expect(c.biggestLineage).toBe(2)
+    expect(c.maxChildren).toBe(1)
+  })
+})
+
+describe('rolling mean', () => {
+  it('averages only the trailing window and leaves gaps where nothing was recorded', () => {
+    const r = new RollingMean(1000, 10) // 10 buckets of 100 ticks
+    r.record(50, 10)
+    r.record(150, 20)
+    expect(r.mean(150)).toBe(15)
+    const s = r.series(150)
+    expect(s[s.length - 1]).toBe(20)
+    expect(s[s.length - 2]).toBe(10)
+    expect(Number.isNaN(s[0])).toBe(true)
+    r.record(5000, 99) // far beyond the window: the old values must fall out
+    expect(r.mean(5000)).toBe(99)
   })
 })

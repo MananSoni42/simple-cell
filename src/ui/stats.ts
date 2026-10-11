@@ -10,35 +10,38 @@ interface Series {
   canvas: HTMLCanvasElement
 }
 
-/** Running stats panel: live numbers plus sparklines sampled as the world ticks. */
+/** Running stats panel: live numbers, sparklines sampled per tick, and lifetime trends. */
 export class StatsPanel {
   private el: Record<string, HTMLElement> = {}
   private series: Series[] = []
   private lastTick = -1
+  private lifeCanvas: HTMLCanvasElement
 
   constructor(root: HTMLElement) {
     root.innerHTML = `
       <div class="hd"><span id="s-tick"></span><span id="s-rate"></span></div>
       <div class="dim" id="s-world"></div>
       <div class="dim" id="s-perf"></div>
-      ${this.block('Organisms', 'orgs', '#f4f6fb')}
+      ${this.block('Organisms', 'orgs')}
       <div class="sub" id="s-orgs-sub"></div>
-      ${this.block('Food', 'food', '#a3e635')}
-      ${this.block('Energy', 'energy', '#ffc145')}
+      ${this.block('Food', 'food')}
+      ${this.block('Energy', 'energy')}
       <div class="sub" id="s-energy-sub"></div>
-      <div class="blk"><div class="row"><b>Largest connected</b><i id="s-max"></i></div>
-      <div class="sub" id="s-cluster-sub"></div></div>
-      <div class="blk"><div class="row"><b>Lifetimes</b><i class="dim">ticks · min / med / mean / p90 / max</i></div>
+      <div class="blk"><div class="row"><b>Lineages</b><i id="s-lineage"></i></div>
+      <div class="sub" id="s-lineage-sub"></div></div>
+      <div class="blk"><div class="row"><b>Mean lifespan</b><i id="s-life-head"></i></div>
+      <canvas id="c-life" width="220" height="40"></canvas>
       <div class="sub" id="s-life"></div></div>`
-    for (const id of ['s-tick', 's-rate', 's-world', 's-perf', 's-orgs-sub', 's-energy-sub', 's-max', 's-cluster-sub', 's-life', 's-orgs', 's-food', 's-energy']) {
+    for (const id of ['s-tick', 's-rate', 's-world', 's-perf', 's-orgs', 's-orgs-sub', 's-food', 's-energy', 's-energy-sub', 's-lineage', 's-lineage-sub', 's-life', 's-life-head']) {
       this.el[id] = root.querySelector<HTMLElement>('#' + id)!
     }
     for (const [key, color] of [['orgs', '#f4f6fb'], ['food', '#a3e635'], ['energy', '#ffc145']] as const) {
       this.series.push({ key, color, data: [], canvas: root.querySelector<HTMLCanvasElement>('#c-' + key)! })
     }
+    this.lifeCanvas = root.querySelector<HTMLCanvasElement>('#c-life')!
   }
 
-  private block(title: string, key: string, _color?: string): string {
+  private block(title: string, key: string): string {
     return `<div class="blk"><div class="row"><b>${title}</b><i id="s-${key}"></i></div><canvas id="c-${key}" width="220" height="26"></canvas></div>`
   }
 
@@ -61,19 +64,59 @@ export class StatsPanel {
     set('s-tick', `tick ${st.tick}`)
     set('s-rate', rateLabel)
     set('s-world', `seed ${st.seed} · ${st.size}² · food ${st.foodMode}${st.foodMoves ? ' (drifting)' : ' (static)'} · T ${st.T}`)
-    set('s-perf', perf)
+    set('s-perf', `${perf}${st.clampedPct > 0.05 ? ` · step clamped ${st.clampedPct.toFixed(1)}%` : ''}`)
     set('s-orgs', `${c.organisms} alive`)
-    set('s-orgs-sub', `born ${st.births} (${st.budded} budded) · died ${st.deaths} · max gen ${c.maxGen} · oldest ${c.oldest} · record ${Math.max(st.recordAge, c.oldest)} · limbs/org ${c.organisms ? (c.limbs / c.organisms).toFixed(1) : '–'}`)
+    set('s-orgs-sub', `born ${st.births} (${st.budded} budded) · died ${st.deaths} · free matter ${c.freeMatter} · limbs/org ${c.organisms ? (c.limbs / c.organisms).toFixed(1) : '–'}`)
     set('s-food', `${c.food}`)
     set('s-energy', `${(c.eOrganisms + c.eFree + c.eFood).toFixed(0)}`)
     set('s-energy-sub', `organisms ${c.eOrganisms.toFixed(0)} · free ${c.eFree.toFixed(0)} · food ${c.eFood.toFixed(0)} · burned ${st.burned.toFixed(0)}`)
-    set('s-max', `${st.cluster.max}`)
-    set('s-cluster-sub', `mean ${st.cluster.mean.toFixed(1)} · clusters ${st.cluster.count} · free matter ${c.freeMatter}`)
+    set('s-lineage', `${c.lineages} alive`)
+    set('s-lineage-sub', `biggest ${c.biggestLineage} organisms · max gen ${c.maxGen} · children ${c.children} (most ${c.maxChildren}) · oldest ${c.oldest} · record ${Math.max(st.recordAge, c.oldest)}`)
+
+    const l = st.life
+    const mp = l.windowMeanParticles
+    const mo = l.windowMeanOrganisms
+    const fmt = (v: number) => (Number.isFinite(v) ? Math.round(v).toString() : '–')
+    set('s-life-head', `${(l.windowTicks / 1000).toFixed(0)}k ticks`)
     const f = (label: string, s: Summary) =>
       s.n === 0 ? `${label}: –` : `${label} (${s.n}): ${[s.min, s.median, s.mean, s.p90, s.max].map((v) => Math.round(v)).join(' / ')}`
-    const l = st.life
-    this.el['s-life'].innerHTML = [f('particles live', l.particlesNow), f('particles ran dry', l.particlesDied), f('organisms live', l.organismsNow), f('organisms died', l.organismsDied)].join('<br>')
+    this.el['s-life'].innerHTML =
+      `<span style="color:#5b8def">■</span> particles ${fmt(mp)} &nbsp; <span style="color:#f4f6fb">■</span> organisms ${fmt(mo)} ticks<br>` +
+      `all-time min/med/mean/p90/max<br>${f('particles', l.particlesDied)}<br>${f('organisms', l.organismsDied)}`
+    this.lifeTrend(l.particlesTrend, l.organismsTrend)
     for (const s of this.series) this.spark(s)
+  }
+
+  /** Two lines on a shared scale: mean completed lifespan per bucket across the window. */
+  private lifeTrend(particles: Float64Array, organisms: Float64Array): void {
+    const g = this.lifeCanvas.getContext('2d')!
+    const { width: W, height: H } = this.lifeCanvas
+    g.clearRect(0, 0, W, H)
+    let max = 0
+    for (const arr of [particles, organisms]) for (const v of arr) if (Number.isFinite(v) && v > max) max = v
+    if (max <= 0) return
+    for (const [arr, color] of [[particles, '#5b8def'], [organisms, '#f4f6fb']] as const) {
+      g.strokeStyle = color
+      g.lineWidth = 1.5
+      g.lineJoin = 'round'
+      g.beginPath()
+      let drawing = false
+      arr.forEach((v, i) => {
+        if (!Number.isFinite(v)) {
+          drawing = false // a gap means nothing died in that bucket; do not bridge it
+          return
+        }
+        const x = (i / (arr.length - 1)) * W
+        const y = H - 2 - (v / max) * (H - 4)
+        if (drawing) g.lineTo(x, y)
+        else g.moveTo(x, y)
+        drawing = true
+      })
+      g.stroke()
+    }
+    g.fillStyle = '#6b7589'
+    g.font = '9px ui-monospace, monospace'
+    g.fillText(String(Math.round(max)), 2, 9)
   }
 
   private spark(s: Series): void {

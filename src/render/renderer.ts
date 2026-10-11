@@ -24,6 +24,7 @@ export class Renderer {
   private prevTheta = new Float32Array(0)
   private prevAlive = new Uint8Array(0)
   private prevOwner = new Int32Array(0)
+  private prevType = new Uint8Array(0)
   private X = new Float32Array(0)
   private Y = new Float32Array(0)
 
@@ -97,6 +98,7 @@ export class Renderer {
       this.prevTheta = new Float32Array(w.cap)
       this.prevAlive = new Uint8Array(w.cap)
       this.prevOwner = new Int32Array(w.cap)
+      this.prevType = new Uint8Array(w.cap)
       this.X = new Float32Array(w.cap)
       this.Y = new Float32Array(w.cap)
     }
@@ -105,6 +107,7 @@ export class Renderer {
     this.prevTheta.set(w.theta)
     this.prevAlive.set(w.alive)
     this.prevOwner.set(w.owner)
+    this.prevType.set(w.type)
   }
 
   /** Screen positions for this frame. Limbs are rebuilt from their brain so rod and tip never drift apart. */
@@ -115,7 +118,10 @@ export class Renderer {
     for (let i = 0; i < w.cap; i++) {
       let x = w.x[i]
       let y = w.y[i]
-      if (alpha < 1 && this.prevAlive[i] && w.alive[i]) {
+      // slots are recycled, so a live-before/live-after slot may hold a different particle:
+      // interpolating then makes food appear to fly across the world
+      const same = this.prevAlive[i] && w.alive[i] && this.prevType[i] === w.type[i] && this.prevOwner[i] === w.owner[i]
+      if (alpha < 1 && same) {
         const dx = x - this.prevX[i]
         const dy = y - this.prevY[i]
         if (Math.abs(dx) < S / 2 && Math.abs(dy) < S / 2) {
@@ -158,75 +164,97 @@ export class Renderer {
     const y0 = -this.oy / z - m / z
     const y1 = (px - this.oy) / z + m / z
     const vis = (i: number) => X[i] >= x0 && X[i] <= x1 && Y[i] >= y0 && Y[i] <= y1
+    // The world is a torus, so anything within `band` of an edge is also drawn on the far side.
+    const band = (w.L.L_rod + 8) * k
+    const offs: [number, number][] = []
+    const tiles = (sx: number, sy: number): [number, number][] => {
+      offs.length = 0
+      offs.push([0, 0])
+      const left = sx < band
+      const right = sx > px - band
+      const top = sy < band
+      const bottom = sy > px - band
+      if (left) offs.push([px, 0])
+      if (right) offs.push([-px, 0])
+      if (top) offs.push([0, px])
+      if (bottom) offs.push([0, -px])
+      if (left && top) offs.push([px, px])
+      if (left && bottom) offs.push([px, -px])
+      if (right && top) offs.push([-px, px])
+      if (right && bottom) offs.push([-px, -px])
+      return offs
+    }
 
     const brains: number[] = []
     for (let b = w.nIntr; b < w.nMatter; b++) if (w.alive[b] && w.isBrain(b)) brains.push(b)
 
-    // organism footprints, then rods
+    // Each organism is drawn whole, once per tile it touches, so a body on the seam is
+    // never cut in half and its rods never run off the canvas.
     for (const b of brains) {
       if (!vis(b)) continue
-      ctx.beginPath()
-      ctx.arc(X[b], Y[b], (w.L.L_rod + 5) * k, 0, Math.PI * 2)
-      ctx.fillStyle = 'rgba(244,246,251,0.045)'
-      ctx.fill()
-      ctx.strokeStyle = 'rgba(244,246,251,0.14)'
-      ctx.lineWidth = 1
-      ctx.stroke()
-    }
-    ctx.lineCap = 'round'
-    ctx.lineWidth = Math.max(2, 1.5 * k)
-    for (const b of brains) {
-      if (!vis(b)) continue
-      for (let s = 0; s < 4; s++) {
-        const l = w.limbOf(b, s)
-        if (l < 0) continue
-        ctx.strokeStyle = COLORS[w.type[l]]
+      for (const [ox, oy] of tiles(X[b], Y[b])) {
+        const bx = X[b] + ox
+        const by = Y[b] + oy
         ctx.beginPath()
-        ctx.moveTo(X[b], Y[b])
-        ctx.lineTo(X[l], Y[l])
+        ctx.arc(bx, by, (w.L.L_rod + 5) * k, 0, Math.PI * 2)
+        ctx.fillStyle = 'rgba(244,246,251,0.045)'
+        ctx.fill()
+        ctx.strokeStyle = 'rgba(244,246,251,0.14)'
+        ctx.lineWidth = 1
         ctx.stroke()
+
+        ctx.lineCap = 'round'
+        ctx.lineWidth = Math.max(2, 1.5 * k)
+        for (let s = 0; s < 4; s++) {
+          const l = w.limbOf(b, s)
+          if (l < 0) continue
+          ctx.strokeStyle = COLORS[w.type[l]]
+          ctx.beginPath()
+          ctx.moveTo(bx, by)
+          ctx.lineTo(X[l] + ox, Y[l] + oy)
+          ctx.stroke()
+        }
+        for (let s = 0; s < 4; s++) {
+          const l = w.limbOf(b, s)
+          if (l < 0) continue
+          const e = clamp01(w.energy[l] / w.L.E_ref)
+          const r = R_PARTICLE * k
+          const lx = X[l] + ox
+          const ly = Y[l] + oy
+          ctx.globalAlpha = 0.28
+          this.circle(lx, ly, r, COLORS[w.type[l]])
+          ctx.globalAlpha = 1
+          this.circle(lx, ly, r * Math.sqrt(e), COLORS[w.type[l]])
+          ctx.strokeStyle = e < 0.12 ? LOW : COLORS[w.type[l]]
+          ctx.lineWidth = Math.max(1, 0.5 * k)
+          ctx.beginPath()
+          ctx.arc(lx, ly, r, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+        const e = clamp01(w.energy[b] / w.L.E_ref)
+        const r = R_BRAIN * k
+        ctx.fillStyle = '#1b2230'
+        ctx.fillRect(bx - r, by - r, 2 * r, 2 * r)
+        ctx.fillStyle = e < 0.12 ? LOW : COLORS[BRAIN]
+        ctx.fillRect(bx - r, by - r + 2 * r * (1 - e), 2 * r, 2 * r * e)
+        ctx.strokeStyle = COLORS[BRAIN]
+        ctx.lineWidth = Math.max(1, 0.5 * k)
+        ctx.strokeRect(bx - r, by - r, 2 * r, 2 * r)
       }
     }
 
     // food, then free matter
-    for (let i = w.nMatter; i < w.cap; i++) if (w.alive[i] && vis(i)) this.diamond(X[i], Y[i], R_FOOD * k, COLORS[FOOD])
+    for (let i = w.nMatter; i < w.cap; i++) {
+      if (!w.alive[i] || !vis(i)) continue
+      for (const [ox, oy] of tiles(X[i], Y[i])) this.diamond(X[i] + ox, Y[i] + oy, R_FOOD * k, COLORS[FOOD])
+    }
     ctx.globalAlpha = 0.6
     for (let i = 0; i < w.nIntr; i++) {
-      if (w.alive[i] && w.owner[i] < 0 && vis(i)) this.circle(X[i], Y[i], R_PARTICLE * 0.8 * k, COLORS[w.type[i]])
+      if (!w.alive[i] || w.owner[i] >= 0 || !vis(i)) continue
+      for (const [ox, oy] of tiles(X[i], Y[i])) this.circle(X[i] + ox, Y[i] + oy, R_PARTICLE * 0.8 * k, COLORS[w.type[i]])
     }
     ctx.globalAlpha = 1
 
-    // bound limbs: dim disc + bright core sized by energy
-    for (let i = 0; i < w.nIntr; i++) {
-      if (!w.alive[i] || w.owner[i] < 0 || !vis(i)) continue
-      const e = clamp01(w.energy[i] / w.L.E_ref)
-      const r = R_PARTICLE * k
-      ctx.globalAlpha = 0.28
-      this.circle(X[i], Y[i], r, COLORS[w.type[i]])
-      ctx.globalAlpha = 1
-      this.circle(X[i], Y[i], r * Math.sqrt(e), COLORS[w.type[i]])
-      ctx.strokeStyle = e < 0.12 ? LOW : COLORS[w.type[i]]
-      ctx.lineWidth = Math.max(1, 0.5 * k)
-      ctx.beginPath()
-      ctx.arc(X[i], Y[i], r, 0, Math.PI * 2)
-      ctx.stroke()
-    }
-
-    // brains: gauge filling from the bottom
-    for (const b of brains) {
-      if (!vis(b)) continue
-      const e = clamp01(w.energy[b] / w.L.E_ref)
-      const r = R_BRAIN * k
-      const x0 = X[b] - r
-      const y0 = Y[b] - r
-      ctx.fillStyle = '#1b2230'
-      ctx.fillRect(x0, y0, 2 * r, 2 * r)
-      ctx.fillStyle = e < 0.12 ? LOW : COLORS[BRAIN]
-      ctx.fillRect(x0, y0 + 2 * r * (1 - e), 2 * r, 2 * r * e)
-      ctx.strokeStyle = COLORS[BRAIN]
-      ctx.lineWidth = Math.max(1, 0.5 * k)
-      ctx.strokeRect(x0, y0, 2 * r, 2 * r)
-    }
     // unborn brains: hollow squares
     ctx.globalAlpha = 0.45
     ctx.strokeStyle = '#8b94a8'
@@ -234,7 +262,7 @@ export class Renderer {
     for (let b = w.nIntr; b < w.nMatter; b++) {
       if (!w.alive[b] || w.isBrain(b) || !vis(b)) continue
       const r = R_BRAIN * 0.8 * k
-      ctx.strokeRect(X[b] - r, Y[b] - r, 2 * r, 2 * r)
+      for (const [ox, oy] of tiles(X[b], Y[b])) ctx.strokeRect(X[b] + ox - r, Y[b] + oy - r, 2 * r, 2 * r)
     }
     ctx.globalAlpha = 1
     ctx.setTransform(1, 0, 0, 1, 0, 0)

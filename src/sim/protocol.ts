@@ -1,6 +1,6 @@
 import type { Perf } from '../compute/select'
 import type { Init } from '../core/params'
-import type { ClusterStats, Census, LifeStats } from '../core/metrics'
+import type { Census, LifeStats } from '../core/metrics'
 import type { FrameBuffers, FrameLayout } from './frames'
 
 export type ToSim =
@@ -21,7 +21,7 @@ export interface StatsSnapshot {
   tps: number
   census: Census
   life: LifeStats
-  cluster: ClusterStats
+  clampedPct: number // how often the per-tick step guardrail bit
   burned: number
   births: number
   budded: number

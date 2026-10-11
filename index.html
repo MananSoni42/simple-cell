@@ -17,9 +17,16 @@
   select { background:#0d121b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
   input, button { background:#0d121b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 10px; font:inherit; }
   input { width:150px; } input:focus { outline:1px solid var(--accent); }
+  input[type=checkbox] { width:auto; margin:0 6px 0 0; vertical-align:-1px; }
+  .check { display:flex; align-items:baseline; gap:2px; flex-wrap:wrap; }
   button { cursor:pointer; } button:hover { border-color:var(--accent); }
   table.m { border-collapse:separate; border-spacing:3px; margin-bottom:6px; }
-  table.m td { width:58px; height:34px; text-align:center; border-radius:5px; font-size:12px; }
+  table.m td { width:58px; height:34px; text-align:center; border-radius:5px; font-size:12px; cursor:ns-resize; user-select:none; }
+  table.m td:focus { outline:1px solid var(--accent); }
+  table.m td.locked { cursor:default; opacity:.45; }
+  .stab { margin:4px 0 16px; font-size:11px; line-height:1.5; }
+  .stab b.ok { color:#3ddc97; } .stab b.warn { color:#ff6b81; }
+  textarea { width:100%; height:120px; background:#0d121b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; font:inherit; margin-bottom:14px; }
   table.m th { color:var(--dim); font-weight:400; padding:0 4px; }
   .legend { color:var(--dim); font-size:11px; margin-bottom:18px; }
   dl { display:grid; grid-template-columns:auto 1fr; gap:2px 18px; margin:0 0 22px; }
@@ -27,7 +34,7 @@
   .counts { display:grid; grid-template-columns:repeat(2,1fr); gap:8px 14px; margin-bottom:22px; }
   .counts label { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--dim); }
   .counts input { width:72px; }
-  .check { display:block; color:var(--fg); margin-bottom:8px; } .check .dim { color:var(--dim); font-size:11px; }
+  .check { color:var(--fg); margin-bottom:8px; } .check .dim { color:var(--dim); font-size:11px; }
   .go { color:var(--accent); letter-spacing:.06em; }
   #world { position:fixed; inset:0; }
   #c { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }

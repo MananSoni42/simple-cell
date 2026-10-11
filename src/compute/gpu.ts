@@ -5,7 +5,7 @@ import type { World } from '../core/world'
 // WebGPU types are not part of the TS DOM lib; the handful of calls used here are typed loosely.
 
 const WGSL = /* wgsl */ `
-struct Params { n: u32, nc: u32, size: f32, rc: f32, beta: f32, K: f32, pad0: f32, pad1: f32 }
+struct Params { n: u32, nc: u32, size: f32, rc: f32, r0: f32, K: f32, rBrainCore: f32, rBrain: f32, KBrain: f32, pad0: f32, pad1: f32, pad2: f32 }
 @group(0) @binding(0) var<uniform> P: Params;
 @group(0) @binding(1) var<storage, read> pos: array<vec2<f32>>;
 @group(0) @binding(2) var<storage, read> minfo: array<vec2<i32>>; // x: type (-1 = dead), y: owner
@@ -51,15 +51,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let r2 = dot(d, d);
         if (r2 >= P.rc * P.rc || r2 < 1e-18) { continue; }
         let r = sqrt(r2);
-        let u = r / P.rc;
+        var core = P.r0;
+        var kcore = P.K;
+        if (ti == 4 || mj.x == 4) {
+          if (ti == 4 && mj.x == 4) { core = P.rBrain; } else { core = P.rBrainCore; }
+          kcore = P.KBrain;
+        }
         var f = 0.0;
-        if (u < P.beta) {
-          f = P.K * (u / P.beta - 1.0);
+        if (r < core) {
+          f = kcore * (r / core - 1.0);
         } else {
           let mjx = midx(mj.x);
           var a = 0.0;
           if (mi >= 0 && mjx >= 0) { a = A[mi * 5 + mjx]; }
-          f = a * (1.0 - abs(2.0 * u - 1.0 - P.beta) / (1.0 - P.beta));
+          let beta = core / P.rc;
+          let u = r / P.rc;
+          f = a * (1.0 - abs(2.0 * u - 1.0 - beta) / (1.0 - beta));
         }
         s = s + d * (f / r);
         if (mj.x == 5) { near = near + 1.0; }
@@ -101,7 +108,7 @@ export class GpuBackend implements ForceBackend {
     const mk = (size: number, usage: number) => device.createBuffer({ size: Math.max(16, size), usage })
     const S = USAGE.STORAGE | USAGE.COPY_DST
     this.bufs = {
-      params: mk(32, USAGE.UNIFORM | USAGE.COPY_DST),
+      params: mk(48, USAGE.UNIFORM | USAGE.COPY_DST),
       pos: mk(8 * n, S),
       minfo: mk(8 * n, S),
       start: mk(4 * w.grid.start.length, S),
@@ -117,14 +124,17 @@ export class GpuBackend implements ForceBackend {
     }))
     this.bind = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries })
     const p = w.kernelParams
-    this.params = new ArrayBuffer(32)
+    this.params = new ArrayBuffer(48)
     const dv = new DataView(this.params)
     dv.setUint32(0, n, true)
     dv.setUint32(4, p.nc, true)
     dv.setFloat32(8, p.SIZE, true)
     dv.setFloat32(12, p.r_c, true)
-    dv.setFloat32(16, p.beta, true)
+    dv.setFloat32(16, p.r_0, true)
     dv.setFloat32(20, p.K_core, true)
+    dv.setFloat32(24, p.r_brain_core, true)
+    dv.setFloat32(28, p.r_brain, true)
+    dv.setFloat32(32, p.K_brain, true)
     device.queue.writeBuffer(this.bufs.params, 0, this.params)
     device.queue.writeBuffer(this.bufs.A, 0, Float32Array.from(w.A))
   }

@@ -1,6 +1,7 @@
 import { MAX_THREADS, type Perf, canShare, gpuAvailable } from '../compute/select'
-import { type Init, initFromSeed } from '../core/params'
-import { MATRIX_NAMES } from '../core/types'
+import { type Init, QUANTA, clamp11, initFromSeed, quantize, stability } from '../core/params'
+import { MATRIX_NAMES, N_MATRIX } from '../core/types'
+import { configText, download, parseConfig, readHash, writeHash } from './config'
 
 const FOOD_BLURB: Record<string, string> = {
   random: 'uniform sprinkle',
@@ -8,7 +9,7 @@ const FOOD_BLURB: Record<string, string> = {
   gradient: 'one sunlit band',
 }
 
-/** Starting-population knobs. Defaults come from the seed (and the world scale); each can be overridden. */
+/** Starting-population knobs. Defaults come from the seed (and the world scale). */
 const COUNTS = [
   { key: 'n_intrinsic', label: 'particles', min: 4, max: 60000 },
   { key: 'n_brain', label: 'brains', min: 1, max: 6000 },
@@ -18,6 +19,7 @@ const COUNTS = [
 type CountKey = (typeof COUNTS)[number]['key']
 
 const SCALES = [1, 2, 4, 8, 16, 32]
+const FOOD = N_MATRIX - 1
 
 function cellColor(a: number): string {
   const m = Math.abs(a)
@@ -25,52 +27,55 @@ function cellColor(a: number): string {
 }
 
 /**
- * Start screen. The seed fixes the chemistry and every rate (read-only). The world
- * scale, starting population, a few world options and the compute settings are editable.
+ * Start screen. The seed proposes a world; the matrix, population, options and compute
+ * settings can all be edited, and the result can be exported, imported or shared as a link.
  */
 export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) => void): { show(): void; hide(): void } {
-  let seed = Math.floor(Math.random() * 1e9)
-  let scale = 1
-  const overrides: Partial<Record<CountKey, number>> = {}
-  const flags = { inflow: false, foodMoves: false, repro: true }
-  let decayPct = 0.2 // % of its reserve a free particle loses per tick
+  let init = initFromSeed(Math.floor(Math.random() * 1e9), 1)
   const perf: Perf = { threads: 1, gpu: false }
-  let base = initFromSeed(seed, scale)
-
-  const current = (): Init => {
-    const init = { ...base, ...overrides, ...flags, decay_free: decayPct / 100 }
-    init.n_brain = Math.min(init.n_brain, init.n_intrinsic)
-    init.n_start = Math.min(init.n_start, init.n_brain)
-    init.n_food0 = Math.min(init.n_food0, init.max_food)
-    return init
+  const fromHash = readHash()
+  if (fromHash) {
+    init = fromHash.init
+    if (fromHash.perf) Object.assign(perf, fromHash.perf)
   }
-
-  const check = (id: string, label: string, hint: string, off = false) =>
-    `<label class="check"><input type="checkbox" id="${id}" ${off ? 'disabled' : ''} /> ${label} <span class="dim">— ${hint}</span></label>`
 
   root.innerHTML = `
     <div class="card">
       <h1>CELL LIFE</h1>
-      <div class="sub">a world is a seed. the chemistry below is frozen.</div>
+      <div class="sub">a world is a seed, then whatever you change about it.</div>
       <div class="row">
         <label>seed <input id="seed" inputmode="numeric" /></label>
         <button id="roll">re-roll (R)</button>
         <label>world <select id="scale">${SCALES.map((s) => `<option value="${s}">${s}× (${300 * s}²)</option>`).join('')}</select></label>
       </div>
       <table class="m" id="matrix"></table>
-      <div class="legend">attraction <span style="color:#ffaa3c">■</span> positive &nbsp; <span style="color:#508cff">■</span> negative &nbsp; (symmetric; Food×Food = 0)</div>
+      <div class="legend">
+        <span style="color:#ffaa3c">■</span> attract &nbsp; <span style="color:#508cff">■</span> repel &nbsp;
+        click a cell and type, or drag · symmetric, Food×Food = 0 · the Food row acts at half strength
+      </div>
+      <label class="check"><input type="checkbox" id="quantized" /> quantized bonds <span class="dim">— snap the 4×4 to ${QUANTA.join(', ')}</span></label>
       <dl id="params"></dl>
-      <div class="sub" style="margin-bottom:6px">starting population <span class="dim">(editable)</span></div>
+      <div class="sub" style="margin-bottom:6px">starting population</div>
       <div class="counts" id="counts"></div>
-      <div class="row"><label>free particle decay <input type="number" id="decay" min="0" max="10" step="0.05" value="0.2" style="width:80px" /> % of reserve per tick <span class="dim">(0 = off)</span></label></div>
-      ${check('repro', 'reproduction', 'organisms holding enough energy bud off a mutated child')}
-      ${check('foodMoves', 'food drifts', 'off: food stays where it lands')}
-      ${check('inflow', 'continuous organism inflow', 'new particles arrive with every organism, and all matter can die')}
+      <div class="row"><label>temperature <input type="number" id="temp" min="0" max="200" step="0.1" style="width:80px" /></label>
+        <label>free decay <input type="number" id="decay" min="0" max="10" step="0.05" style="width:70px" /> %/tick</label></div>
+      <div id="stab" class="stab"></div>
+      <label class="check"><input type="checkbox" id="repro" /> reproduction <span class="dim">— organisms holding enough energy bud off a mutated child</span></label>
+      <label class="check"><input type="checkbox" id="foodMoves" /> food drifts <span class="dim">— off: food stays where it lands</span></label>
+      <label class="check"><input type="checkbox" id="inflow" /> continuous organism inflow <span class="dim">— new particles arrive with every organism, and all matter can die</span></label>
       <div class="sub" style="margin:14px 0 6px">compute <span class="dim">(${MAX_THREADS} cores detected; only pays off for large worlds)</span></div>
       <div class="row">
-        <label>threads <input type="number" id="threads" min="1" max="${MAX_THREADS}" value="1" ${canShare ? '' : 'disabled'} /></label>
+        <label>threads <input type="number" id="threads" min="1" max="${MAX_THREADS}" style="width:70px" ${canShare ? '' : 'disabled'} /></label>
         <label class="check" style="margin:0"><input type="checkbox" id="gpu" ${gpuAvailable() ? '' : 'disabled'} /> GPU forces <span class="dim">${gpuAvailable() ? '' : '(WebGPU unavailable)'}</span></label>
       </div>
+      <div class="row" style="margin-top:14px">
+        <button id="export">export config</button>
+        <button id="copy">copy JSON</button>
+        <button id="importBtn">import…</button>
+        <input type="file" id="file" accept="application/json" hidden />
+        <span class="dim" id="io"></span>
+      </div>
+      <textarea id="paste" placeholder="paste a config JSON here, then press Import again" hidden></textarea>
       <div class="go">press ENTER to enter the world</div>
     </div>`
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!
@@ -78,6 +83,8 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
   const matrixEl = q<HTMLTableElement>('#matrix')
   const paramsEl = q('#params')
   const countsEl = q('#counts')
+  const ioEl = q('#io')
+  const pasteEl = q<HTMLTextAreaElement>('#paste')
 
   countsEl.innerHTML = COUNTS.map((c) => `<label>${c.label}<input type="number" data-k="${c.key}" min="${c.min}" max="${c.max}" /></label>`).join('')
   const countInputs = Array.from(countsEl.querySelectorAll<HTMLInputElement>('input'))
@@ -85,42 +92,102 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     input.addEventListener('input', () => {
       const spec = COUNTS.find((c) => c.key === input.dataset.k)!
       const n = Math.round(Number(input.value))
-      if (input.value !== '' && Number.isFinite(n)) overrides[spec.key] = Math.min(spec.max, Math.max(spec.min, n))
+      if (input.value !== '' && Number.isFinite(n)) {
+        init[spec.key] = Math.min(spec.max, Math.max(spec.min, n))
+        sync()
+      }
     })
     input.addEventListener('change', render)
   }
 
-  for (const key of ['repro', 'foodMoves', 'inflow'] as const) {
+  const checks = ['quantized', 'repro', 'foodMoves', 'inflow'] as const
+  for (const key of checks) {
     const el = q<HTMLInputElement>('#' + key)
-    el.checked = flags[key]
-    el.addEventListener('change', () => (flags[key] = el.checked))
+    el.addEventListener('change', () => {
+      init[key] = el.checked
+      if (key === 'quantized' && el.checked) {
+        for (let i = 0; i < FOOD; i++) {
+          for (let j = i; j < FOOD; j++) {
+            const v = quantize(init.A[i][j])
+            init.A[i][j] = v
+            init.A[j][i] = v
+          }
+        }
+      }
+      render()
+    })
   }
+  const tempEl = q<HTMLInputElement>('#temp')
+  tempEl.addEventListener('input', () => {
+    const v = Number(tempEl.value)
+    if (Number.isFinite(v) && tempEl.value !== '') {
+      init.T = Math.min(200, Math.max(0, v))
+      renderStability()
+    }
+  })
   const decayEl = q<HTMLInputElement>('#decay')
-  decayEl.addEventListener('input', () => (decayPct = Math.min(10, Math.max(0, Number(decayEl.value) || 0))))
+  decayEl.addEventListener('input', () => (init.decay_free = Math.min(0.1, Math.max(0, (Number(decayEl.value) || 0) / 100))))
   const threadsEl = q<HTMLInputElement>('#threads')
-  const gpuEl = q<HTMLInputElement>('#gpu')
   threadsEl.addEventListener('input', () => (perf.threads = Math.min(MAX_THREADS, Math.max(1, Math.round(Number(threadsEl.value)) || 1))))
+  const gpuEl = q<HTMLInputElement>('#gpu')
   gpuEl.addEventListener('change', () => (perf.gpu = gpuEl.checked))
   const scaleEl = q<HTMLSelectElement>('#scale')
-  scaleEl.addEventListener('change', () => {
-    scale = Number(scaleEl.value)
-    resetSeed(seed)
-  })
+  scaleEl.addEventListener('change', () => resetSeed(init.seed, Number(scaleEl.value)))
+
+  /** One matrix cell: type a value, or drag vertically to sweep it. */
+  function matrixCell(i: number, j: number, a: number): string {
+    const locked = i === FOOD && j === FOOD
+    return `<td style="background:${cellColor(a)}" ${locked ? 'class="locked"' : `data-i="${i}" data-j="${j}" tabindex="0"`}>${a.toFixed(2)}</td>`
+  }
+
+  function setCell(i: number, j: number, v: number): void {
+    let a = clamp11(v)
+    if (init.quantized && i < FOOD && j < FOOD) a = quantize(a)
+    init.A[i][j] = a
+    init.A[j][i] = a // the matrix is symmetric by law
+    render()
+  }
 
   function render(): void {
-    const init = current()
-    if (document.activeElement !== seedEl) seedEl.value = String(seed)
+    if (document.activeElement !== seedEl) seedEl.value = String(init.seed)
+    scaleEl.value = String(init.scale)
     const head = '<tr><th></th>' + MATRIX_NAMES.map((n) => `<th>${n}</th>`).join('') + '</tr>'
-    const rows = init.A.map(
-      (row, i) =>
-        `<tr><th>${MATRIX_NAMES[i]}</th>` +
-        row.map((a) => `<td style="background:${cellColor(a)}">${a.toFixed(2)}</td>`).join('') +
-        '</tr>',
-    ).join('')
-    matrixEl.innerHTML = head + rows
+    matrixEl.innerHTML =
+      head +
+      init.A.map((row, i) => `<tr><th>${MATRIX_NAMES[i]}</th>` + row.map((a, j) => matrixCell(i, j, a)).join('') + '</tr>').join('')
+    for (const td of Array.from(matrixEl.querySelectorAll<HTMLTableCellElement>('td[data-i]'))) {
+      const i = Number(td.dataset.i)
+      const j = Number(td.dataset.j)
+      td.addEventListener('pointerdown', (e) => {
+        e.preventDefault()
+        td.setPointerCapture(e.pointerId)
+        const startY = e.clientY
+        const startV = init.A[i][j]
+        const move = (ev: PointerEvent) => setCell(i, j, startV - (ev.clientY - startY) / 60)
+        const up = () => {
+          td.removeEventListener('pointermove', move)
+          td.removeEventListener('pointerup', up)
+        }
+        td.addEventListener('pointermove', move)
+        td.addEventListener('pointerup', up)
+      })
+      td.addEventListener('keydown', (e) => {
+        const step = init.quantized ? 0.25 : 0.05
+        if (e.key === 'ArrowUp') setCell(i, j, init.A[i][j] + step)
+        else if (e.key === 'ArrowDown') setCell(i, j, init.A[i][j] - step)
+        else if (/^-?[0-9.]$/.test(e.key)) {
+          const typed = prompt(`${MATRIX_NAMES[i]} × ${MATRIX_NAMES[j]} (-1 … 1)`, String(init.A[i][j]))
+          if (typed !== null && Number.isFinite(Number(typed))) setCell(i, j, Number(typed))
+        }
+      })
+      td.addEventListener('dblclick', () => {
+        const typed = prompt(`${MATRIX_NAMES[i]} × ${MATRIX_NAMES[j]} (-1 … 1)`, String(init.A[i][j]))
+        if (typed !== null && Number.isFinite(Number(typed))) setCell(i, j, Number(typed))
+      })
+    }
+
     const patchy = init.foodMode === 'patchy' ? ` · ${init.n_patch} patches, r=${init.r_patch}, drift ${init.v_patch}` : ''
     const items: [string, string][] = [
-      ['temperature', String(init.T)],
       ['food', `${init.foodMode} (${FOOD_BLURB[init.foodMode]})${patchy}`],
       ['food every', `${init.T_food} ticks${init.food_batch > 1 ? ` × ${init.food_batch}` : ''} (up to ${init.max_food} in the world)`],
       ['organism every', `${init.T_spawn} ticks${init.spawn_batch > 1 ? ` × ${init.spawn_batch}` : ''} (brain weights random each time)`],
@@ -129,12 +196,33 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     for (const input of countInputs) {
       if (document.activeElement !== input) input.value = String(init[input.dataset.k as CountKey])
     }
+    for (const key of checks) q<HTMLInputElement>('#' + key).checked = init[key]
+    if (document.activeElement !== tempEl) tempEl.value = String(init.T)
+    if (document.activeElement !== decayEl) decayEl.value = (init.decay_free * 100).toFixed(2)
+    threadsEl.value = String(perf.threads)
+    gpuEl.checked = perf.gpu
+    renderStability()
+    sync()
   }
 
-  function resetSeed(s: number): void {
-    seed = s
-    base = initFromSeed(seed, scale)
-    for (const c of COUNTS) delete overrides[c.key]
+  /** Shows whether the world is inside its discrete-time budgets (see PLAN.md section 1). */
+  function renderStability(): void {
+    const s = stability(init)
+    const pct = (v: number) => `${Math.round(v * 100)}%`
+    q('#stab').innerHTML =
+      `<b class="${s.ok ? 'ok' : 'warn'}">${s.ok ? 'stable' : 'unstable'}</b> ` +
+      `<span class="dim">Brownian step ${s.sigma.toFixed(2)} = ${pct(s.sigmaRatio)} of a particle radius · ` +
+      `force step ${pct(s.forceRatio)} · temperature ${pct(s.tempRatio)} of one bond` +
+      (s.ok ? '' : ' — structures will not hold; lower the temperature') +
+      '</span>'
+  }
+
+  function sync(): void {
+    writeHash(init, perf)
+  }
+
+  function resetSeed(seed: number, scale = init.scale): void {
+    init = initFromSeed(Math.floor(seed), scale)
     render()
   }
 
@@ -143,12 +231,54 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     const n = Number(seedEl.value)
     if (Number.isFinite(n) && seedEl.value.trim() !== '') resetSeed(Math.floor(n))
   })
+
+  q('#export').addEventListener('click', () => {
+    download(`cell-life-${init.seed}-${init.scale}x.json`, configText(init, perf))
+    ioEl.textContent = 'downloaded'
+  })
+  q('#copy').addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(configText(init, perf))
+      ioEl.textContent = 'copied'
+    } catch {
+      pasteEl.hidden = false
+      pasteEl.value = configText(init, perf)
+      ioEl.textContent = 'copy from the box'
+    }
+  })
+  const applyConfig = (text: string): void => {
+    try {
+      const parsed = parseConfig(text)
+      init = parsed.init
+      if (parsed.perf) Object.assign(perf, parsed.perf)
+      pasteEl.hidden = true
+      ioEl.textContent = 'imported'
+      render()
+    } catch (e) {
+      ioEl.textContent = `could not read that: ${(e as Error).message}`
+    }
+  }
+  q('#importBtn').addEventListener('click', () => {
+    if (pasteEl.hidden) {
+      pasteEl.hidden = false
+      pasteEl.value = ''
+      pasteEl.focus()
+      ioEl.textContent = 'paste, then press Import again — or pick a file'
+      q<HTMLInputElement>('#file').click()
+    } else if (pasteEl.value.trim()) applyConfig(pasteEl.value)
+    else pasteEl.hidden = true
+  })
+  q<HTMLInputElement>('#file').addEventListener('change', async (e) => {
+    const f = (e.target as HTMLInputElement).files?.[0]
+    if (f) applyConfig(await f.text())
+  })
+
   addEventListener('keydown', (e) => {
     if (root.hidden) return
-    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement
-    if (e.key === 'Enter') {
+    const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement
+    if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
       ;(document.activeElement as HTMLElement | null)?.blur()
-      onStart(current(), { ...perf })
+      onStart(init, { ...perf })
     } else if ((e.key === 'r' || e.key === 'R') && !typing) resetSeed(Math.floor(Math.random() * 1e9))
   })
 

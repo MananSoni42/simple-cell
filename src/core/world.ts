@@ -1,7 +1,7 @@
 import { type ForceBackend, serialBackend } from './backend'
 import { type KernelArrays, type KernelParams } from './forcekernel'
-import { LifeTracker } from './lifestats'
-import { type Init, type Laws, LAWS } from './params'
+import { LifeTracker, RollingMean } from './lifestats'
+import { type Init, type Laws, LAWS, applyQuantization } from './params'
 import { Rng } from './rng'
 import { BRAIN, FOOD, N_MATRIX } from './types'
 
@@ -166,6 +166,14 @@ export class World {
   private wasLive: Uint8Array
   readonly lifeParticles = new LifeTracker()
   readonly lifeOrganisms = new LifeTracker()
+  readonly lifeParticlesWindow: RollingMean
+  readonly lifeOrganismsWindow: RollingMean
+  /** Lineage: a spawned organism founds one; its descendants inherit the id. */
+  readonly lineage: Int32Array
+  readonly children: Int32Array
+  private nextLineage = 1
+  nClamped = 0 // how often the per-tick step guardrail has had to bite
+  nSteps = 0
   readonly initialEnergy: number
 
   // particle state (struct of arrays)
@@ -210,7 +218,15 @@ export class World {
     const L = this.L
 
     this.A = new Float64Array(buffer(8 * N_MATRIX * N_MATRIX, opts.shared ?? false))
-    for (let i = 0; i < N_MATRIX; i++) for (let j = 0; j < N_MATRIX; j++) this.A[i * N_MATRIX + j] = init.A[i][j]
+    const Araw = init.quantized ? applyQuantization(init.A.map((r) => r.slice())) : init.A
+    const food = N_MATRIX - 1
+    for (let i = 0; i < N_MATRIX; i++) {
+      for (let j = 0; j < N_MATRIX; j++) {
+        // food couples more weakly than matter does, which biases chemistry toward structure
+        const w = i === food || j === food ? this.L.food_coupling : 1
+        this.A[i * N_MATRIX + j] = w * Araw[i][j]
+      }
+    }
 
     this.continuous = init.inflow
     const brainCap = this.continuous ? init.n_brain * 3 : init.n_brain
@@ -237,6 +253,8 @@ export class World {
     this.gen = new Int32Array(n)
     this.parent = new Int32Array(n).fill(-1)
     this.repCool = new Int16Array(n)
+    this.lineage = new Int32Array(n)
+    this.children = new Int32Array(n)
     this.since = new Int32Array(n)
     this.wasLive = new Uint8Array(n)
     this.limbs = new Int32Array(n * 4).fill(-1)
@@ -264,13 +282,19 @@ export class World {
       px: g.px, py: g.py, ptype: g.ptype, powner: g.powner, pcell: g.pcell, items: g.items,
       cellStart: g.start, fx: this.fx, fy: this.fy, foodNear: this.foodNear, A: this.A,
     }
-    this.kernelParams = { SIZE: L.SIZE, r_c: L.r_c, beta: L.beta, K_core: L.K_core, nc: g.nc, skipFood: !init.foodMoves }
+    this.kernelParams = {
+      SIZE: L.SIZE, r_c: L.r_c, K_core: L.K_core, r_0: L.beta * L.r_c,
+      r_brain_core: L.r_brain_core, r_brain: L.r_brain, K_brain: L.K_brain,
+      nc: g.nc, skipFood: !init.foodMoves,
+    }
     this.field = new Float64Array(L.fieldN * L.fieldN)
     this.fieldTmp = new Float64Array(L.fieldN * L.fieldN)
     for (let p = 0; p < init.n_patch; p++) {
       this.patches.push({ x: this.rng.next() * L.SIZE, y: this.rng.next() * L.SIZE, h: this.rng.next() * TAU })
     }
 
+    this.lifeParticlesWindow = new RollingMean(L.life_window, L.life_buckets)
+    this.lifeOrganismsWindow = new RollingMean(L.life_window, L.life_buckets)
     this.initialEnergy = this.totalEnergy()
     if (opts.autoSpawn !== false) {
       for (let i = 0; i < init.n_start; i++) this.spawnRandom()
@@ -349,6 +373,8 @@ export class World {
     this.decayFree()
     if (this.continuous) this.freeMatterDecay()
     this.deaths()
+    // before anything can re-endow a slot this tick, so a death-and-rebirth is still two lives
+    this.trackLiveness()
     if (this.init.repro) this.reproduce()
     this.captures()
     this.stepField()
@@ -359,17 +385,53 @@ export class World {
     for (let i = 0; i < this.nMatter; i++) {
       if (this.cool[i] > 0) this.cool[i]--
       if (this.repCool[i] > 0) this.repCool[i]--
-      const live = this.alive[i] && this.energy[i] > 1e-12 ? 1 : 0
-      if (live !== this.wasLive[i]) {
-        if (live) this.since[i] = this.tick
-        else this.lifeParticles.record(this.tick - this.since[i])
-        this.wasLive[i] = live
-      }
     }
   }
 
+  /** Opens and closes particle lifetimes. A life runs from first having energy until running dry. */
+  private trackLiveness(): void {
+    for (let i = 0; i < this.nMatter; i++) {
+      const live = this.alive[i] && this.energy[i] > 1e-12 ? 1 : 0
+      if (live === this.wasLive[i]) continue
+      if (live) this.since[i] = this.tick
+      else {
+        const span = this.tick - this.since[i]
+        this.lifeParticles.record(span)
+        this.lifeParticlesWindow.record(this.tick, span)
+      }
+      this.wasLive[i] = live
+    }
+  }
+
+  /** Starts a fresh life for a slot that is being endowed, closing any previous one. */
+  private beginLife(i: number): void {
+    if (this.wasLive[i] && this.energy[i] > 1e-12) {
+      const span = this.tick - this.since[i]
+      this.lifeParticles.record(span)
+      this.lifeParticlesWindow.record(this.tick, span)
+    }
+    this.since[i] = this.tick
+    this.wasLive[i] = 1
+  }
+
+  /** Guardrail: no particle may move further than d_max in one tick, whatever the forces say. */
+  private clampStep(dx: number, dy: number): [number, number] {
+    const d = Math.hypot(dx, dy)
+    this.nSteps++
+    if (d <= this.L.d_max) return [dx, dy]
+    this.nClamped++
+    const k = this.L.d_max / d
+    return [dx * k, dy * k]
+  }
+
+  /** A Brownian draw, clamped to z_max sigma so a rare tail cannot teleport a particle. */
+  private kick(): number {
+    const z = this.rng.gauss()
+    return Math.min(this.L.z_max, Math.max(-this.L.z_max, z))
+  }
+
   private integrate(): void {
-    const { L, x, y, fx, fy, owner, alive, theta, rng } = this
+    const { L, x, y, fx, fy, owner, alive, theta } = this
     const mu = L.mu
     const sn = Math.sqrt(2 * mu * this.init.T)
 
@@ -377,8 +439,9 @@ export class World {
     for (let i = 0; i < this.cap; i++) {
       if (!alive[i] || owner[i] !== -1) continue
       if (!foodMoves && this.type[i] === FOOD) continue
-      x[i] = this.wrap(x[i] + mu * fx[i] + sn * rng.gauss())
-      y[i] = this.wrap(y[i] + mu * fy[i] + sn * rng.gauss())
+      const [sx, sy] = this.clampStep(mu * fx[i] + sn * this.kick(), mu * fy[i] + sn * this.kick())
+      x[i] = this.wrap(x[i] + sx)
+      y[i] = this.wrap(y[i] + sy)
     }
 
     for (let b = this.nIntr; b < this.nMatter; b++) {
@@ -394,12 +457,54 @@ export class World {
         const tangent = -fx[l] * ey + fy[l] * ex
         bx += radial * ex // a rigid rod passes its radial load to the brain
         by += radial * ey
-        const th = theta[l] + (mu * tangent + sn * rng.gauss()) / L.L_rod
-        theta[l] = Math.min(this.quadHi(s), Math.max(this.quadLo(s), th))
+        let dth = (mu * tangent + sn * this.kick()) / L.L_rod
+        dth = Math.min(L.dth_max, Math.max(-L.dth_max, dth))
+        theta[l] = Math.min(this.quadHi(s), Math.max(this.quadLo(s), theta[l] + dth))
       }
-      x[b] = this.wrap(x[b] + mu * bx + sn * rng.gauss())
-      y[b] = this.wrap(y[b] + mu * by + sn * rng.gauss())
+      const [bsx, bsy] = this.clampStep(mu * bx + sn * this.kick(), mu * by + sn * this.kick())
+      x[b] = this.wrap(x[b] + bsx)
+      y[b] = this.wrap(y[b] + bsy)
       this.placeLimbs(b)
+    }
+    this.separateBrains()
+  }
+
+  /**
+   * Enforces the minimum separation between organisms as a constraint rather than a force.
+   * Repulsion alone cannot guarantee it: a limb pulling toward a neighbour drags its own brain
+   * inward, and the step clamp then carries it there. So after integrating, any two brains
+   * closer than r_brain are pushed apart along their separation. Organisms can still touch —
+   * through their limbs, which is the point.
+   */
+  private separateBrains(): void {
+    const { L, x, y, grid } = this
+    const want = L.r_brain
+    for (let pass = 0; pass < 2; pass++) {
+      let moved = false
+      for (let b = this.nIntr; b < this.nMatter; b++) {
+        if (!this.alive[b] || !this.isBrain(b)) continue
+        const n = grid.near(x[b], y[b])
+        for (let k = 0; k < n; k++) {
+          const o = grid.buf[k]
+          if (o <= b || o < this.nIntr || !this.alive[o] || !this.isBrain(o)) continue
+          const dx = this.minImage(x[o] - x[b])
+          const dy = this.minImage(y[o] - y[b])
+          const d = Math.hypot(dx, dy)
+          if (d >= want) continue
+          // degenerate overlap: pick an arbitrary axis so the pair still separates
+          const ux = d > 1e-9 ? dx / d : 1
+          const uy = d > 1e-9 ? dy / d : 0
+          // bounded like every other motion, so separation converges over a few ticks
+          const push = Math.min((want - d) / 2, L.d_max)
+          x[b] = this.wrap(x[b] - ux * push)
+          y[b] = this.wrap(y[b] - uy * push)
+          x[o] = this.wrap(x[o] + ux * push)
+          y[o] = this.wrap(y[o] + uy * push)
+          moved = true
+        }
+      }
+      if (!moved) break
+      for (let b = this.nIntr; b < this.nMatter; b++) if (this.alive[b] && this.isBrain(b)) this.placeLimbs(b)
     }
   }
 
@@ -507,11 +612,12 @@ export class World {
       this.mvx[b] = L.F_max * Math.tanh(yout[4])
       this.mvy[b] = L.F_max * Math.tanh(yout[5])
 
+      // softmax over all four outputs (R5.2): a share allocated to an empty socket simply
+      // stays in the brain, so "hoard by addressing a missing limb" is a usable strategy
       let zmax = -Infinity
-      for (let s = 0; s < 4; s++) if (this.limbs[b * 4 + s] >= 0) zmax = Math.max(zmax, yout[s])
-      if (zmax === -Infinity) continue
+      for (let s = 0; s < 4; s++) zmax = Math.max(zmax, yout[s])
       let z = 0
-      for (let s = 0; s < 4; s++) if (this.limbs[b * 4 + s] >= 0) z += Math.exp(yout[s] - zmax)
+      for (let s = 0; s < 4; s++) z += Math.exp(yout[s] - zmax)
       const release = L.releaseFrac * energy[b]
       for (let s = 0; s < 4; s++) {
         const l = this.limbs[b * 4 + s]
@@ -542,7 +648,7 @@ export class World {
         const l = this.limbs[b * 4 + s]
         if (l < 0) continue
         this.pay(l, L.c_up)
-        this.pay(l, L.c_sig * Math.max(0, this.sig[l]))
+        this.pay(l, L.c_sig * Math.abs(this.sig[l]))
       }
     }
   }
@@ -567,6 +673,8 @@ export class World {
     this.burned += this.energy[i]
     this.energy[i] = 0
     this.alive[i] = 0
+    this.cool[i] = this.L.cooldown // a dead slot waits as long as an unbound limb does
+    this.sig[i] = 0
   }
 
   /** Continuous-inflow worlds: free matter pays upkeep too and vanishes at zero energy. */
@@ -584,6 +692,8 @@ export class World {
     this.owner[l] = -1
     this.socket[l] = -1
     this.cool[l] = this.L.cooldown
+    this.sig[l] = 0 // otherwise the next socket to capture it deposits this, unpaid for
+    this.msg[l] = 0
   }
 
   private deaths(): void {
@@ -598,6 +708,7 @@ export class World {
         if (this.continuous) this.kill(b)
         this.nDeaths++
         this.lifeOrganisms.record(this.tick - this.bornAt[b])
+        this.lifeOrganismsWindow.record(this.tick, this.tick - this.bornAt[b])
         this.recordAge = Math.max(this.recordAge, this.tick - this.bornAt[b])
         this.wLimb[b] = undefined
         this.wBrain[b] = undefined
@@ -633,7 +744,8 @@ export class World {
           if (err >= bestErr) continue
           let phi = Math.atan2(dy, dx)
           if (phi < 0) phi += TAU
-          if (Math.min(3, Math.floor(phi / HALF_PI)) !== s) continue
+          // must lie inside the socket's quadrant proper, not in the gap between quadrants
+          if (phi < this.quadLo(s) || phi > this.quadHi(s)) continue
           best = j
           bestErr = err
           bestAngle = phi
@@ -703,6 +815,43 @@ export class World {
     return [rng.next() * S, rng.next() * S]
   }
 
+  /** Squared distance to the nearest live brain, on the torus. */
+  private brainGap2(px: number, py: number, ignore = -1): number {
+    let best = Infinity
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      if (b === ignore || !this.alive[b] || !this.isBrain(b)) continue
+      const dx = this.minImage(this.x[b] - px)
+      const dy = this.minImage(this.y[b] - py)
+      best = Math.min(best, dx * dx + dy * dy)
+    }
+    return best
+  }
+
+  /**
+   * A spot at least `r_brain` from every existing organism. Bodies must never be placed
+   * overlapping: the repulsion can only separate them a few units per tick, so an overlapping
+   * spawn would stay tangled for a long time.
+   */
+  private freeSpot(tries = 24): [number, number] {
+
+    const want = this.L.r_brain * this.L.r_brain
+    let bx = 0
+    let by = 0
+    let bestGap = -1
+    for (let t = 0; t < tries; t++) {
+      const px = this.rng.next() * this.L.SIZE
+      const py = this.rng.next() * this.L.SIZE
+      const gap = this.brainGap2(px, py)
+      if (gap >= want) return [px, py]
+      if (gap > bestGap) {
+        bestGap = gap
+        bx = px
+        by = py
+      }
+    }
+    return [bx, by] // crowded world: take the roomiest spot we saw
+  }
+
   injectFood(): boolean {
     if (this.freeFood.length === 0) return false
     const [px, py] = this.samplePoint()
@@ -733,6 +882,11 @@ export class World {
     this.wBrain[b] = spec.wBrain ?? Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
     this.gen[b] = spec.gen ?? 0
     this.parent[b] = spec.parent ?? -1
+    this.children[b] = 0
+    if (spec.parent !== undefined && spec.parent >= 0) {
+      this.lineage[b] = this.lineage[spec.parent]
+      this.children[spec.parent]++
+    } else this.lineage[b] = this.nextLineage++
     this.repCool[b] = this.L.repro_cooldown
     for (const { idx, quad, angle } of spec.limbs) {
       this.owner[idx] = b
@@ -778,7 +932,7 @@ export class World {
       let pick = -1
       for (let i = 0; i < this.nIntr && pick < 0; i++) {
         if (taken.has(i)) continue
-        const open = this.continuous ? !this.alive[i] : this.owner[i] === -1 && this.type[i] === w.type && this.cool[i] === 0
+        const open = this.continuous ? !this.alive[i] && this.cool[i] === 0 : this.owner[i] === -1 && this.type[i] === w.type && this.cool[i] === 0
         if (open) pick = i
       }
       if (pick < 0) continue
@@ -789,19 +943,41 @@ export class World {
     }
     if (limbs.length === 0 || this.energy[b] < cost + L.E_hold) return
 
-    const a = rng.next() * TAU
+    // place the child clear of every other body, preferring the parent's own neighbourhood
+    let cx = 0
+    let cy = 0
+    let bestGap = -1
+    for (let t = 0; t < 16; t++) {
+      const a = rng.next() * TAU
+      const px = this.wrap(this.x[b] + L.repro_dist * Math.cos(a))
+      const py = this.wrap(this.y[b] + L.repro_dist * Math.sin(a))
+      const gap = this.brainGap2(px, py, b)
+      if (gap >= L.r_brain * L.r_brain) {
+        cx = px
+        cy = py
+        bestGap = Infinity
+        break
+      }
+      if (gap > bestGap) {
+        bestGap = gap
+        cx = px
+        cy = py
+      }
+    }
+    if (bestGap < L.r_brain * L.r_brain * 0.25) return // nowhere to put it: wait
     const sigma = this.init.repro_mut
     const mutate = (w: Float64Array) => Float64Array.from(w, (v) => v + sigma * rng.gauss())
     for (const idx of [childBrain, ...limbs.map((l) => l.idx)]) {
       this.alive[idx] = 1
       const add = Math.max(0, L.E_birth - this.energy[idx])
+      if (add > 0) this.beginLife(idx)
       this.energy[idx] += add
       this.energy[b] -= add
     }
     this.placeOrganism({
       brain: childBrain,
-      x: this.x[b] + L.repro_dist * Math.cos(a),
-      y: this.y[b] + L.repro_dist * Math.sin(a),
+      x: cx,
+      y: cy,
       limbs,
       wLimb: mutate(this.wLimb[b]!),
       wBrain: mutate(this.wBrain[b]!),
@@ -815,13 +991,14 @@ export class World {
   /** Tops a particle's reserve up to E_init. Energy created here is counted as injected. */
   private endow(i: number): void {
     const add = Math.max(0, this.L.E_init - this.energy[i])
+    if (add > 0) this.beginLife(i)
     this.energy[i] += add
     this.injected += add
   }
 
   /** Spawns one organism at a random place with 1-4 random limbs. Returns false if matter is short. */
   spawnRandom(): boolean {
-    const { rng, L } = this
+    const { rng } = this
     const brains: number[] = []
     const open = (i: number) => (this.continuous ? !this.alive[i] : this.owner[i] === -1)
     for (let b = this.nIntr; b < this.nMatter; b++) if (open(b)) brains.push(b)
@@ -849,12 +1026,8 @@ export class World {
       this.alive[idx] = 1
       this.endow(idx)
     }
-    this.placeOrganism({
-      brain,
-      x: rng.next() * L.SIZE,
-      y: rng.next() * L.SIZE,
-      limbs,
-    })
+    const [sx, sy] = this.freeSpot()
+    this.placeOrganism({ brain, x: sx, y: sy, limbs })
     return true
   }
 }

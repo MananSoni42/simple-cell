@@ -41,6 +41,15 @@ into static structure. **Temperature `T`** (Brownian jitter, R2.2) is what keeps
 alive: it lets structures anneal, melt, and reform. `T` is the single most
 consequential dial in the world.
 
+**R1.4a — Quantized bonds.** The non-food 4×4 block is snapped to
+`{−1, −0.5, −0.25, 0, 0.25, 0.5, 1}` by default (`quantized`). This is not a stability measure —
+the magnitudes are unchanged — it makes chemistries repeatable and comparable, and the matrix
+editable by eye. The Food row stays continuous.
+
+**R1.4b — Food couples at half strength.** Every Food entry is multiplied by
+`food_coupling = 0.5` at force time, biasing the world toward particle-to-particle structure
+rather than food-chasing. The matrix itself stays uniform in `[-1, 1]`.
+
 **R1.4** `Food` has a row in `A`. A type with `A[t][Food] > 0` is a mouth; a type
 with `A[t][Food] < 0` is a wall food cannot cross. Eating and selective permeability
 are consequences of chemistry, not special-cased code.
@@ -56,10 +65,18 @@ are consequences of chemistry, not special-cased code.
 core fraction `β`:
 
 ```
-u < β       →   F = K_core · (u/β − 1)                            [always repulsive]
-β ≤ u ≤ 1   →   F = A[i][j] · (1 − |2u − 1 − β| / (1 − β))        [tent, peak at u = (1+β)/2]
-u > 1       →   F = 0
+r < r_core  →   F = K · (r/r_core − 1)                            [always repulsive]
+r_core ≤ r ≤ r_c → F = A[i][j] · (1 − |2u − 1 − β| / (1 − β))     [tent, u = r/r_c, β = r_core/r_c]
+r > r_c     →   F = 0
 ```
+
+`r_core` depends on the pair, because a brain carries a body:
+
+| pair | exclusion radius | strength |
+|---|---|---|
+| two ordinary particles | `r_0 = β·r_c = 10` | `K_core` |
+| one of them a brain | `r_brain_core = 8` | `K_brain` |
+| **both brains** | `r_brain = 16` | `K_brain` |
 
 Positive `F` attracts. Force acts along the minimum-image separation vector. Two
 terms with two distinct jobs:
@@ -79,6 +96,26 @@ x ← x + μ·F·dt + sqrt(2·μ·T·dt)·N(0,1)    then wrap into [0, SIZE)
 ```
 
 Bound limbs are not integrated independently; see R3.3–R3.4.
+
+**R2.4 — Motion budget (discrete-time guardrail).** Time is discrete, so a step long enough to
+cross a particle would defeat exclusion entirely. Three hard bounds, every tick:
+
+- forces and noise move any particle at most `d_max = 5`, half a core radius — direction is kept,
+  only the length is cut;
+- a Brownian draw is clamped to `z_max = 3` sigma, so no rare tail can teleport anything;
+- a rod swings at most `dth_max = 0.25` rad.
+
+A brain may then be pushed up to `d_max` further by R2.5. So a free particle moves ≤ 5 (well
+inside `r_0 = 10`: **nothing can tunnel**), a brain ≤ 10, and a limb ≤ 14 as it both rides its
+brain and swings. The clamp is meant to be a backstop: the stats panel reports how often it
+bites, and if that is more than a few percent the world is too hot (R1.3).
+
+**R2.5 — Organisms keep their distance.** After integrating, any two brains closer than
+`r_brain` are pushed apart along their separation (at most `d_max` per tick each). This is a
+*constraint*, not a force, because repulsion alone cannot hold: a limb attracted to a neighbour
+drags its own brain inward and the step clamp carries it there. New organisms are also placed
+`r_brain` clear of every existing body — an overlapping spawn would stay tangled for hundreds of
+ticks. Organisms can still touch and bond: through their limbs, which is the point.
 
 **R2.3 — Who feels whom.** All pairs within `r_c` interact, with two exceptions:
 
@@ -322,8 +359,12 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `dt` | 1 | tick |
 | `mu` | 0.5 | mobility |
 | `r_c` | 40 | interaction cutoff |
-| `beta` | 0.1 | core fraction → `r_0 = 4` |
+| `beta` | 0.25 | core fraction → `r_0 = 10` |
 | `K_core` | 3.0 | hard-core strength; must exceed `max|A| = 1` |
+| `r_brain_core` · `r_brain` · `K_brain` | 8 · 16 · 12 | a brain's body radius against anything, against another brain, and its strength |
+| `food_coupling` | 0.5 | scales every Food row/column entry |
+| `d_max` · `dth_max` · `z_max` | 5 · 0.25 · 3 | motion budget (R2.4) |
+| `life_window` · `life_buckets` | 10000 · 100 | trailing window for mean-lifespan reporting |
 | `L_rod` | 16 | rod length |
 | `gap` | 0.12 rad | angular gap between quadrants (≈7°) |
 | `r_bind` | 6 | socket capture tolerance around the rod circle |
@@ -351,7 +392,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | | | |
 |---|---|---|
 | `A` | uniform in `[-1, 1]`, symmetric, `Food×Food = 0` | the chemistry; the main dial |
-| `T` | log-uniform `1 … 40` | temperature |
+| `T` | log-uniform `1 … 4` | temperature. Capped by the R2.4 budget: `sqrt(2·μ·T)` must stay under a fifth of `r_0`. Hotter worlds can be typed in and are flagged on the start screen; a true gas phase needs sub-stepping, which we have not built |
 | `foodMode` | `random` · `patchy` · `gradient` | see below |
 | `T_food` | 2 … 6 | ticks between food injections |
 | `T_spawn` | 60 … 140 | ticks between organism spawns |
@@ -365,6 +406,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `foodMoves` | off | food drifts and responds to forces. **Editable** |
 | `repro` · `repro_mut` | on · 0.05 | budding (R7.7) and mutation std. **Editable** (on/off) |
 | `inflow` | off | continuous organism inflow (R7.6). **Editable** |
+| `quantized` | on | snap the 4×4 to the bond set (R1.4a). **Editable** |
 | `n_patch, r_patch, v_patch` | 1…3, 35…65, 0.05…0.2 | only for `patchy` |
 
 **Food modes.** All three place one Food particle per injection; they differ only in
@@ -376,9 +418,18 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
   following the food.
 - **gradient** — density `∝ ((1 + cos(2πx/SIZE))/2)²`: one sunlit band along x.
 
-**Stability constraint.** Overdamped Euler is stable while `μ·|F|_max·dt ≪ r_0`.
-With these numbers, `μ·K_core·dt = 1.5` against `r_0 = 4`. Raising `μ` or `K_core`
-without lowering `dt` lets particles tunnel through each other.
+**Stability budget.** Three quantities have to hold at once, and the start screen shows all
+three, amber when one is breached:
+
+```
+noise step    sqrt(2·μ·T)   ≤ 0.2 · r_0     (T ≤ ~4)
+force step    μ·K_core      ≤ 0.35 · r_0
+structure     T             ≤ bond depth ≈ r_c·(1−β)/2 = 15
+```
+
+Before this was enforced, mid-range temperatures moved particles further than their own
+diameter on about half of all ticks: exclusion failed, brains sat 0.3 units apart, and nothing
+stayed assembled. R2.4 and R2.5 are the enforcement; this table is the budget.
 
 ---
 
@@ -388,8 +439,15 @@ without lowering `dt` lets particles tunnel through each other.
 all read-only: the chemistry is frozen. Two kinds of input:
 
 - the **seed** (type one, or press `R` to re-roll), which fixes everything above;
-- the **starting population** — particles, brains, organisms at start, food at start.
-  These default from the seed and can be overridden; changing the seed resets them.
+- the **starting population** — particles, brains, organisms at start, food at start;
+- the **chemistry matrix** itself: drag a cell vertically, use the arrow keys, or double-click to
+  type. Edits mirror across the diagonal (the matrix is symmetric by law), clamp to `[-1, 1]`,
+  and snap to the bond set while `quantized` is on. Food×Food stays 0;
+- **temperature** and **free-particle decay**, with the stability budget shown live;
+- **export / import**: download the config as JSON, copy it, or load one back. The whole config
+  also lives in the URL hash, so a world is a link.
+
+All of these default from the seed; re-rolling or retyping the seed resets them.
 
 **World options** (all editable): scale, reproduction, food drifts, continuous inflow.
 
@@ -407,16 +465,18 @@ all read-only: the chemistry is frozen. Two kinds of input:
   `.` single-steps.
 - **Camera:** wheel zooms about the cursor (up to 80×), drag pans, double-click resets.
   Only what is on screen is drawn, and particles smaller than a pixel become dots.
-- **Lifetimes** in the stats panel: for particles and for organisms, the ages of those
-  alive now and the completed lifespans of those that died, as
-  `min / median / mean / p90 / max`. A particle is *live* while it is active with
-  reserve `> 0`: it starts when it is spawned or refed from empty, and ends when it
-  runs dry or is removed. For completed lifespans, count, mean, min and max are exact;
-  median and p90 use the most recent 4096.
+- **Mean lifespan** as a two-line graph — particles and organisms — of the average completed
+  lifespan per bucket over a trailing `life_window` (10k ticks, 100 buckets). Gaps are left
+  where nothing died in a bucket rather than bridged. The all-time
+  `min / median / mean / p90 / max` is printed underneath. A particle is *live* while it is
+  active with reserve `> 0`: a life starts when it is spawned or refed from empty and ends when
+  it runs dry, and a slot that dies and is reborn in the same tick counts as two lives.
+- **Lineages**: a spawned organism founds a lineage and its descendants inherit it. The panel
+  shows lineages alive, the biggest one, children produced, the most by any one organism, and
+  the oldest and record ages.
 - **Stats panel** with sparklines for organisms, food and total energy, plus: born /
-  died / oldest / record lifespan, limbs per organism, the energy split (in organisms,
-  in free particles, in food) and cumulative burned, and the largest connected cluster
-  (particles touching, `r < 2.5 r_0`, with a brain always joined to its limbs).
+  died / budded, free matter, limbs per organism, the energy split (in organisms, in free
+  particles, in food), cumulative burned, and how often the motion clamp bit
 - **Rendering:** flat shapes only — circles for P1–P4 (coral, amber, mint, blue), a
   square for a brain, a lime diamond for food. Free particles are smaller and
   translucent. Each organism has a thick rod per limb and a faint disc marking its

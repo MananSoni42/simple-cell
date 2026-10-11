@@ -6,10 +6,21 @@ export const LAWS = {
   SIZE: 300,
   mu: 0.5, // mobility
   r_c: 40, // interaction cutoff
-  beta: 0.1, // hard-core fraction -> r_0 = beta * r_c
+  beta: 0.25, // hard-core fraction -> r_0 = beta * r_c = 10
   K_core: 3,
   L_rod: 16,
   gap: 0.12, // angular gap between quadrants (rad)
+  r_brain_core: 8, // a brain's exclusion radius against any particle
+  r_brain: 16, // brain-against-brain exclusion: organisms may only touch through limbs
+  K_brain: 12,
+  food_coupling: 0.5, // scales every Food row/column entry, biasing chemistry toward structure
+  // Hardest guardrail: half a core radius under a particle's own motion, so it can never
+  // pass through anything. A rod tip may swing up to L_rod * dth_max = 4 on top of riding its
+  // brain, so a limb's worst case is 9 — still inside r_0 = 10. Meant to be a backstop: if it
+  // bites often (the stats panel reports how often), the world is too hot.
+  d_max: 5,
+  dth_max: 0.25,
+  z_max: 3, // Brownian draws are clamped to this many sigma
   r_bind: 6,
   r_eat: 6,
   cooldown: 20, // ticks before an unbound limb can be recaptured
@@ -32,18 +43,32 @@ export const LAWS = {
   repro_dist: 42, // how far from the parent a child appears
   E_birth: 15, // reserve each particle of a budded child starts with
   E_viable: 1, // minimum reserve for a free particle to be captured as a limb
+  life_window: 10000, // lifetime averages are reported over this many trailing ticks
+  life_buckets: 100,
 }
 export type Laws = { [K in keyof typeof LAWS]: number }
 
 export type FoodMode = 'random' | 'patchy' | 'gradient'
 export const FOOD_MODES: readonly FoodMode[] = ['random', 'patchy', 'gradient']
 
-/** Everything the start screen shows. Fully determined by the seed. */
+/** Bond strengths the quantized chemistry can take. */
+export const QUANTA = [-1, -0.5, -0.25, 0, 0.25, 0.5, 1]
+
+export function quantize(a: number): number {
+  let best = QUANTA[0]
+  for (const q of QUANTA) if (Math.abs(q - a) < Math.abs(best - a)) best = q
+  return best
+}
+
+export const clamp11 = (a: number): number => Math.min(1, Math.max(-1, a))
+
+/** Everything the start screen shows. Fully determined by the seed, then editable. */
 export interface Init {
   seed: number
   size: number // world edge length; counts and rates below already include the area scaling
   scale: number
   A: number[][] // N_MATRIX x N_MATRIX, symmetric, Food-Food = 0
+  quantized: boolean // snap the non-food 4x4 to QUANTA
   T: number
   n_intrinsic: number
   n_brain: number
@@ -65,6 +90,28 @@ export interface Init {
   v_patch: number
 }
 
+/** Snaps the non-food block of a matrix to QUANTA, in place, keeping it symmetric. */
+export function applyQuantization(A: number[][]): number[][] {
+  for (let i = 0; i < N_MATRIX - 1; i++) {
+    for (let j = i; j < N_MATRIX - 1; j++) {
+      const q = quantize(A[i][j])
+      A[i][j] = q
+      A[j][i] = q
+    }
+  }
+  return A
+}
+
+/**
+ * How far apart two particles must stay. The matrix governs the mid-range; this is the
+ * universal exclusion, and brains carry a body radius so organisms can only touch through limbs.
+ */
+export function coreRadius(brainA: boolean, brainB: boolean, L: Laws): number {
+  if (brainA && brainB) return L.r_brain
+  if (brainA || brainB) return L.r_brain_core
+  return L.beta * L.r_c
+}
+
 /** `scale` multiplies the world edge; counts and rates scale with area so density stays constant. */
 export function initFromSeed(seed: number, scale = 1): Init {
   const rng = new Rng(seed)
@@ -82,8 +129,12 @@ export function initFromSeed(seed: number, scale = 1): Init {
     seed,
     size: LAWS.SIZE * scale,
     scale,
-    A,
-    T: Math.round(Math.pow(40, rng.next()) * 10) / 10, // 1 .. 40
+    A: applyQuantization(A),
+    quantized: true,
+    // Stability budget: the Brownian step sqrt(2 mu T) must stay under a fifth of the core
+    // radius r_0 = 10, which caps T near 4. Hotter worlds can be typed in, and the start screen
+    // flags them; reaching a genuine gas phase needs sub-stepping (see PLAN.md section 1).
+    T: Math.round(Math.pow(4, rng.next()) * 10) / 10, // 1 .. 4
     n_intrinsic: (30 + rng.int(21)) * area,
     n_brain: 4 * area,
     n_start: (1 + rng.int(2)) * area,
@@ -103,4 +154,31 @@ export function initFromSeed(seed: number, scale = 1): Init {
     r_patch: 35 + rng.int(31),
     v_patch: Math.round(rng.range(0.05, 0.2) * 100) / 100,
   }
+}
+
+/** Diagnostics for the discrete-time budgets, shown on the start screen. */
+export interface Stability {
+  sigma: number // Brownian step per tick
+  sigmaRatio: number // ... as a fraction of the core radius
+  forceRatio: number // worst single-pair force step, same units
+  bondDepth: number // potential depth of one strongest bond
+  tempRatio: number // T / bond depth: structure needs this below ~1
+  ok: boolean
+}
+
+export function stability(init: Init, L: Laws = LAWS): Stability {
+  const r0 = L.beta * L.r_c
+  const sigma = Math.sqrt(2 * L.mu * init.T)
+  const forceStep = L.mu * L.K_core
+  const bondDepth = (L.r_c * (1 - L.beta)) / 2
+  const s: Stability = {
+    sigma,
+    sigmaRatio: sigma / r0,
+    forceRatio: forceStep / r0,
+    bondDepth,
+    tempRatio: init.T / bondDepth,
+    ok: false,
+  }
+  s.ok = s.sigmaRatio <= 0.2 && s.forceRatio <= 0.35 && s.tempRatio <= 1
+  return s
 }

@@ -92,7 +92,12 @@ brain sees food only through whatever the limb neuron chose to encode. Three lev
 
 ---
 
-## 3. Immediate — mechanical, low risk, do now
+## 3. Immediate — DONE (see commit history)
+
+All ten shipped, plus every bug in section 6 except B1's full resolution (which is the medium
+stability item). Measured before and after: per-tick steps now bounded at ~6 regardless of
+temperature (was 34), and the closest brain-to-brain distance went from 0.3 to 15.2 against a
+mandated 16.
 
 | # | Item | Notes |
 |---|---|---|

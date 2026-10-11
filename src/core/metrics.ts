@@ -117,10 +117,17 @@ export interface Census {
   eFood: number
   oldest: number
   maxGen: number
+  /** Lineages with at least one organism alive. */
+  lineages: number
+  /** Organisms in the largest surviving lineage. */
+  biggestLineage: number
+  children: number // children currently-alive organisms have produced
+  maxChildren: number
 }
 
 export function census(w: World): Census {
-  const c: Census = { organisms: 0, limbs: 0, freeMatter: 0, food: w.nFood, eOrganisms: 0, eFree: 0, eFood: 0, oldest: 0, maxGen: 0 }
+  const c: Census = { organisms: 0, limbs: 0, freeMatter: 0, food: w.nFood, eOrganisms: 0, eFree: 0, eFood: 0, oldest: 0, maxGen: 0, lineages: 0, biggestLineage: 0, children: 0, maxChildren: 0 }
+  const perLineage = new Map<number, number>()
   for (let i = 0; i < w.cap; i++) {
     if (!w.alive[i]) continue
     if (w.type[i] === FOOD) c.eFood += w.energy[i]
@@ -130,12 +137,17 @@ export function census(w: World): Census {
         c.organisms++
         c.oldest = Math.max(c.oldest, w.tick - w.bornAt[i])
         c.maxGen = Math.max(c.maxGen, w.gen[i])
+        c.children += w.children[i]
+        c.maxChildren = Math.max(c.maxChildren, w.children[i])
+        perLineage.set(w.lineage[i], (perLineage.get(w.lineage[i]) ?? 0) + 1)
       } else c.limbs++
     } else {
       c.eFree += w.energy[i]
       c.freeMatter++
     }
   }
+  c.lineages = perLineage.size
+  for (const n of perLineage.values()) c.biggestLineage = Math.max(c.biggestLineage, n)
   return c
 }
 
@@ -159,6 +171,12 @@ export interface LifeStats {
   particlesDied: Summary // completed lifespans: from becoming live to running dry or being removed
   organismsNow: Summary
   organismsDied: Summary
+  /** Mean completed lifespan per bucket over the trailing window, oldest to newest. */
+  particlesTrend: Float64Array
+  organismsTrend: Float64Array
+  windowTicks: number
+  windowMeanParticles: number
+  windowMeanOrganisms: number
 }
 
 export function lifeStats(w: World): LifeStats {
@@ -176,5 +194,10 @@ export function lifeStats(w: World): LifeStats {
     particlesDied: w.lifeParticles.summary(),
     organismsNow: summarize(oa, no),
     organismsDied: w.lifeOrganisms.summary(),
+    particlesTrend: w.lifeParticlesWindow.series(w.tick),
+    organismsTrend: w.lifeOrganismsWindow.series(w.tick),
+    windowTicks: w.lifeParticlesWindow.windowTicks,
+    windowMeanParticles: w.lifeParticlesWindow.mean(w.tick),
+    windowMeanOrganisms: w.lifeOrganismsWindow.mean(w.tick),
   }
 }

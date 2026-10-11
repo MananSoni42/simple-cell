@@ -1,5 +1,5 @@
 import { makeBackend, canShare } from '../compute/select'
-import { census, clusterStats, lifeStats } from '../core/metrics'
+import { census, lifeStats } from '../core/metrics'
 import { World } from '../core/world'
 import { H, N_FRAMES, allocFrame, layoutOf, writeFrame, type FrameBuffers } from './frames'
 import type { FromSim, StatsSnapshot, ToSim } from './protocol'
@@ -51,7 +51,7 @@ function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnap
     tps,
     census: census(w),
     life: heavy ? heavy.life : lifeStats(w),
-    cluster: heavy ? heavy.cluster : clusterStats(w),
+    clampedPct: w.nSteps > 0 ? (100 * w.nClamped) / w.nSteps : 0,
     burned: w.burned,
     births: w.nBirths,
     budded: w.nBudded,
