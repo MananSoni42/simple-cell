@@ -1,5 +1,6 @@
 import { type ForceBackend, serialBackend } from './backend'
 import { type KernelArrays, type KernelParams } from './forcekernel'
+import { LifeTracker } from './lifestats'
 import { type Init, type Laws, LAWS } from './params'
 import { Rng } from './rng'
 import { BRAIN, FOOD, N_MATRIX } from './types'
@@ -118,6 +119,11 @@ export class World {
   readonly gen: Int32Array // generation: 0 for spawned organisms, parent + 1 for budded ones
   readonly parent: Int32Array
   readonly repCool: Int16Array
+  /** Tick at which a matter particle last became "live" (alive with energy > 0). */
+  readonly since: Int32Array
+  private wasLive: Uint8Array
+  readonly lifeParticles = new LifeTracker()
+  readonly lifeOrganisms = new LifeTracker()
   readonly initialEnergy: number
 
   // particle state (struct of arrays)
@@ -189,6 +195,8 @@ export class World {
     this.gen = new Int32Array(n)
     this.parent = new Int32Array(n).fill(-1)
     this.repCool = new Int16Array(n)
+    this.since = new Int32Array(n)
+    this.wasLive = new Uint8Array(n)
     this.limbs = new Int32Array(n * 4).fill(-1)
     this.mvx = new Float64Array(n)
     this.mvy = new Float64Array(n)
@@ -204,6 +212,7 @@ export class World {
       const active = i < this.nIntr ? i < init.n_intrinsic : !this.continuous
       this.alive[i] = active ? 1 : 0
       this.energy[i] = active ? L.E_init : 0
+      this.wasLive[i] = active ? 1 : 0
     }
     for (let i = this.cap - 1; i >= this.nMatter; i--) this.freeFood.push(i)
 
@@ -295,6 +304,7 @@ export class World {
     this.uptake()
     this.think()
     this.costs()
+    this.decayFree()
     if (this.continuous) this.freeMatterDecay()
     this.deaths()
     if (this.init.repro) this.reproduce()
@@ -307,6 +317,12 @@ export class World {
     for (let i = 0; i < this.nMatter; i++) {
       if (this.cool[i] > 0) this.cool[i]--
       if (this.repCool[i] > 0) this.repCool[i]--
+      const live = this.alive[i] && this.energy[i] > 1e-12 ? 1 : 0
+      if (live !== this.wasLive[i]) {
+        if (live) this.since[i] = this.tick
+        else this.lifeParticles.record(this.tick - this.since[i])
+        this.wasLive[i] = live
+      }
     }
   }
 
@@ -480,6 +496,21 @@ export class World {
     }
   }
 
+  /** Free particles lose a fraction of their reserve each tick; the loss is burned. */
+  private decayFree(): void {
+    const k = this.init.decay_free
+    if (k <= 0) return
+    for (let i = 0; i < this.nMatter; i++) {
+      if (!this.alive[i] || this.owner[i] !== -1) continue
+      const e = this.energy[i]
+      if (e <= 0) continue
+      let d = e * k
+      if (e - d < 0.01) d = e // snap the tail to zero so particles actually run dry
+      this.energy[i] = e - d
+      this.burned += d
+    }
+  }
+
   /** Deactivates a slot; any residual reserve is burned so the ledger stays exact. */
   private kill(i: number): void {
     this.burned += this.energy[i]
@@ -515,6 +546,7 @@ export class World {
         this.owner[b] = -1
         if (this.continuous) this.kill(b)
         this.nDeaths++
+        this.lifeOrganisms.record(this.tick - this.bornAt[b])
         this.recordAge = Math.max(this.recordAge, this.tick - this.bornAt[b])
         this.wLimb[b] = undefined
         this.wBrain[b] = undefined
@@ -543,7 +575,7 @@ export class World {
         let bestAngle = 0
         for (let k = 0; k < n; k++) {
           const j = grid.buf[k]
-          if (j >= this.nIntr || type[j] === FOOD || owner[j] !== -1 || energy[j] <= 0 || cool[j] > 0) continue
+          if (j >= this.nIntr || type[j] === FOOD || owner[j] !== -1 || energy[j] < L.E_viable || cool[j] > 0) continue
           const dx = this.minImage(x[j] - x[b])
           const dy = this.minImage(y[j] - y[b])
           const err = Math.abs(Math.hypot(dx, dy) - L.L_rod)
@@ -662,7 +694,7 @@ export class World {
 
   /**
    * Budding: a brain holding at least E_repro pays for a child's body (every particle
-   * topped up to E_init) and keeps at least E_hold. The child copies the parent's limb
+   * topped up to E_birth) and keeps at least E_hold. The child copies the parent's limb
    * types and angles, inherits its brain weights plus Gaussian noise, and appears
    * `repro_dist` away. Energy only moves from parent to child, so nothing is injected.
    */
@@ -690,7 +722,7 @@ export class World {
     if (childBrain < 0) return
     const taken = new Set<number>()
     const limbs: OrganismSpec['limbs'] = []
-    let cost = Math.max(0, L.E_init - this.energy[childBrain])
+    let cost = Math.max(0, L.E_birth - this.energy[childBrain])
     for (const w of want) {
       let pick = -1
       for (let i = 0; i < this.nIntr && pick < 0; i++) {
@@ -700,7 +732,7 @@ export class World {
       }
       if (pick < 0) continue
       taken.add(pick)
-      cost += Math.max(0, L.E_init - this.energy[pick])
+      cost += Math.max(0, L.E_birth - this.energy[pick])
       limbs.push({ idx: pick, quad: w.quad, angle: w.angle })
       if (this.continuous) this.type[pick] = w.type
     }
@@ -711,7 +743,7 @@ export class World {
     const mutate = (w: Float64Array) => Float64Array.from(w, (v) => v + sigma * rng.gauss())
     for (const idx of [childBrain, ...limbs.map((l) => l.idx)]) {
       this.alive[idx] = 1
-      const add = Math.max(0, L.E_init - this.energy[idx])
+      const add = Math.max(0, L.E_birth - this.energy[idx])
       this.energy[idx] += add
       this.energy[b] -= add
     }

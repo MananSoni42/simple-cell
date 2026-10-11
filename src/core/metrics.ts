@@ -1,3 +1,4 @@
+import { type Summary, summarize } from './lifestats'
 import { pairPotential } from './forces'
 import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX } from './types'
 import type { World } from './world'
@@ -151,4 +152,29 @@ export function stateHash(w: World): number {
     h = Math.imul(h ^ Math.round(w.energy[i] * 1e6), 16777619)
   }
   return h >>> 0
+}
+
+export interface LifeStats {
+  particlesNow: Summary // ages of matter that is live now (alive with energy > 0)
+  particlesDied: Summary // completed lifespans: from becoming live to running dry or being removed
+  organismsNow: Summary
+  organismsDied: Summary
+}
+
+export function lifeStats(w: World): LifeStats {
+  const pa = new Float64Array(w.nMatter)
+  let np = 0
+  const oa = new Float64Array(w.nMatter - w.nIntr)
+  let no = 0
+  for (let i = 0; i < w.nMatter; i++) {
+    if (!w.alive[i] || w.energy[i] <= 1e-12) continue
+    pa[np++] = w.tick - w.since[i]
+    if (i >= w.nIntr && w.isBrain(i)) oa[no++] = w.tick - w.bornAt[i]
+  }
+  return {
+    particlesNow: summarize(pa, np),
+    particlesDied: w.lifeParticles.summary(),
+    organismsNow: summarize(oa, no),
+    organismsDied: w.lifeOrganisms.summary(),
+  }
 }

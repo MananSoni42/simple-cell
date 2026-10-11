@@ -30,6 +30,8 @@ export const LAWS = {
   E_hold: 20, // reserve a parent must keep after paying for a child
   repro_cooldown: 80,
   repro_dist: 42, // how far from the parent a child appears
+  E_birth: 15, // reserve each particle of a budded child starts with
+  E_viable: 1, // minimum reserve for a free particle to be captured as a limb
 }
 export type Laws = { [K in keyof typeof LAWS]: number }
 
@@ -53,6 +55,7 @@ export interface Init {
   foodMoves: boolean // food drifts and responds to forces; otherwise it stays where it lands
   repro: boolean // budding reproduction
   repro_mut: number // std-dev of weight mutation in children
+  decay_free: number // fraction of its reserve a free particle loses each tick (burned)
   inflow: boolean // continuous organism inflow: new matter is created for each spawn, and all matter is mortal
   foodMode: FoodMode
   T_food: number
@@ -91,6 +94,7 @@ export function initFromSeed(seed: number, scale = 1): Init {
     foodMoves: false,
     repro: true,
     repro_mut: 0.05,
+    decay_free: 0.002,
     inflow: false,
     foodMode: FOOD_MODES[rng.int(FOOD_MODES.length)],
     T_food: 2 + rng.int(5),

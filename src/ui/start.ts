@@ -33,11 +33,12 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
   let scale = 1
   const overrides: Partial<Record<CountKey, number>> = {}
   const flags = { inflow: false, foodMoves: false, repro: true }
+  let decayPct = 0.2 // % of its reserve a free particle loses per tick
   const perf: Perf = { threads: 1, gpu: false }
   let base = initFromSeed(seed, scale)
 
   const current = (): Init => {
-    const init = { ...base, ...overrides, ...flags }
+    const init = { ...base, ...overrides, ...flags, decay_free: decayPct / 100 }
     init.n_brain = Math.min(init.n_brain, init.n_intrinsic)
     init.n_start = Math.min(init.n_start, init.n_brain)
     init.n_food0 = Math.min(init.n_food0, init.max_food)
@@ -61,6 +62,7 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
       <dl id="params"></dl>
       <div class="sub" style="margin-bottom:6px">starting population <span class="dim">(editable)</span></div>
       <div class="counts" id="counts"></div>
+      <div class="row"><label>free particle decay <input type="number" id="decay" min="0" max="10" step="0.05" value="0.2" style="width:80px" /> % of reserve per tick <span class="dim">(0 = off)</span></label></div>
       ${check('repro', 'reproduction', 'organisms holding enough energy bud off a mutated child')}
       ${check('foodMoves', 'food drifts', 'off: food stays where it lands')}
       ${check('inflow', 'continuous organism inflow', 'new particles arrive with every organism, and all matter can die')}
@@ -93,6 +95,8 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     el.checked = flags[key]
     el.addEventListener('change', () => (flags[key] = el.checked))
   }
+  const decayEl = q<HTMLInputElement>('#decay')
+  decayEl.addEventListener('input', () => (decayPct = Math.min(10, Math.max(0, Number(decayEl.value) || 0))))
   const threadsEl = q<HTMLInputElement>('#threads')
   const gpuEl = q<HTMLInputElement>('#gpu')
   threadsEl.addEventListener('input', () => (perf.threads = Math.min(MAX_THREADS, Math.max(1, Math.round(Number(threadsEl.value)) || 1))))

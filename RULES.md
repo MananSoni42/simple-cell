@@ -174,6 +174,7 @@ heat and is recorded as burned:
 | Upkeep | `c_up` per tick, for brains of live organisms and bound limbs. Free particles are inert and pay nothing |
 | Motion | `c_mv · μ · \|F_move\|²`, brains only |
 | Signal | `c_sig · \|sig\|` per emitting particle |
+| Free decay | a free particle loses `decay_free` of its reserve each tick (default 0.2%, half-life ≈ 350 ticks); the tail below 0.01 snaps to zero. Bound particles and food are exempt. Burned, so the ledger stays exact |
 
 **R4.5 — Redistribution.** The brain holds its accumulated reserve and sends a
 fraction `releaseFrac` of it back out along the rods each tick, split by the brain's
@@ -243,7 +244,7 @@ R7.3 lets them finish growing from the soup.
 particle again, in cooldown for `cooldown` ticks. The organism carries on with an empty socket.
 
 **R7.3 — Regeneration.** An empty socket captures any free intrinsic particle with
-energy `> 0`, not in cooldown, lying
+energy `≥ E_viable` (1), not in cooldown, lying
 within its own quadrant and within `r_bind` of the rod circle (`|r − L_rod| <
 r_bind`, measured from the brain). The particle snaps to `L_rod` and the new rod
 takes the angle the particle already had. A socket's capture zone is therefore an
@@ -269,7 +270,7 @@ filling up and freezing once every brain is in use.
 cooldown may reproduce, if it can pay and there is room. The child gets one limb per
 limb the parent currently has, of the same type and angle, taken from free particles of
 that type (pool mode) or from fresh slots (continuous inflow). Every particle of the
-child is topped up to `E_init`, and **that energy is taken from the parent**, who must
+child is topped up to `E_birth` (15), and **that energy is taken from the parent**, who must
 keep at least `E_hold`. Nothing is injected. The child appears `repro_dist` away,
 inherits the parent's brain weights plus Gaussian noise of std `repro_mut`, and
 records `parent` and `generation = parent + 1`. Parent and child wait `repro_cooldown`
@@ -341,7 +342,8 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `lambda` | 0.05 | signal decay |
 | `D_sig` | 0.2 | signal diffusion |
 | `fieldN` | 64 × scale (max 256) | signal grid resolution |
-| `E_repro` · `E_hold` | 60 · 20 | budding threshold; reserve a parent must keep |
+| `E_repro` · `E_hold` · `E_birth` | 60 · 20 · 15 | budding threshold; reserve a parent must keep; reserve each child particle starts with |
+| `E_viable` | 1 | minimum reserve for a free particle to be captured as a limb |
 | `repro_cooldown` · `repro_dist` | 80 · 42 | ticks between buds; child placement distance |
 
 ### Initial conditions — derived from the seed
@@ -359,6 +361,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `n_food0` | 30 | food present at tick 0. **Editable** |
 | `max_food` | 120 | the sun pauses while this much food is in the world |
 | `scale` | 1 | world edge multiplier (1, 2, 4 … 32). Counts × scale², and each injection / spawn event repeats scale² times. **Editable** |
+| `decay_free` | 0.2% / tick | free-particle decay. **Editable** (0 = off) |
 | `foodMoves` | off | food drifts and responds to forces. **Editable** |
 | `repro` · `repro_mut` | on · 0.05 | budding (R7.7) and mutation std. **Editable** (on/off) |
 | `inflow` | off | continuous organism inflow (R7.6). **Editable** |
@@ -404,6 +407,12 @@ all read-only: the chemistry is frozen. Two kinds of input:
   `.` single-steps.
 - **Camera:** wheel zooms about the cursor (up to 80×), drag pans, double-click resets.
   Only what is on screen is drawn, and particles smaller than a pixel become dots.
+- **Lifetimes** in the stats panel: for particles and for organisms, the ages of those
+  alive now and the completed lifespans of those that died, as
+  `min / median / mean / p90 / max`. A particle is *live* while it is active with
+  reserve `> 0`: it starts when it is spawned or refed from empty, and ends when it
+  runs dry or is removed. For completed lifespans, count, mean, min and max are exact;
+  median and p90 use the most recent 4096.
 - **Stats panel** with sparklines for organisms, food and total energy, plus: born /
   died / oldest / record lifespan, limbs per organism, the energy split (in organisms,
   in free particles, in food) and cumulative burned, and the largest connected cluster

@@ -1,4 +1,5 @@
-import { type ClusterStats, census, clusterStats } from '../core/metrics'
+import type { Summary } from '../core/lifestats'
+import { type ClusterStats, type LifeStats, census, clusterStats, lifeStats } from '../core/metrics'
 import type { World } from '../core/world'
 
 const HISTORY = 240
@@ -17,6 +18,7 @@ export class StatsPanel {
   private lastTick = -1
   private cluster: ClusterStats = { mean: 0, max: 0, count: 0 }
   private clusterAt = 0
+  private life: LifeStats | null = null
 
   constructor(root: HTMLElement) {
     root.innerHTML = `
@@ -29,8 +31,10 @@ export class StatsPanel {
       ${this.block('Energy', 'energy', '#ffc145')}
       <div class="sub" id="s-energy-sub"></div>
       <div class="blk"><div class="row"><b>Largest connected</b><i id="s-max"></i></div>
-      <div class="sub" id="s-cluster-sub"></div></div>`
-    for (const id of ['s-tick', 's-rate', 's-world', 's-perf', 's-orgs-sub', 's-energy-sub', 's-max', 's-cluster-sub', 's-orgs', 's-food', 's-energy']) {
+      <div class="sub" id="s-cluster-sub"></div></div>
+      <div class="blk"><div class="row"><b>Lifetimes</b><i class="dim">ticks · min / med / mean / p90 / max</i></div>
+      <div class="sub" id="s-life"></div></div>`
+    for (const id of ['s-tick', 's-rate', 's-world', 's-perf', 's-orgs-sub', 's-energy-sub', 's-max', 's-cluster-sub', 's-life', 's-orgs', 's-food', 's-energy']) {
       this.el[id] = root.querySelector<HTMLElement>('#' + id)!
     }
     for (const [key, color] of [['orgs', '#f4f6fb'], ['food', '#a3e635'], ['energy', '#ffc145']] as const) {
@@ -46,6 +50,7 @@ export class StatsPanel {
     for (const s of this.series) s.data = []
     this.lastTick = -1
     this.clusterAt = 0
+    this.life = null
   }
 
   update(w: World, rateLabel: string, perf = ''): void {
@@ -53,6 +58,7 @@ export class StatsPanel {
     const now = performance.now()
     if (now - this.clusterAt > 700) {
       this.cluster = clusterStats(w)
+      this.life = lifeStats(w)
       this.clusterAt = now
     }
     if (w.tick !== this.lastTick) {
@@ -77,6 +83,12 @@ export class StatsPanel {
     set('s-energy-sub', `organisms ${c.eOrganisms.toFixed(0)} · free ${c.eFree.toFixed(0)} · food ${c.eFood.toFixed(0)} · burned ${w.burned.toFixed(0)}`)
     set('s-max', `${this.cluster.max}`)
     set('s-cluster-sub', `mean ${this.cluster.mean.toFixed(1)} · clusters ${this.cluster.count} · free matter ${c.freeMatter}`)
+    if (this.life) {
+      const f = (label: string, s: Summary) =>
+        s.n === 0 ? `${label}: –` : `${label} (${s.n}): ${[s.min, s.median, s.mean, s.p90, s.max].map((v) => Math.round(v)).join(' / ')}`
+      const l = this.life
+      this.el['s-life'].innerHTML = [f('particles live', l.particlesNow), f('particles ran dry', l.particlesDied), f('organisms live', l.organismsNow), f('organisms died', l.organismsDied)].join('<br>')
+    }
     for (const s of this.series) this.spark(s)
   }
 

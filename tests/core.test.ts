@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pairForce, pairPotential } from '../src/core/forces'
-import { census, clusterStats, meanClusterSize, massByType, potentialEnergy, stateHash } from '../src/core/metrics'
+import { LifeTracker, summarize } from '../src/core/lifestats'
+import { census, clusterStats, lifeStats, meanClusterSize, massByType, potentialEnergy, stateHash } from '../src/core/metrics'
 import { type Init, LAWS, type Laws, initFromSeed } from '../src/core/params'
 import { Rng } from '../src/core/rng'
 import { World } from '../src/core/world'
@@ -266,6 +267,15 @@ describe('budding reproduction', () => {
     expect(Array.from(w.wLimb[child]!)).toEqual(Array.from(w.wLimb[b]!))
   })
 
+  it('can afford a child in a continuous-inflow world, where every child particle is new', () => {
+    const w = rich({ inflow: true, n_start: 1 })
+    const b = [...Array(w.nMatter).keys()].find((i) => w.isBrain(i))!
+    w.energy[b] = w.L.E_cap
+    w.repCool[b] = 0
+    w.step()
+    expect(w.nBudded).toBe(1)
+  })
+
   it('never buds when switched off, and keeps the ledger closed over a long run when on', () => {
     const off = rich({ repro: false })
     for (let t = 0; t < 500; t++) off.step()
@@ -277,5 +287,66 @@ describe('budding reproduction', () => {
       if (t % 100 === 0) expect(on.totalEnergy() + on.burned).toBeCloseTo(on.initialEnergy + on.injected, 6)
     }
     expect(on.nBirths - on.nDeaths).toBe(census(on).organisms)
+  })
+})
+
+describe('life statistics', () => {
+  it('summarises values and keeps exact count/min/max across ring wrap-around', () => {
+    const s = summarize([1, 2, 3, 4, 100])
+    expect(s).toMatchObject({ n: 5, min: 1, max: 100, median: 3, mean: 22 })
+    const t = new LifeTracker(4)
+    for (const v of [10, 20, 30, 40, 50, 60]) t.record(v)
+    const r = t.summary()
+    expect(r).toMatchObject({ n: 6, min: 10, max: 60, mean: 35 })
+    expect(r.median).toBe(45) // median of the most recent four: 30 40 50 60
+  })
+})
+
+describe('free particle decay', () => {
+  const lone = (decay: number) => {
+    const init = smallInit({ T: 0, n_brain: 0, n_intrinsic: 1, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, decay_free: decay })
+    init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
+    return new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
+  }
+
+  it('drains a free particle exponentially, burns exactly what it loses, and records its lifespan', () => {
+    const k = 0.01
+    const w = lone(k)
+    for (let t = 1; t <= 100; t++) {
+      w.step()
+      expect(w.energy[0]).toBeCloseTo(30 * Math.pow(1 - k, t), 9)
+    }
+    expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy, 9)
+    const expectedLife = Math.ceil(Math.log(0.01 / 30) / Math.log(1 - k))
+    for (let t = 0; t < 1200; t++) w.step()
+    expect(w.energy[0]).toBe(0)
+    expect(w.lifeParticles.summary().n).toBe(1)
+    expect(Math.abs(w.lifeParticles.summary().max - expectedLife)).toBeLessThanOrEqual(2)
+    expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy, 9)
+  })
+
+  it('does nothing when off, and never touches bound particles', () => {
+    const off = lone(0)
+    for (let t = 0; t < 200; t++) off.step()
+    expect(off.energy[0]).toBe(30)
+
+    const init = smallInit({ T: 0, n_brain: 1, n_intrinsic: 2, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, decay_free: 0.5, repro: false })
+    init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
+    const w = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
+    w.placeOrganism({ brain: 2, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    for (let t = 0; t < 10; t++) w.step()
+    expect(w.energy[0]).toBeGreaterThan(29) // only upkeep and signalling, no 50% decay
+    expect(w.energy[1]).toBeLessThan(0.1) // the free particle has been drained
+  })
+
+  it('reports live ages for particles and organisms', () => {
+    const w = new World(smallInit({ T_spawn: 15 }), SMALL)
+    for (let t = 0; t < 400; t++) w.step()
+    const s = lifeStats(w)
+    expect(s.particlesNow.n).toBeGreaterThan(0)
+    expect(s.particlesNow.max).toBeLessThanOrEqual(w.tick)
+    expect(s.particlesNow.min).toBeLessThanOrEqual(s.particlesNow.median)
+    expect(s.particlesNow.median).toBeLessThanOrEqual(s.particlesNow.max)
+    expect(s.organismsNow.n).toBe(census(w).organisms)
   })
 })
