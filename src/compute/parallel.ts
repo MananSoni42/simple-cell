@@ -23,15 +23,16 @@ export class ParallelBackend implements ForceBackend {
 
   compute(w: World): Promise<void> {
     const parts = this.workers.length + 1
-    const chunk = Math.ceil(w.cap / parts)
+    const n = w.grid.count
+    const chunk = Math.ceil(n / parts)
     const pending = this.workers.map(
       (wk, t) =>
         new Promise<void>((resolve) => {
           wk.onmessage = () => resolve()
-          wk.postMessage({ kind: 'run', lo: (t + 1) * chunk, hi: Math.min(w.cap, (t + 2) * chunk) })
+          wk.postMessage({ kind: 'run', lo: (t + 1) * chunk, hi: Math.min(n, (t + 2) * chunk) })
         }),
     )
-    computeForcesRange(0, Math.min(w.cap, chunk), w.kernelArrays, w.kernelParams)
+    computeForcesRange(0, Math.min(n, chunk), w.kernelArrays, w.kernelParams)
     return Promise.all(pending).then(() => undefined)
   }
 

@@ -31,3 +31,19 @@ Observations that drive the optimization plan: forces are ~70% of a serial tick 
 candidate pair; two threads barely beat serial because the contiguous index split puts almost all
 live particles in the first slice; and the app itself reaches far fewer ticks/s than the benchmark
 because stepping shares each frame with drawing.
+
+## After phase 1 (bit-exact: packed cell-ordered kernel, static food skipped, matter-first uptake)
+
+All six golden worlds still end in exactly the same state.
+
+Single thread, ms per tick (Node):
+
+| Scale | Total | was | Forces | was | Uptake | was |
+|---|---|---|---|---|---|---|
+| 8× | 1.85 | 2.79 | 0.88 | 1.74 | 0.18 | 0.32 |
+| 16× | 6.42 | 10.82 | 3.61 | 7.67 | 0.73 | 1.36 |
+| 32× | 25.90 | 45.38 | 14.27 | 31.90 | 3.17 | 6.06 |
+
+Browser, 16×, ticks per second: serial 148 → 215, 2 threads 150 → 296, 4 → 350, 8 → 392,
+14 → 395 (was 311). Threads now split evenly because the kernel runs over the dense list of live
+particles instead of raw slot indices.

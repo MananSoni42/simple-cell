@@ -15,6 +15,6 @@ export interface ForceBackend {
 export const serialBackend: ForceBackend = {
   name: 'serial',
   compute(w) {
-    computeForcesRange(0, w.cap, w.kernelArrays, w.kernelParams)
+    computeForcesRange(0, w.grid.count, w.kernelArrays, w.kernelParams)
   },
 }

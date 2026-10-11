@@ -66,7 +66,7 @@ export interface ClusterStats {
  */
 export function clusterStats(w: World): ClusterStats {
   const { L } = w
-  w.grid.build(w.x, w.y, w.alive, w.cap)
+  w.grid.build()
   const parent = new Int32Array(w.nMatter).map((_, i) => i)
   const find = (a: number): number => {
     while (parent[a] !== a) a = parent[a] = parent[parent[a]]

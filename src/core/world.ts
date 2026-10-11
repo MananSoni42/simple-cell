@@ -34,23 +34,50 @@ function buffer(bytes: number, shared: boolean): ArrayBufferLike {
   return shared ? new SharedArrayBuffer(bytes) : new ArrayBuffer(bytes)
 }
 
-/** Spatial hash over the torus. Cell size >= r_c, so a 3x3 block covers every interaction. */
+/** Live-particle arrays the grid reads when it packs them in cell order. */
+export interface GridSource {
+  x: Float64Array
+  y: Float64Array
+  alive: Uint8Array
+  type: Uint8Array
+  owner: Int32Array
+}
+
+/**
+ * Spatial hash over the torus. Cell size >= r_c, so a 3x3 block covers every interaction.
+ * Live particles are counting-sorted into cells (ascending index within a cell, so matter
+ * always precedes food) and their hot fields are copied into packed arrays in that order.
+ */
 export class Grid {
   readonly nc: number
   readonly cs: number
-  readonly start: Int32Array
-  readonly items: Int32Array
-  readonly cellOf: Int32Array
+  readonly start: Int32Array // cell -> first packed slot
+  readonly matterEnd: Int32Array // cell -> end of its matter (food follows, up to start[cell + 1])
+  readonly items: Int32Array // packed slot -> particle index
+  readonly cellOf: Int32Array // particle -> cell (-1 if not live)
+  readonly px: Float64Array
+  readonly py: Float64Array
+  readonly ptype: Uint8Array
+  readonly powner: Int32Array
+  readonly pcell: Int32Array
   readonly buf: Int32Array
+  count = 0 // number of live particles = packed length
   private fill: Int32Array
 
-  constructor(size: number, rc: number, cap: number, shared = false) {
+  constructor(size: number, rc: number, private cap: number, private nMatter: number, private src: GridSource, shared = false) {
     this.nc = Math.max(3, Math.floor(size / rc))
     this.cs = size / this.nc
-    this.start = new Int32Array(buffer(4 * (this.nc * this.nc + 1), shared))
-    this.fill = new Int32Array(this.nc * this.nc)
+    const cells = this.nc * this.nc
+    this.start = new Int32Array(buffer(4 * (cells + 1), shared))
+    this.matterEnd = new Int32Array(cells)
+    this.fill = new Int32Array(cells)
     this.items = new Int32Array(buffer(4 * cap, shared))
     this.cellOf = new Int32Array(buffer(4 * cap, shared))
+    this.px = new Float64Array(buffer(8 * cap, shared))
+    this.py = new Float64Array(buffer(8 * cap, shared))
+    this.ptype = new Uint8Array(buffer(cap, shared))
+    this.powner = new Int32Array(buffer(4 * cap, shared))
+    this.pcell = new Int32Array(buffer(4 * cap, shared))
     this.buf = new Int32Array(cap)
   }
 
@@ -60,9 +87,12 @@ export class Grid {
     return cy * this.nc + cx
   }
 
-  build(x: Float64Array, y: Float64Array, alive: Uint8Array, cap: number): void {
-    const { start, fill, items, cellOf } = this
+  build(): void {
+    const { start, matterEnd, fill, items, cellOf, px, py, ptype, powner, pcell, cap, nMatter } = this
+    const { x, y, alive, type, owner } = this.src
+    const cells = fill.length
     start.fill(0)
+    matterEnd.fill(0)
     for (let i = 0; i < cap; i++) {
       if (!alive[i]) {
         cellOf[i] = -1
@@ -71,13 +101,25 @@ export class Grid {
       const c = this.cellIndex(x[i], y[i])
       cellOf[i] = c
       start[c + 1]++
+      if (i < nMatter) matterEnd[c]++
     }
-    for (let c = 0; c < start.length - 1; c++) start[c + 1] += start[c]
-    fill.set(start.subarray(0, fill.length))
+    for (let c = 0; c < cells; c++) {
+      start[c + 1] += start[c]
+      matterEnd[c] += start[c]
+    }
+    fill.set(start.subarray(0, cells))
     for (let i = 0; i < cap; i++) {
       const c = cellOf[i]
-      if (c >= 0) items[fill[c]++] = i
+      if (c < 0) continue
+      const k = fill[c]++
+      items[k] = i
+      px[k] = x[i]
+      py[k] = y[i]
+      ptype[k] = type[i]
+      powner[k] = owner[i]
+      pcell[k] = c
     }
+    this.count = start[cells]
   }
 
   /** Fills `buf` with every item in the 3x3 block around (x, y); returns the count. */
@@ -216,13 +258,13 @@ export class World {
     }
     for (let i = this.cap - 1; i >= this.nMatter; i--) this.freeFood.push(i)
 
-    this.grid = new Grid(L.SIZE, L.r_c, n, sh)
+    this.grid = new Grid(L.SIZE, L.r_c, n, this.nMatter, this, sh)
+    const g = this.grid
     this.kernelArrays = {
-      x: this.x, y: this.y, fx: this.fx, fy: this.fy, type: this.type, owner: this.owner,
-      alive: this.alive, foodNear: this.foodNear, cellStart: this.grid.start,
-      cellItems: this.grid.items, cellOf: this.grid.cellOf, A: this.A,
+      px: g.px, py: g.py, ptype: g.ptype, powner: g.powner, pcell: g.pcell, items: g.items,
+      cellStart: g.start, fx: this.fx, fy: this.fy, foodNear: this.foodNear, A: this.A,
     }
-    this.kernelParams = { SIZE: L.SIZE, r_c: L.r_c, beta: L.beta, K_core: L.K_core, nc: this.grid.nc }
+    this.kernelParams = { SIZE: L.SIZE, r_c: L.r_c, beta: L.beta, K_core: L.K_core, nc: g.nc, skipFood: !init.foodMoves }
     this.field = new Float64Array(L.fieldN * L.fieldN)
     this.fieldTmp = new Float64Array(L.fieldN * L.fieldN)
     for (let p = 0; p < init.n_patch; p++) {
@@ -295,12 +337,12 @@ export class World {
   }
 
   private prepare(): void {
-    this.grid.build(this.x, this.y, this.alive, this.cap)
+    this.grid.build()
   }
 
   private finish(): void {
     this.integrate()
-    this.grid.build(this.x, this.y, this.alive, this.cap)
+    this.grid.build()
     this.uptake()
     this.think()
     this.costs()
@@ -382,28 +424,37 @@ export class World {
 
   private uptake(): void {
     const { L, x, y, grid, owner, energy, alive } = this
-    const { nc, start, items, cellOf } = grid
+    const { nc, start, matterEnd, items, px, py, cellOf } = grid
     const re2 = L.r_eat * L.r_eat
+    const S = L.SIZE
+    const half = S / 2
     for (let f = this.nMatter; f < this.cap; f++) {
       if (!alive[f]) continue
       const c = cellOf[f]
       const cx = c % nc
       const cy = (c - cx) / nc
+      const fxp = x[f]
+      const fyp = y[f]
       let best = -1
       let bestD = re2
       for (let dy = -1; dy <= 1; dy++) {
         const row = ((cy + dy + nc) % nc) * nc
         for (let dx = -1; dx <= 1; dx++) {
           const cc = row + ((cx + dx + nc) % nc)
-          for (let k = start[cc]; k < start[cc + 1]; k++) {
-            const j = items[k]
-            if (j >= this.nMatter) continue // only matter eats
-            const ex = this.minImage(x[j] - x[f])
-            const ey = this.minImage(y[j] - y[f])
+          for (let k = start[cc], e = matterEnd[cc]; k < e; k++) {
+            let ex = px[k] - fxp
+            if (ex >= half) ex -= S
+            else if (ex < -half) ex += S
+            let ey = py[k] - fyp
+            if (ey >= half) ey -= S
+            else if (ey < -half) ey += S
             const d2 = ex * ex + ey * ey
-            if (d2 < bestD && this.canEat(j)) {
-              bestD = d2
-              best = j
+            if (d2 < bestD) {
+              const j = items[k]
+              if (this.canEat(j)) {
+                bestD = d2
+                best = j
+              }
             }
           }
         }

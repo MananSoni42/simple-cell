@@ -35,7 +35,7 @@ async function main(): Promise<void> {
       continue
     }
     // reference forces from the serial kernel on the current state
-    w.grid.build(w.x, w.y, w.alive, w.cap)
+    w.grid.build()
     serialBackend.compute(w)
     const ref = { fx: Float64Array.from(w.fx), fy: Float64Array.from(w.fy), near: Float32Array.from(w.foodNear) }
     await backend.compute(w)
@@ -43,6 +43,7 @@ async function main(): Promise<void> {
     let scaleF = 1e-12
     let nearBad = 0
     for (let i = 0; i < w.cap; i++) {
+      if (!w.alive[i] || (!w.init.foodMoves && w.type[i] === 5)) continue // serial skips static food
       scaleF = Math.max(scaleF, Math.abs(ref.fx[i]), Math.abs(ref.fy[i]))
       worst = Math.max(worst, Math.abs(w.fx[i] - ref.fx[i]), Math.abs(w.fy[i] - ref.fy[i]))
       if (w.foodNear[i] !== ref.near[i]) nearBad++

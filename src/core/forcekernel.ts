@@ -1,18 +1,21 @@
 import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX } from './types'
 
-/** Everything the pair-force kernel reads or writes. Plain typed arrays, so they can live in shared memory. */
+/**
+ * Everything the pair-force kernel reads or writes. The `p*` arrays hold the live
+ * particles packed in cell order (built by `Grid.build`), so the neighbour scan reads
+ * memory sequentially. Plain typed arrays, so they can live in shared memory.
+ */
 export interface KernelArrays {
-  x: Float64Array
-  y: Float64Array
-  fx: Float64Array
-  fy: Float64Array
-  type: Uint8Array
-  owner: Int32Array
-  alive: Uint8Array
-  foodNear: Float32Array
+  px: Float64Array
+  py: Float64Array
+  ptype: Uint8Array
+  powner: Int32Array
+  pcell: Int32Array
+  items: Int32Array // packed slot -> particle index
   cellStart: Int32Array
-  cellItems: Int32Array
-  cellOf: Int32Array
+  fx: Float64Array // outputs, indexed by particle
+  fy: Float64Array
+  foodNear: Float32Array
   A: Float64Array
 }
 
@@ -22,28 +25,31 @@ export interface KernelParams {
   beta: number
   K_core: number
   nc: number
+  /** Skip food as a target: its force is never used while food is static. */
+  skipFood: boolean
 }
 
+const MIDX = Int8Array.from(MATRIX_INDEX)
+
 /**
- * Net pair force on every particle in [lo, hi). Each particle sums over all of its
- * neighbours (no Newton's-third-law shortcut), so ranges are independent and can run
- * on different threads, or be ported to a GPU, without any write conflicts.
+ * Net pair force on the packed particles in slots [lo, hi). Each particle sums over all
+ * of its neighbours (no Newton's-third-law shortcut), so ranges are independent and can
+ * run on different threads without write conflicts. Slots are dense (live particles only),
+ * so equal-sized ranges carry equal work.
  */
 export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: KernelParams): void {
-  const { x, y, fx, fy, type, owner, alive, foodNear, cellStart, cellItems, cellOf, A } = a
-  const { SIZE: S, r_c: rc, beta, K_core: K, nc } = p
+  const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, A } = a
+  const { SIZE: S, r_c: rc, beta, K_core: K, nc, skipFood } = p
   const rc2 = rc * rc
-  for (let i = lo; i < hi; i++) {
-    fx[i] = 0
-    fy[i] = 0
-    foodNear[i] = 0
-    if (!alive[i]) continue
-    const xi = x[i]
-    const yi = y[i]
-    const ti = type[i]
-    const mi = MATRIX_INDEX[ti]
-    const oi = owner[i]
-    const c = cellOf[i]
+  const half = S / 2
+  for (let k0 = lo; k0 < hi; k0++) {
+    const ti = ptype[k0]
+    if (skipFood && ti === FOOD) continue
+    const xi = px[k0]
+    const yi = py[k0]
+    const mi = MIDX[ti]
+    const oi = powner[k0]
+    const c = pcell[k0]
     const cx = c % nc
     const cy = (c - cx) / nc
     let sx = 0
@@ -53,19 +59,22 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
       const row = ((cy + dy + nc) % nc) * nc
       for (let dx = -1; dx <= 1; dx++) {
         const cc = row + ((cx + dx + nc) % nc)
-        for (let k = cellStart[cc]; k < cellStart[cc + 1]; k++) {
-          const j = cellItems[k]
-          if (j === i) continue
-          const tj = type[j]
-          if (oi >= 0 && oi === owner[j] && (ti === BRAIN || tj === BRAIN)) continue
-          let ddx = x[j] - xi
-          let ddy = y[j] - yi
-          ddx -= S * Math.round(ddx / S)
-          ddy -= S * Math.round(ddy / S)
-          const r2 = ddx * ddx + ddy * ddy
+        for (let k = cellStart[cc], e = cellStart[cc + 1]; k < e; k++) {
+          if (k === k0) continue
+          const tj = ptype[k]
+          if (oi >= 0 && oi === powner[k] && (ti === BRAIN || tj === BRAIN)) continue
+          let ddx = px[k] - xi
+          if (ddx >= half) ddx -= S
+          else if (ddx < -half) ddx += S
+          const ax = ddx * ddx
+          if (ax >= rc2) continue
+          let ddy = py[k] - yi
+          if (ddy >= half) ddy -= S
+          else if (ddy < -half) ddy += S
+          const r2 = ax + ddy * ddy
           if (r2 >= rc2 || r2 < 1e-18) continue
           const r = Math.sqrt(r2)
-          const mj = MATRIX_INDEX[tj]
+          const mj = MIDX[tj]
           const u = r / rc
           let f: number
           if (u < beta) f = K * (u / beta - 1)
@@ -77,6 +86,7 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
         }
       }
     }
+    const i = items[k0]
     fx[i] = sx
     fy[i] = sy
     foodNear[i] = near
