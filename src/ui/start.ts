@@ -82,6 +82,7 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
           <label>free decay <input type="number" id="decay" min="0" max="10" step="0.05" style="width:70px" /> %/tick</label>
           <label>food lasts <input type="number" id="foodLife" min="0" max="100000" step="10" style="width:80px" /> ticks <span class="dim">(0 = forever)</span></label>
         </div>
+        <label class="check"><input type="checkbox" id="bonds" /> particle bonds <span class="dim">— touching particles with attractive chemistry latch, and hold until pulled much harder</span></label>
         <label class="check"><input type="checkbox" id="repro" /> reproduction <span class="dim">— organisms holding enough energy bud off a mutated child</span></label>
         <label class="check"><input type="checkbox" id="foodMoves" /> food drifts <span class="dim">— off: food stays where it lands</span></label>
         <label class="check"><input type="checkbox" id="inflow" /> continuous organism inflow <span class="dim">— new particles arrive with every organism, and all matter can die</span></label>
@@ -147,7 +148,7 @@ export function mountStart(root: HTMLElement, onStart: (init: Init, perf: Perf) 
     input.addEventListener('change', render)
   }
 
-  const checks = ['quantized', 'repro', 'foodMoves', 'inflow'] as const
+  const checks = ['quantized', 'bonds', 'repro', 'foodMoves', 'inflow'] as const
   for (const key of checks) {
     q<HTMLInputElement>('#' + key).addEventListener('change', (e) => {
       init[key] = (e.target as HTMLInputElement).checked

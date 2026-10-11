@@ -253,6 +253,30 @@ export class Renderer {
       }
     }
 
+    // bonds: the joins that persist, drawn under everything else
+    const bondsOn = w.bonds
+    if (bondsOn) {
+      ctx.strokeStyle = 'rgba(244,246,251,0.4)'
+      ctx.lineWidth = Math.max(1, 0.8 * k)
+      ctx.setLineDash([3 * k, 2 * k])
+      for (let i = 0; i < w.nIntr; i++) {
+        if (!w.alive[i] || !vis(i)) continue
+        for (let s2 = 0; s2 < bondsOn.max; s2++) {
+          const j = bondsOn.partner[i * bondsOn.max + s2]
+          if (j <= i || !w.alive[j]) continue
+          let dx = X[j] - X[i]
+          let dy = Y[j] - Y[i]
+          if (Math.abs(dx) > px / 2) dx -= Math.sign(dx) * px // the shorter way round the torus
+          if (Math.abs(dy) > px / 2) dy -= Math.sign(dy) * px
+          ctx.beginPath()
+          ctx.moveTo(X[i], Y[i])
+          ctx.lineTo(X[i] + dx, Y[i] + dy)
+          ctx.stroke()
+        }
+      }
+      ctx.setLineDash([])
+    }
+
     // food, then free matter
     for (let i = w.nMatter; i < w.cap; i++) {
       if (!w.alive[i] || !vis(i)) continue

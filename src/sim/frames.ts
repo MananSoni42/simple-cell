@@ -14,6 +14,8 @@ export interface RenderState {
   alive: Uint8Array
   type: Uint8Array
   owner: Int32Array
+  /** Present when the world has bonding on, so the renderer can draw the joins. */
+  bonds?: { max: number; partner: Int32Array }
   limbOf(brain: number, socket: number): number
   isBrain(i: number): boolean
 }
@@ -26,6 +28,7 @@ export interface FrameLayout {
   SIZE: number
   L_rod: number
   E_ref: number
+  maxBonds: number
 }
 
 /** One published snapshot of the world, in shared memory. */
@@ -39,12 +42,13 @@ export interface FrameBuffers {
   type: Uint8Array
   owner: Int32Array
   limbs: Int32Array // 4 sockets for each brain slot, indexed from nIntr
+  bondPartner: Int32Array
 }
 
 export const N_FRAMES = 3 // one being written, one latest, one being read
 
 export function layoutOf(w: World): FrameLayout {
-  return { cap: w.cap, nIntr: w.nIntr, nMatter: w.nMatter, fieldN: w.L.fieldN, SIZE: w.L.SIZE, L_rod: w.L.L_rod, E_ref: w.L.E_ref }
+  return { cap: w.cap, nIntr: w.nIntr, nMatter: w.nMatter, fieldN: w.L.fieldN, SIZE: w.L.SIZE, L_rod: w.L.L_rod, E_ref: w.L.E_ref, maxBonds: w.bonds.max }
 }
 
 const sab = (bytes: number) => new SharedArrayBuffer(bytes)
@@ -60,6 +64,7 @@ export function allocFrame(l: FrameLayout): FrameBuffers {
     type: new Uint8Array(sab(l.cap)),
     owner: new Int32Array(sab(4 * l.cap)),
     limbs: new Int32Array(sab(4 * 4 * (l.nMatter - l.nIntr))),
+    bondPartner: new Int32Array(sab(4 * l.cap * Math.max(1, l.maxBonds))),
   }
 }
 
@@ -75,6 +80,7 @@ export function writeFrame(w: World, f: FrameBuffers): void {
   f.type.set(w.type)
   f.owner.set(w.owner)
   f.limbs.set(w.limbs.subarray(4 * w.nIntr, 4 * w.nMatter))
+  f.bondPartner.set(w.bonds.partner)
   for (let i = 0; i < f.field.length; i++) f.field[i] = w.field[i]
 }
 
@@ -93,6 +99,7 @@ export function frameState(l: FrameLayout, f: FrameBuffers): RenderState {
     alive: f.alive,
     type: f.type,
     owner,
+    bonds: { max: l.maxBonds, partner: f.bondPartner },
     limbOf: (b, s) => limbs[(b - l.nIntr) * 4 + s],
     isBrain: (i) => owner[i] === i,
   }
@@ -113,6 +120,7 @@ export function worldState(w: World): RenderState {
     alive: w.alive,
     type: w.type,
     owner: w.owner,
+    bonds: { max: w.bonds.max, partner: w.bonds.partner },
     limbOf: (b, s) => w.limbs[b * 4 + s],
     isBrain: (i) => w.owner[i] === i,
   }

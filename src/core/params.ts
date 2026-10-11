@@ -43,7 +43,22 @@ export const LAWS = {
   repro_dist: 42, // how far from the parent a child appears
   E_birth: 15, // reserve each particle of a budded child starts with
   E_viable: 1,
-  corpse_frac: 0.5, // share of a dead brain's reserve that is left behind as food // minimum reserve for a free particle to be captured as a limb
+  corpse_frac: 0.5,
+  // Bonds between particles, with hysteresis: forming is easy, breaking is not. The gap between
+  // F_form and F_break is the activation energy, and it is what lets aggregates persist instead
+  // of constantly reshuffling.
+  max_bonds: 2, // how many bonds one particle can hold
+  A_form: 0.25, // chemistry must be at least this attractive to bond at all
+  k_bond: 0.6, // spring pulling a bond back to its rest length
+  r_bond: 10, // rest length, which is also the core radius
+  // The hysteresis, as the two forces: a bond forms only while the pair is slack enough to be
+  // held by F_form, and survives until stretched hard enough to need F_break. With these
+  // numbers that is "form within 12 units, break beyond 16.7" - a bond can be pulled 40%
+  // further than it could ever have been made at.
+  F_form: 1.2,
+  F_break: 4,
+  E_bond: 0.1, // energy spent to form a bond, paid by both particles
+  bond_cooldown: 30, // ticks before the same particle may bond again after a break // share of a dead brain's reserve that is left behind as food // minimum reserve for a free particle to be captured as a limb
   substeps_max: 16, // integration sub-steps are capped here when a hot world needs them
   life_window: 10000, // lifetime averages are reported over this many trailing ticks
   life_buckets: 100,
@@ -81,6 +96,7 @@ export interface Init {
   food_batch: number // food particles per injection event (area scaling)
   spawn_batch: number // organisms per spawn event (area scaling)
   foodMoves: boolean // food drifts and responds to forces; otherwise it stays where it lands
+  bonds: boolean // particles may bond to each other (R16)
   repro: boolean // budding reproduction
   repro_mut: number // std-dev of weight mutation in children
   food_life: number // ticks before an uneaten food particle spoils (0 = never)
@@ -148,6 +164,7 @@ function seedWorld(seed: number, scale = 1): Init {
     food_batch: area,
     spawn_batch: area,
     foodMoves: false,
+    bonds: true,
     repro: true,
     repro_mut: 0.05,
     food_life: 200,
@@ -173,6 +190,11 @@ export function initFromSeed(seed: number, scale = 1): Init {
 export function substepsFor(init: Init, L: Laws = LAWS): number {
   for (let n = 1; n <= L.substeps_max; n++) if (stability({ ...init, substeps: n }, L).ok) return n
   return 0
+}
+
+/** How far apart a bond may be made, and how far it can be stretched before it snaps. */
+export function bondRange(L: Laws): { form: number; breakAt: number } {
+  return { form: L.r_bond + L.F_form / L.k_bond, breakAt: L.r_bond + L.F_break / L.k_bond }
 }
 
 /** Diagnostics for the discrete-time budgets, shown on the start screen. */

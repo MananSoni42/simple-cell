@@ -1,50 +1,50 @@
 {
   "base-s1": {
-    "hash": 3161675965,
+    "hash": 1607428163,
     "births": 13,
     "budded": 0,
     "deaths": 11,
     "organisms": 2,
-    "energy": 1186.476397
+    "energy": 1169.35423
   },
   "drift-s2": {
-    "hash": 202290146,
-    "births": 24,
-    "budded": 0,
-    "deaths": 21,
+    "hash": 3509748139,
+    "births": 25,
+    "budded": 1,
+    "deaths": 22,
     "organisms": 3,
-    "energy": 1234.319493
+    "energy": 1310.532438
   },
   "inflow-s3": {
-    "hash": 3373668565,
-    "births": 14,
-    "budded": 0,
-    "deaths": 11,
-    "organisms": 3,
-    "energy": 1294.973534
-  },
-  "scale2-s4": {
-    "hash": 2261254601,
-    "births": 26,
-    "budded": 2,
-    "deaths": 17,
-    "organisms": 9,
-    "energy": 4584.355715
-  },
-  "plain-s5": {
-    "hash": 2963840853,
+    "hash": 1695087292,
     "births": 14,
     "budded": 0,
     "deaths": 12,
     "organisms": 2,
-    "energy": 2162.419082
+    "energy": 1446.236864
+  },
+  "scale2-s4": {
+    "hash": 86184741,
+    "births": 24,
+    "budded": 0,
+    "deaths": 19,
+    "organisms": 5,
+    "energy": 4534.401422
+  },
+  "plain-s5": {
+    "hash": 2696381122,
+    "births": 14,
+    "budded": 0,
+    "deaths": 12,
+    "organisms": 2,
+    "energy": 1980.404848
   },
   "patchy-s7": {
-    "hash": 361704422,
-    "births": 12,
-    "budded": 1,
-    "deaths": 11,
+    "hash": 2127618290,
+    "births": 11,
+    "budded": 0,
+    "deaths": 10,
     "organisms": 1,
-    "energy": 1238.450368
+    "energy": 1215.018205
   }
 }

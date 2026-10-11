@@ -74,7 +74,7 @@ export class StatsPanel {
     set('s-energy-sub', `organisms ${c.eOrganisms.toFixed(0)} · free ${c.eFree.toFixed(0)} · food ${c.eFood.toFixed(0)} · burned ${st.burned.toFixed(0)}`)
     const g = st.aggregates
     set('s-agg', g.groups ? `${g.groups} group${g.groups > 1 ? 's' : ''}, biggest ${g.largest}` : 'none')
-    set('s-agg-sub', `${g.inGroups} organisms joined · mean ${g.meanSize ? g.meanSize.toFixed(1) : '–'} sub-organisms · bonds ${g.bonds}` +
+    set('s-agg-sub', `bonds held ${st.bondCount} · ${g.inGroups} organisms joined · mean ${g.meanSize ? g.meanSize.toFixed(1) : '–'} sub-organisms · bonds ${g.bonds}` +
       ` · held ${g.stableBonds} (${g.stableGroups} lasting group${g.stableGroups === 1 ? '' : 's'}, biggest ${g.stableLargest}) · oldest bond ${g.oldestBond}t`)
     set('s-lineage', `${c.lineages} alive`)
     set('s-lineage-sub', `biggest ${c.biggestLineage} organisms · max gen ${c.maxGen} · children ${c.children} (most ${c.maxChildren}) · oldest ${c.oldest} · record ${Math.max(st.recordAge, c.oldest)}`)

@@ -62,6 +62,7 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     spawn_batch: Math.round(num(src.spawn_batch, base.spawn_batch, 0, 1e5)),
     foodMoves: bool(src.foodMoves, base.foodMoves),
     repro: bool(src.repro, base.repro),
+    bonds: bool(src.bonds, base.bonds),
     repro_mut: num(src.repro_mut, base.repro_mut, 0, 5),
     decay_free: num(src.decay_free, base.decay_free, 0, 1),
     food_life: Math.round(num(src.food_life, base.food_life, 0, 1e7)),

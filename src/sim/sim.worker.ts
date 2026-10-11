@@ -117,6 +117,7 @@ function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnap
     census: census(w),
     life: heavy ? heavy.life : lifeStats(w),
     aggregates: heavy ? heavy.aggregates : w.aggregates.stats(w),
+    bondCount: w.bonds.count,
     clampedPct: w.nSteps > 0 ? (100 * w.nClamped) / w.nSteps : 0,
     historyTicks: ringLen > 0 ? w.tick - snapshots()[0].tick : 0,
     oldestTick: ringLen > 0 ? snapshots()[0].tick : w.tick,

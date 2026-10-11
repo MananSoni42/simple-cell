@@ -1,11 +1,12 @@
 import { type ForceBackend, serialBackend } from './backend'
 import { type KernelArrays, type KernelParams } from './forcekernel'
 import { AggregateTracker } from './aggregates'
+import { Bonds, bondForce } from './bonds'
 import { LifeTracker, RollingMean } from './lifestats'
 import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
-import { type Init, type Laws, LAWS, applyQuantization } from './params'
+import { type Init, type Laws, LAWS, applyQuantization, bondRange } from './params'
 import { Rng } from './rng'
-import { BRAIN, FOOD, N_MATRIX } from './types'
+import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX } from './types'
 
 const HALF_PI = Math.PI / 2
 const TAU = Math.PI * 2
@@ -165,6 +166,8 @@ export class World {
   readonly repCool: Int16Array
   /** What the brain last told each socket; the limb neuron reads it next tick. */
   readonly brainSig: Float64Array
+  readonly bonds: Bonds
+  readonly bondCool: Int16Array
   /** Tick at which a matter particle last became "live" (alive with energy > 0). */
   readonly since: Int32Array
   private wasLive: Uint8Array
@@ -263,6 +266,8 @@ export class World {
     this.parent = new Int32Array(n).fill(-1)
     this.repCool = new Int16Array(n)
     this.brainSig = new Float64Array(n * 4)
+    this.bonds = new Bonds(n, this.L.max_bonds)
+    this.bondCool = new Int16Array(n)
     this.lineage = new Int32Array(n)
     this.children = new Int32Array(n)
     this.since = new Int32Array(n)
@@ -391,6 +396,7 @@ export class World {
   }
 
   private finish(): void {
+    if (this.init.bonds) this.applyBonds()
     this.integrate()
     this.grid.build()
     this.uptake()
@@ -404,6 +410,7 @@ export class World {
     this.trackLiveness()
     if (this.init.repro) this.reproduce()
     this.captures()
+    if (this.init.bonds) this.formBonds()
     this.stepField()
     this.stepPatches()
     this.aggregates.observe(this)
@@ -413,6 +420,7 @@ export class World {
     for (let i = 0; i < this.nMatter; i++) {
       if (this.cool[i] > 0) this.cool[i]--
       if (this.repCool[i] > 0) this.repCool[i]--
+      if (this.bondCool[i] > 0) this.bondCool[i]--
     }
   }
 
@@ -457,6 +465,66 @@ export class World {
   private kick(): number {
     const z = this.rng.gauss()
     return Math.min(this.L.z_max, Math.max(-this.L.z_max, z))
+  }
+
+  /**
+   * Bond springs, and the breaking test. Tension above F_break snaps the bond: that is the
+   * hysteresis, since forming only needed the pair to touch with F_form of pull behind it.
+   */
+  private applyBonds(): void {
+    const { L, x, y, fx, fy, bonds } = this
+    bonds.forEach((i, j) => {
+      if (!this.alive[i] || !this.alive[j]) {
+        bonds.remove(i, j)
+        return
+      }
+      const dx = this.minImage(x[j] - x[i])
+      const dy = this.minImage(y[j] - y[i])
+      const r = Math.hypot(dx, dy)
+      if (r < 1e-9) return
+      const f = bondForce(r, L)
+      if (Math.abs(f) > L.F_break) {
+        bonds.remove(i, j)
+        this.bondCool[i] = L.bond_cooldown
+        this.bondCool[j] = L.bond_cooldown
+        return
+      }
+      const ux = dx / r
+      const uy = dy / r
+      fx[i] += f * ux
+      fy[i] += f * uy
+      fx[j] -= f * ux
+      fy[j] -= f * uy
+    }, this.cap)
+  }
+
+  /** Forms new bonds between touching particles whose chemistry likes the pairing. */
+  private formBonds(): void {
+    const { L, x, y, grid, bonds, type } = this
+    const r2max = bondRange(L).form ** 2
+    for (let i = 0; i < this.nIntr; i++) {
+      if (!this.alive[i] || this.bondCool[i] > 0 || bonds.slots(i) === 0) continue
+      const mi = MATRIX_INDEX[type[i]]
+      if (mi < 0) continue
+      const n = grid.near(x[i], y[i])
+      for (let k = 0; k < n; k++) {
+        const j = grid.buf[k]
+        if (j <= i || j >= this.nIntr || !this.alive[j] || this.bondCool[j] > 0) continue
+        if (this.owner[i] >= 0 && this.owner[i] === this.owner[j]) continue // siblings are already joined by rods
+        if (bonds.has(i, j) || bonds.slots(j) === 0) continue
+        const mj = MATRIX_INDEX[type[j]]
+        if (mj < 0 || this.A[mi * N_MATRIX + mj] < L.A_form) continue
+        const dx = this.minImage(x[j] - x[i])
+        const dy = this.minImage(y[j] - y[i])
+        const r2 = dx * dx + dy * dy
+        if (r2 > r2max) continue // slack enough that F_form can hold it
+        if (this.energy[i] < L.E_bond || this.energy[j] < L.E_bond) continue
+        if (!bonds.add(i, j)) break
+        this.pay(i, L.E_bond)
+        this.pay(j, L.E_bond)
+        if (bonds.slots(i) === 0) break
+      }
+    }
   }
 
   private integrate(): void {
@@ -786,6 +854,7 @@ export class World {
 
   /** Deactivates a slot; any residual reserve is burned so the ledger stays exact. */
   private kill(i: number): void {
+    this.bonds.clear(i)
     this.burned += this.energy[i]
     this.energy[i] = 0
     this.alive[i] = 0

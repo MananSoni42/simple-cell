@@ -431,6 +431,10 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `E_repro` · `E_hold` · `E_birth` | 60 · 20 · 15 | budding threshold; reserve a parent must keep; reserve each child particle starts with |
 | `E_viable` | 1 | minimum reserve for a free particle to be captured as a limb |
 | `corpse_frac` | 0.5 | share of a dead body's energy left behind as food (R7.8) |
+| `max_bonds` · `A_form` | 2 · 0.25 | bonds per particle, and the chemistry needed to form one (R16) |
+| `k_bond` · `r_bond` | 0.6 · 10 | bond spring and its rest length |
+| `F_form` · `F_break` | 1.2 · 4 | the hysteresis: form within 12 units, break beyond 16.7 |
+| `E_bond` · `bond_cooldown` | 0.1 · 30 | cost to form a bond, and the wait after one breaks |
 | `repro_cooldown` · `repro_dist` | 80 · 42 | ticks between buds; child placement distance |
 
 ### Initial conditions — derived from the seed
@@ -452,6 +456,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `decay_free` | 0.2% / tick | free-particle decay. **Editable** (0 = off) |
 | `foodMoves` | off | food drifts and responds to forces. **Editable** |
 | `repro` · `repro_mut` | on · 0.05 | budding (R7.7) and mutation std. **Editable** (on/off) |
+| `bonds` | on | particle bonding (R16). **Editable** |
 | `inflow` | off | continuous organism inflow (R7.6). **Editable** |
 | `quantized` | on | snap the 4×4 to the bond set (R1.4a). **Editable** |
 | `substeps` | from `T` | integration sub-steps (R2.6). **Editable**, with an auto button |
@@ -646,3 +651,31 @@ The same primitive is what state save/load and long-run checkpointing will be bu
 quadrants, the chemistry matrix and the hard core, both neurons with every input and output
 labelled, the energy path, the life cycle, and why time is clamped. Everything on it is generated
 from the live constants, so it cannot drift away from the rules.
+
+---
+
+## 16. Bonds between particles
+
+Organisms could previously only *touch*. Now two particles can **latch**, and the rule that makes
+a latch worth having is **hysteresis**: forming is easy, breaking is not.
+
+- **Form** when two particles (not two limbs of the same organism — rods already hold those) are
+  within `r_bond + F_form/k_bond` = **12** units, their chemistry is at least `A_form` = 0.25
+  attractive, and both can pay `E_bond`.
+- **Hold** by a spring `k_bond·(r − r_bond)` toward a rest length of `r_bond` = 10, which is also
+  the core radius, so a bonded pair sits just touching.
+- **Break** only when the spring needs more than `F_break` = 4, i.e. beyond **16.7** units,
+  after which both particles wait `bond_cooldown` ticks.
+
+The gap between those two numbers is the point. **A bond can be stretched 40% further than it
+could ever have been made at**, so a joined pair stays joined through ordinary jostling instead
+of reshuffling every time the soup moves. That gap is the activation energy, expressed as the two
+forces: `F_form` to make one, `F_break` to undo it.
+
+Measured across the presets: switching bonding on takes standing bonds from 0 to 20–60 in the
+dense worlds and leaves the sparse ones (Grazers, Desert) largely unbonded, which is what the
+chemistry should decide. Bonds are drawn as faint dashed lines, and the stats panel counts them.
+
+This is the mechanism multicellularity needs, and it is what the aggregate metrics in §13
+ultimately want to be built on: a group joined by bonds is a real object, not a coincidence of
+proximity.

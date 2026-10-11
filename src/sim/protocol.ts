@@ -26,6 +26,7 @@ export interface StatsSnapshot {
   census: Census
   life: LifeStats
   aggregates: AggregateStats
+  bondCount: number
   clampedPct: number
   /** Ticks of history held, and the oldest tick we can rewind to. */
   historyTicks: number
