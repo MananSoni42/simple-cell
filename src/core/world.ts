@@ -313,6 +313,11 @@ export class World {
 
   // ---------------------------------------------------------------- accessors
 
+  /** How many weights a brain holds, so a snapshot can size itself. */
+  get brainWeightCount(): number {
+    return N_OUT * N_IN
+  }
+
   /** The food free-list, for snapshots. */
   freeFoodSlots(): number[] {
     return this.freeFood

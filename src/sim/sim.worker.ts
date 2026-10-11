@@ -1,6 +1,6 @@
 import { makeBackend, canShare } from '../compute/select'
 import { census, lifeStats } from '../core/metrics'
-import { type Snapshot, restoreSnapshot, snapshotBytes, takeSnapshot } from '../core/snapshot'
+import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, writeSnapshot } from '../core/snapshot'
 import { World } from '../core/world'
 import { H, N_FRAMES, allocFrame, layoutOf, writeFrame, type FrameBuffers } from './frames'
 import type { FromSim, StatsSnapshot, ToSim } from './protocol'
@@ -20,30 +20,48 @@ let paused = false
 let stepRequests = 0
 let note = ''
 let world: World | null = null
-let history: Snapshot[] = []
 let historyEvery = 1
 let rewindTo = -1 // a pending request, applied between ticks
 
-const HISTORY_BUDGET = 256 << 20 // bytes of snapshots we are willing to hold
+const HISTORY_BUDGET = 192 << 20 // bytes of snapshots we are willing to hold
+const HISTORY_HZ = 20 // snapshots per second of wall clock, however fast the world runs
 
 /**
- * Keeps a ring of past states so the world can be rewound. The interval adapts to the world's
- * size: a small world keeps every tick, a large one keeps fewer, so the memory cost is bounded
- * either way.
+ * A ring of past states so the world can be rewound. Two things keep it affordable:
+ * the buffers are allocated once and overwritten in place, and the sampling interval is
+ * recomputed from the *tick rate*, so a world running at thousands of ticks a second takes
+ * no more snapshots per second than a slow one.
  */
+let ring: Snapshot[] = []
+let ringPos = 0
+let ringLen = 0
+
 function planHistory(w: World): void {
   const per = snapshotBytes(w)
-  const slots = Math.max(8, Math.min(600, Math.floor(HISTORY_BUDGET / per)))
-  history = []
-  historyEvery = Math.max(1, Math.ceil(600 / slots))
-  historyCap = slots
+  const slots = Math.max(8, Math.min(240, Math.floor(HISTORY_BUDGET / per)))
+  ring = Array.from({ length: slots }, () => allocSnapshot(w))
+  ringPos = 0
+  ringLen = 0
+  historyEvery = 1
 }
-let historyCap = 60
+
+/** Oldest-to-newest view of the ring. */
+function snapshots(): Snapshot[] {
+  const out: Snapshot[] = []
+  for (let i = 0; i < ringLen; i++) out.push(ring[(ringPos - ringLen + i + ring.length) % ring.length])
+  return out
+}
 
 function remember(w: World): void {
-  if (w.tick % historyEvery !== 0) return
-  history.push(takeSnapshot(w))
-  if (history.length > historyCap) history.shift()
+  if (ring.length === 0 || w.tick % historyEvery !== 0) return
+  writeSnapshot(w, ring[ringPos])
+  ringPos = (ringPos + 1) % ring.length
+  ringLen = Math.min(ringLen + 1, ring.length)
+}
+
+/** Sample often enough to be useful, seldom enough to stay cheap. */
+function retune(): void {
+  historyEvery = Math.max(1, Math.round((paused ? 1 : rate) / HISTORY_HZ))
 }
 
 const channel = new MessageChannel()
@@ -56,18 +74,20 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 /** Rewinds to the newest snapshot at or before `tick`. Returns the world to run from. */
 function rewind(w: World, tick: number): World {
-  let pick = -1
-  for (let i = history.length - 1; i >= 0; i--) {
-    if (history[i].tick <= tick) {
+  const held = snapshots()
+  if (held.length === 0) return w
+  let pick = 0
+  for (let i = held.length - 1; i >= 0; i--) {
+    if (held[i].tick <= tick) {
       pick = i
       break
     }
   }
-  if (pick < 0) pick = 0
-  if (history.length === 0) return w
-  const snap = history[pick]
-  history.length = pick + 1 // the future we are abandoning is no longer history
+  const snap = held[pick]
   const fresh = restoreSnapshot(w.init, snap, { shared: canShare })
+  // the future we are abandoning stops being history
+  ringLen = pick + 1
+  ringPos = (ringPos - (held.length - 1 - pick) + ring.length) % ring.length
   fresh.backend = w.backend
   return fresh
 }
@@ -98,8 +118,8 @@ function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnap
     life: heavy ? heavy.life : lifeStats(w),
     aggregates: heavy ? heavy.aggregates : w.aggregates.stats(w),
     clampedPct: w.nSteps > 0 ? (100 * w.nClamped) / w.nSteps : 0,
-    historyTicks: history.length * historyEvery,
-    oldestTick: history.length ? history[0].tick : w.tick,
+    historyTicks: ringLen > 0 ? w.tick - snapshots()[0].tick : 0,
+    oldestTick: ringLen > 0 ? snapshots()[0].tick : w.tick,
     burned: w.burned,
     births: w.nBirths,
     budded: w.nBudded,
@@ -193,6 +213,7 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       note = made.note
       world = w
       planHistory(w)
+      retune()
       const layout = layoutOf(w)
       frames = Array.from({ length: N_FRAMES }, () => allocFrame(layout))
       header = new Int32Array(new SharedArrayBuffer(4 * H.SIZE))
@@ -209,8 +230,13 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       rewindTo = Math.max(0, (world?.tick ?? 0) - m.ticks)
     } else if (m.kind === 'seek') {
       rewindTo = Math.max(0, m.tick)
-    } else if (m.kind === 'rate') rate = m.rate
-    else if (m.kind === 'pause') paused = m.paused
+    } else if (m.kind === 'rate') {
+      rate = m.rate
+      retune()
+    } else if (m.kind === 'pause') {
+      paused = m.paused
+      retune()
+    }
     else if (m.kind === 'step') {
       paused = true
       stepRequests++

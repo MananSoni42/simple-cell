@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { stateHash } from '../src/core/metrics'
 import { initFromSeed } from '../src/core/params'
-import { restoreSnapshot, takeSnapshot } from '../src/core/snapshot'
+import { allocSnapshot, restoreSnapshot, takeSnapshot, writeSnapshot } from '../src/core/snapshot'
 import { World } from '../src/core/world'
 
 describe('snapshots', () => {
@@ -55,5 +55,48 @@ describe('snapshots', () => {
     }
     expect(stateHash(b)).toBe(stateHash(a))
     expect(b.nFood).toBe(a.nFood)
+  })
+})
+
+describe('snapshot ring', () => {
+  it('refills a preallocated snapshot without allocating, and restores identically', () => {
+    const init = { ...initFromSeed(31), T_spawn: 50, T_food: 2 }
+    const a = new World(init)
+    for (let t = 0; t < 300; t++) a.step()
+
+    const slot = allocSnapshot(a)
+    expect(slot.valid).toBe(false)
+    writeSnapshot(a, slot)
+    expect(slot.valid).toBe(true)
+    const bytes = slot.bytes
+    const field = slot.field
+
+    for (let t = 0; t < 100; t++) a.step()
+    writeSnapshot(a, slot) // reuse: the same buffers must be written in place
+    expect(slot.bytes).toBe(bytes)
+    expect(slot.field).toBe(field)
+    expect(slot.tick).toBe(a.tick)
+
+    const b = restoreSnapshot(init, slot)
+    expect(stateHash(b)).toBe(stateHash(a))
+    for (let t = 0; t < 200; t++) {
+      a.step()
+      b.step()
+    }
+    expect(stateHash(b)).toBe(stateHash(a))
+  })
+
+  it('does not allocate per snapshot once the ring exists', () => {
+    const w = new World(initFromSeed(5, 2))
+    for (let t = 0; t < 100; t++) w.step()
+    const slots = Array.from({ length: 8 }, () => allocSnapshot(w))
+    const before = process.memoryUsage().heapUsed
+    for (let i = 0; i < 400; i++) {
+      w.step()
+      writeSnapshot(w, slots[i % slots.length])
+    }
+    const grown = process.memoryUsage().heapUsed - before
+    // 400 fresh snapshots of this world would be ~100 MB; reuse should stay far below that
+    expect(grown).toBeLessThan(20 << 20)
   })
 })

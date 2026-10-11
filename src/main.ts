@@ -8,7 +8,7 @@ import { mountStart } from './ui/start'
 import { StatsPanel } from './ui/stats'
 
 const MIN_RATE = 0.125
-const MAX_RATE = 65536
+const MAX_RATE = 8192 // above this the simulation outruns its own bookkeeping
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 const startEl = $('start')

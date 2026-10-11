@@ -487,7 +487,7 @@ All of these default from the seed; re-rolling or retyping the seed resets them.
 
 - **Controls** (buttons along the bottom, with keys): **Start** resumes, **Pause** holds
   (`Space` toggles), **Stop** discards the world and returns to the start screen (`Esc`),
-  **0.5×** / **2×** halve or double the speed (`←` / `→`) between 1/8 and 512 ticks/s.
+  **0.5×** / **2×** halve or double the speed (`←` / `→`) between 1/8 and **8192** ticks/s.
   The default is **1 tick / second**; the panel also shows the rate actually achieved.
   `.` single-steps.
 - **Camera:** wheel zooms about the cursor (up to 80×), drag pans, double-click resets.
@@ -583,10 +583,15 @@ and the lineage counter. Restoring one reproduces not just the same state but th
 future**, which is the test: a restored world and the original run 400 more ticks and still hash
 identically.
 
-The simulation worker keeps a ring of snapshots, with the interval and count chosen from the
-world's size against a fixed memory budget, so a small world keeps fine-grained history and a
-large one keeps coarse history. The world screen has a rewind button, a scrub slider over the
-held history, and `Backspace`/`J`; the panel shows how many ticks are held.
+The simulation worker keeps a ring of snapshots. Two things keep it affordable: the buffers are
+**allocated once and overwritten in place**, and the sampling interval is derived from the *tick
+rate* so the world takes ~20 snapshots per second of wall clock however fast it is running.
+Both matter — allocating one per tick produced 0.5–3.5 GB/s of garbage at high rates and could
+bring the tab down. Measured at the 8192 ticks/s cap: 20 snapshots/s, under 2% of a core,
+and no garbage at all.
+
+The world screen has a rewind button, a scrub slider over the held history, and
+`Backspace`/`J`; the panel shows how many ticks are held.
 
 The same primitive is what state save/load and long-run checkpointing will be built on.
 

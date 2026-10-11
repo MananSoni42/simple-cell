@@ -1,3 +1,4 @@
+import { N_WLIMB } from './neurons'
 import type { Init } from './params'
 import { World } from './world'
 
@@ -11,12 +12,19 @@ export interface Snapshot {
   tick: number
   bytes: ArrayBuffer // all per-particle arrays, packed back to back
   scalars: Float64Array
-  weights: (Float64Array | null)[][] // [limbWeights, brainWeights] per brain slot
-  patches: { x: number; y: number; h: number }[]
+  /** [limbWeights, brainWeights] per brain slot, flattened; `has` says which existed. */
+  wLimb: Float64Array
+  wBrain: Float64Array
+  wHas: Uint8Array
+  patches: Float64Array // x, y, h per patch
+  patchCount: number
   rng: [number, number | null]
   field: Float64Array
   freeFood: Int32Array
+  freeFoodCount: number
   lineageCounter: number
+  /** False until the slot has been written at least once. */
+  valid: boolean
 }
 
 /** Per-particle arrays, in a fixed order. Keep this list in step with World's state. */
@@ -36,31 +44,79 @@ export function snapshotBytes(w: World): number {
   return n + w.field.byteLength + 512
 }
 
-export function takeSnapshot(w: World): Snapshot {
+/**
+ * An empty snapshot sized for this world. Allocate once and refill with `writeSnapshot`:
+ * at a few thousand ticks a second, allocating a fresh one per tick produced hundreds of
+ * megabytes a second of garbage and could bring the tab down.
+ */
+export function allocSnapshot(w: World): Snapshot {
   const vs = views(w)
   let total = 0
   for (const v of vs) total += v.byteLength
-  const bytes = new ArrayBuffer(total)
+  const brains = w.nMatter - w.nIntr
+  return {
+    tick: 0,
+    bytes: new ArrayBuffer(total),
+    scalars: new Float64Array(8),
+    wLimb: new Float64Array(brains * N_WLIMB),
+    wBrain: new Float64Array(brains * w.brainWeightCount),
+    wHas: new Uint8Array(brains * 2),
+    patches: new Float64Array(Math.max(1, w.patches.length) * 3),
+    patchCount: 0,
+    rng: [0, null],
+    field: new Float64Array(w.field.length),
+    freeFood: new Int32Array(w.cap),
+    freeFoodCount: 0,
+    lineageCounter: 1,
+    valid: false,
+  }
+}
+
+/** Copies the world into an already-allocated snapshot. Allocation-free. */
+export function writeSnapshot(w: World, snap: Snapshot): Snapshot {
+  const vs = views(w)
   let off = 0
   for (const v of vs) {
-    new Uint8Array(bytes, off, v.byteLength).set(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))
+    new Uint8Array(snap.bytes, off, v.byteLength).set(new Uint8Array(v.buffer, v.byteOffset, v.byteLength))
     off += v.byteLength
   }
-  const weights: (Float64Array | null)[][] = []
-  for (let b = w.nIntr; b < w.nMatter; b++) {
-    weights.push([w.wLimb[b] ? Float64Array.from(w.wLimb[b]!) : null, w.wBrain[b] ? Float64Array.from(w.wBrain[b]!) : null])
+  snap.tick = w.tick
+  snap.scalars[0] = w.burned
+  snap.scalars[1] = w.injected
+  snap.scalars[2] = w.nBirths
+  snap.scalars[3] = w.nBudded
+  snap.scalars[4] = w.nDeaths
+  snap.scalars[5] = w.recordAge
+  snap.scalars[6] = w.nClamped
+  snap.scalars[7] = w.nSteps
+  const nb = w.brainWeightCount
+  for (let i = 0; i < w.nMatter - w.nIntr; i++) {
+    const b = w.nIntr + i
+    const wl = w.wLimb[b]
+    const wb = w.wBrain[b]
+    snap.wHas[i * 2] = wl ? 1 : 0
+    snap.wHas[i * 2 + 1] = wb ? 1 : 0
+    if (wl) snap.wLimb.set(wl, i * N_WLIMB)
+    if (wb) snap.wBrain.set(wb, i * nb)
   }
-  return {
-    tick: w.tick,
-    bytes,
-    scalars: Float64Array.of(w.burned, w.injected, w.nBirths, w.nBudded, w.nDeaths, w.recordAge, w.nClamped, w.nSteps),
-    weights,
-    patches: w.patches.map((p) => ({ ...p })),
-    rng: w.rng.state(),
-    field: Float64Array.from(w.field),
-    freeFood: Int32Array.from(w.freeFoodSlots()),
-    lineageCounter: w.lineageCounter,
+  snap.patchCount = w.patches.length
+  for (let i = 0; i < w.patches.length; i++) {
+    snap.patches[i * 3] = w.patches[i].x
+    snap.patches[i * 3 + 1] = w.patches[i].y
+    snap.patches[i * 3 + 2] = w.patches[i].h
   }
+  snap.rng = w.rng.state()
+  snap.field.set(w.field)
+  const slots = w.freeFoodSlots()
+  snap.freeFoodCount = slots.length
+  for (let i = 0; i < slots.length; i++) snap.freeFood[i] = slots[i]
+  snap.lineageCounter = w.lineageCounter
+  snap.valid = true
+  return snap
+}
+
+export function takeSnapshot(w: World): Snapshot {
+  return writeSnapshot(w, allocSnapshot(w))
 }
 
 /** Rebuilds a world at the snapshot's moment. The Init must be the one it was created with. */
@@ -82,16 +138,19 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   w.recordAge = recordAge
   w.nClamped = clamped
   w.nSteps = steps
-  for (let i = 0; i < snap.weights.length; i++) {
-    const [wl, wb] = snap.weights[i]
-    w.wLimb[w.nIntr + i] = wl ? Float64Array.from(wl) : undefined
-    w.wBrain[w.nIntr + i] = wb ? Float64Array.from(wb) : undefined
+  const nb = w.brainWeightCount
+  for (let i = 0; i < w.nMatter - w.nIntr; i++) {
+    const b = w.nIntr + i
+    w.wLimb[b] = snap.wHas[i * 2] ? snap.wLimb.slice(i * N_WLIMB, (i + 1) * N_WLIMB) : undefined
+    w.wBrain[b] = snap.wHas[i * 2 + 1] ? snap.wBrain.slice(i * nb, (i + 1) * nb) : undefined
   }
   w.patches.length = 0
-  for (const p of snap.patches) w.patches.push({ ...p })
+  for (let i = 0; i < snap.patchCount; i++) {
+    w.patches.push({ x: snap.patches[i * 3], y: snap.patches[i * 3 + 1], h: snap.patches[i * 3 + 2] })
+  }
   w.rng.setState(snap.rng)
   w.field.set(snap.field)
-  w.setFreeFoodSlots(snap.freeFood)
+  w.setFreeFoodSlots(snap.freeFood.subarray(0, snap.freeFoodCount))
   w.lineageCounter = snap.lineageCounter
   w.aggregates.reset()
   w.grid.build()
