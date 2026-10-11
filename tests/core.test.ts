@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { pairForce, pairPotential } from '../src/core/forces'
-import { meanClusterSize, massByType, potentialEnergy, stateHash } from '../src/core/metrics'
+import { census, clusterStats, meanClusterSize, massByType, potentialEnergy, stateHash } from '../src/core/metrics'
 import { type Init, LAWS, type Laws, initFromSeed } from '../src/core/params'
 import { Rng } from '../src/core/rng'
 import { World } from '../src/core/world'
@@ -167,5 +167,32 @@ describe('phenomenology', () => {
     for (let t = 0; t < 5; t++) w.step()
     expect(w.owner[1]).toBe(3)
     expect(w.socket[1]).toBe(0)
+  })
+})
+
+describe('stats', () => {
+  it('counts an organism as one connected cluster through its rods, and nothing else', () => {
+    const init = smallInit({ T: 0, n_brain: 1, n_intrinsic: 4, T_food: 1e9, T_spawn: 1e9 })
+    init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
+    const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
+    // three free particles far apart, one organism with two limbs
+    w.x[0] = 20; w.y[0] = 20
+    w.x[1] = 250; w.y[1] = 60
+    w.placeOrganism({
+      brain: 4, x: 150, y: 150,
+      limbs: [{ idx: 2, quad: 0, angle: 0.6 }, { idx: 3, quad: 2, angle: 4.0 }],
+    })
+    const c = clusterStats(w)
+    expect(c.max).toBe(3)
+    expect(c.count).toBe(3)
+  })
+
+  it('census splits energy cleanly and births/deaths add up to the organisms alive', () => {
+    const w = new World(smallInit({ T_spawn: 15, T_food: 2 }), SMALL)
+    for (let t = 0; t < 1500; t++) w.step()
+    const c = census(w)
+    expect(c.eOrganisms + c.eFree + c.eFood).toBeCloseTo(w.totalEnergy(), 6)
+    expect(w.nBirths - w.nDeaths).toBe(c.organisms)
+    expect(c.organisms).toBeLessThanOrEqual(w.init.n_brain)
   })
 })

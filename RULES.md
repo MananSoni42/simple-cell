@@ -297,7 +297,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 
 | | | |
 |---|---|---|
-| `SIZE` | 1000 | world edge length |
+| `SIZE` | 300 | world edge length (small and dense on purpose: everything is visible) |
 | `dt` | 1 | tick |
 | `mu` | 0.5 | mobility |
 | `r_c` | 40 | interaction cutoff |
@@ -327,13 +327,16 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | | | |
 |---|---|---|
 | `A` | uniform in `[-1, 1]`, symmetric, `Food×Food = 0` | the chemistry; the main dial |
-| `T` | log-uniform `5 … 150` | temperature. Condensation melts near `T ≈ 50` for `A = +1` |
+| `T` | log-uniform `1 … 40` | temperature |
 | `foodMode` | `random` · `patchy` · `gradient` | see below |
-| `T_food` | 1 … 4 | ticks between food injections |
-| `T_spawn` | 30 … 80 | ticks between organism spawns |
-| `n_intrinsic` | 1200 | conserved matter pool (types assigned uniformly at random) |
-| `n_brain` | 20 | conserved brain pool |
-| `n_patch, r_patch, v_patch` | 2…6, 60…120, 0.1…0.4 | only for `patchy` |
+| `T_food` | 2 … 6 | ticks between food injections |
+| `T_spawn` | 60 … 140 | ticks between organism spawns |
+| `n_intrinsic` | 30 … 50 | conserved matter pool (types assigned uniformly at random). **Editable** |
+| `n_brain` | 4 | conserved brain pool, hence the cap on live organisms. **Editable** |
+| `n_start` | 1 … 2 | organisms present at tick 0. **Editable** |
+| `n_food0` | 30 | food present at tick 0. **Editable** |
+| `max_food` | 120 | the sun pauses while this much food is in the world |
+| `n_patch, r_patch, v_patch` | 1…3, 35…65, 0.05…0.2 | only for `patchy` |
 
 **Food modes.** All three place one Food particle per injection; they differ only in
 *where*:
@@ -352,19 +355,29 @@ without lowering `dt` lets particles tunnel through each other.
 
 ## 10. Interface
 
-**Start screen.** Read-only. Shows the 5 × 5 matrix as a heatmap and the seed-derived
-parameters. The **seed** is the only input: type one, or press `R` to re-roll.
-**`Enter` enters the world.** Nothing else is editable — the chemistry is frozen.
+**Start screen.** Shows the 5 × 5 matrix as a heatmap and the seed-derived parameters,
+all read-only: the chemistry is frozen. Two kinds of input:
+
+- the **seed** (type one, or press `R` to re-roll), which fixes everything above;
+- the **starting population** — particles, brains, organisms at start, food at start.
+  These default from the seed and can be overridden; changing the seed resets them.
+
+**`Enter` enters the world.**
 
 **World screen.**
 
 - **Tick meter**, default **1 tick / second**. `←` / `→` step the rate through
   `0.25, 0.5, 1, 2, 5, 10, 30, 60, max` ticks/sec. `Space` pauses. `.` single-steps.
   `Esc` returns to the start screen.
-- Live readout: tick count, seed, food mode, `T`, organism / bound / free counts, food
-  in world, total energy, energy burned, mean cluster size.
-- Rendering: particles as additive glow sprites coloured by type (brightness = energy),
-  rods as lines, signal field as a colour wash beneath.
+- **Stats panel** with sparklines for organisms, food and total energy, plus: born /
+  died / oldest / record lifespan, limbs per organism, the energy split (in organisms,
+  in free particles, in food) and cumulative burned, and the largest connected cluster
+  (particles touching, `r < 2.5 r_0`, with a brain always joined to its limbs).
+- **Rendering:** flat shapes only — circles for P1–P4 (coral, amber, mint, blue), a
+  white square for a brain, a lime diamond for food. Free particles are smaller and
+  translucent; bound limbs are full size with brightness following energy. Each
+  organism has a thick rod per limb and a faint disc marking its body. Between ticks
+  the renderer interpolates positions, so slow rates glide instead of jumping.
 
 ---
 

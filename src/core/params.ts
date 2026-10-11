@@ -3,7 +3,7 @@ import { N_MATRIX } from './types'
 
 /** Universal constants. Same for every particle; not play material. */
 export const LAWS = {
-  SIZE: 1000,
+  SIZE: 300,
   mu: 0.5, // mobility
   r_c: 40, // interaction cutoff
   beta: 0.1, // hard-core fraction -> r_0 = beta * r_c
@@ -39,6 +39,9 @@ export interface Init {
   T: number
   n_intrinsic: number
   n_brain: number
+  n_start: number // organisms present at tick 0
+  n_food0: number // food present at tick 0
+  max_food: number // sun pauses when this much food is in the world
   foodMode: FoodMode
   T_food: number
   T_spawn: number
@@ -61,14 +64,17 @@ export function initFromSeed(seed: number): Init {
   return {
     seed,
     A,
-    T: Math.round(5 * Math.pow(30, rng.next())), // 5 .. 150; condensation melts near T ~ 50
-    n_intrinsic: 1200,
-    n_brain: 20,
+    T: Math.round(Math.pow(40, rng.next()) * 10) / 10, // 1 .. 40
+    n_intrinsic: 30 + rng.int(21),
+    n_brain: 4,
+    n_start: 1 + rng.int(2),
+    n_food0: 30,
+    max_food: 120,
     foodMode: FOOD_MODES[rng.int(FOOD_MODES.length)],
-    T_food: 1 + rng.int(4),
-    T_spawn: 30 + rng.int(51),
-    n_patch: 2 + rng.int(5),
-    r_patch: 60 + rng.int(61),
-    v_patch: Math.round(rng.range(0.1, 0.4) * 100) / 100,
+    T_food: 2 + rng.int(5),
+    T_spawn: 60 + rng.int(81),
+    n_patch: 1 + rng.int(3),
+    r_patch: 35 + rng.int(31),
+    v_patch: Math.round(rng.range(0.05, 0.2) * 100) / 100,
   }
 }

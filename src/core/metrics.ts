@@ -52,8 +52,17 @@ export function potentialEnergy(w: World): number {
   return U
 }
 
-/** Mean size of connected components of matter (not food) linked at r < 0.7 r_c. */
-export function meanClusterSize(w: World): number {
+export interface ClusterStats {
+  mean: number
+  max: number
+  count: number
+}
+
+/**
+ * Connected components of matter (not food). Two particles are linked when they touch
+ * (r < 2.5 r_0), and a brain is always linked to its own limbs through the rods.
+ */
+export function clusterStats(w: World): ClusterStats {
   const { L } = w
   w.grid.build(w.x, w.y, w.alive, w.cap)
   const parent = new Int32Array(w.nMatter).map((_, i) => i)
@@ -61,8 +70,9 @@ export function meanClusterSize(w: World): number {
     while (parent[a] !== a) a = parent[a] = parent[parent[a]]
     return a
   }
-  const link2 = (0.7 * L.r_c) ** 2
+  const link2 = (2.5 * L.beta * L.r_c) ** 2
   for (let i = 0; i < w.nMatter; i++) {
+    if (w.owner[i] >= 0 && w.owner[i] !== i) parent[find(i)] = find(w.owner[i])
     const n = w.grid.near(w.x[i], w.y[i])
     for (let k = 0; k < n; k++) {
       const j = w.grid.buf[k]
@@ -74,9 +84,49 @@ export function meanClusterSize(w: World): number {
       if (ddx * ddx + ddy * ddy < link2) parent[find(i)] = find(j)
     }
   }
-  let roots = 0
-  for (let i = 0; i < w.nMatter; i++) if (find(i) === i) roots++
-  return w.nMatter / roots
+  const size = new Int32Array(w.nMatter)
+  for (let i = 0; i < w.nMatter; i++) size[find(i)]++
+  let count = 0
+  let max = 0
+  for (let i = 0; i < w.nMatter; i++) {
+    if (size[i] > 0) count++
+    if (size[i] > max) max = size[i]
+  }
+  return { mean: w.nMatter / count, max, count }
+}
+
+export function meanClusterSize(w: World): number {
+  return clusterStats(w).mean
+}
+
+export interface Census {
+  organisms: number
+  limbs: number
+  freeMatter: number
+  food: number
+  eOrganisms: number
+  eFree: number
+  eFood: number
+  oldest: number
+}
+
+export function census(w: World): Census {
+  const c: Census = { organisms: 0, limbs: 0, freeMatter: 0, food: w.nFood, eOrganisms: 0, eFree: 0, eFood: 0, oldest: 0 }
+  for (let i = 0; i < w.cap; i++) {
+    if (!w.alive[i]) continue
+    if (w.type[i] === FOOD) c.eFood += w.energy[i]
+    else if (w.owner[i] >= 0) {
+      c.eOrganisms += w.energy[i]
+      if (w.owner[i] === i) {
+        c.organisms++
+        c.oldest = Math.max(c.oldest, w.tick - w.bornAt[i])
+      } else c.limbs++
+    } else {
+      c.eFree += w.energy[i]
+      c.freeMatter++
+    }
+  }
+  return c
 }
 
 /** Cheap fingerprint of the full dynamic state, for determinism tests. */

@@ -23,10 +23,19 @@
   .legend { color:var(--dim); font-size:11px; margin-bottom:18px; }
   dl { display:grid; grid-template-columns:auto 1fr; gap:2px 18px; margin:0 0 22px; }
   dt { color:var(--dim); } dd { margin:0; }
+  .counts { display:grid; grid-template-columns:repeat(2,1fr); gap:8px 14px; margin-bottom:22px; }
+  .counts label { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--dim); }
+  .counts input { width:72px; }
   .go { color:var(--accent); letter-spacing:.06em; }
   #world { position:fixed; inset:0; }
-  canvas { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
-  #hud { position:absolute; left:14px; top:12px; pointer-events:none; white-space:pre; text-shadow:0 0 6px #000; }
+  #c { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
+  #stats { position:absolute; left:14px; top:12px; width:250px; padding:10px 12px; background:rgba(11,14,20,.78); border:1px solid var(--line); border-radius:8px; pointer-events:none; font-size:12px; }
+  #stats .hd { display:flex; justify-content:space-between; font-weight:600; }
+  #stats .dim, #stats .sub { color:var(--dim); font-size:11px; line-height:1.35; }
+  #stats .blk { margin-top:9px; }
+  #stats .row { display:flex; justify-content:space-between; align-items:baseline; }
+  #stats i { font-style:normal; }
+  #stats canvas { width:100%; height:26px; display:block; margin-top:2px; }
   #help { position:absolute; left:14px; bottom:12px; color:var(--dim); pointer-events:none; }
 </style>
 </head>
@@ -34,7 +43,7 @@
 <div id="start"></div>
 <div id="world" hidden>
   <canvas id="c"></canvas>
-  <div id="hud"></div>
+  <div id="stats"></div>
   <div id="help">space pause · ←/→ speed · . step · esc back</div>
 </div>
 <script type="module" src="/src/main.ts"></script>

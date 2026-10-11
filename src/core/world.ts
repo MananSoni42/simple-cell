@@ -97,6 +97,10 @@ export class World {
   tick = 0
   burned = 0
   injected = 0
+  nBirths = 0
+  nDeaths = 0
+  recordAge = 0
+  readonly bornAt: Int32Array
   readonly initialEnergy: number
 
   // particle state (struct of arrays)
@@ -142,7 +146,7 @@ export class World {
 
     this.nIntr = init.n_intrinsic
     this.nMatter = init.n_intrinsic + init.n_brain
-    this.cap = this.nMatter + (opts.maxFood ?? 3000)
+    this.cap = this.nMatter + (opts.maxFood ?? init.max_food)
     const n = this.cap
     this.x = new Float64Array(n)
     this.y = new Float64Array(n)
@@ -158,6 +162,7 @@ export class World {
     this.msg = new Float64Array(n)
     this.foodNear = new Float32Array(n)
     this.cool = new Int16Array(n)
+    this.bornAt = new Int32Array(n)
     this.limbs = new Int32Array(n * 4).fill(-1)
     this.mvx = new Float64Array(n)
     this.mvy = new Float64Array(n)
@@ -181,7 +186,10 @@ export class World {
     }
 
     this.initialEnergy = this.totalEnergy()
-    if (opts.autoSpawn !== false) this.spawnRandom()
+    if (opts.autoSpawn !== false) {
+      for (let i = 0; i < init.n_start; i++) this.spawnRandom()
+      for (let i = 0; i < init.n_food0; i++) this.injectFood()
+    }
   }
 
   // ---------------------------------------------------------------- accessors
@@ -457,6 +465,8 @@ export class World {
           if (l >= 0) this.unbind(l)
         }
         this.owner[b] = -1
+        this.nDeaths++
+        this.recordAge = Math.max(this.recordAge, this.tick - this.bornAt[b])
         this.wLimb[b] = undefined
         this.wBrain[b] = undefined
         continue
@@ -578,6 +588,8 @@ export class World {
     const b = spec.brain
     const { rng } = this
     this.owner[b] = b
+    this.nBirths++
+    this.bornAt[b] = this.tick
     this.x[b] = this.wrap(spec.x)
     this.y[b] = this.wrap(spec.y)
     this.mvx[b] = 0
