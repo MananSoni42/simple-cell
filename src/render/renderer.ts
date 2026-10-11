@@ -1,4 +1,4 @@
-import type { World } from '../core/world'
+import type { RenderState } from '../sim/frames'
 import { BRAIN, FOOD } from '../core/types'
 
 const BG = '#0b0e14'
@@ -90,7 +90,7 @@ export class Renderer {
   }
 
   /** Call right before each world step so the next frames can glide from these states. */
-  snapshot(w: World): void {
+  snapshot(w: RenderState): void {
     if (this.prevX.length !== w.cap) {
       this.prevX = new Float32Array(w.cap)
       this.prevY = new Float32Array(w.cap)
@@ -108,7 +108,7 @@ export class Renderer {
   }
 
   /** Screen positions for this frame. Limbs are rebuilt from their brain so rod and tip never drift apart. */
-  private place(w: World, alpha: number): void {
+  private place(w: RenderState, alpha: number): void {
     const { X, Y } = this
     const S = w.L.SIZE
     const k = this.px / S
@@ -129,7 +129,7 @@ export class Renderer {
     for (let b = w.nIntr; b < w.nMatter; b++) {
       if (!w.alive[b] || !w.isBrain(b)) continue
       for (let s = 0; s < 4; s++) {
-        const l = w.limbs[b * 4 + s]
+        const l = w.limbOf(b, s)
         if (l < 0) continue
         let th = w.theta[l]
         if (alpha < 1 && this.prevOwner[l] === b) th = this.prevTheta[l] + (th - this.prevTheta[l]) * alpha
@@ -140,7 +140,7 @@ export class Renderer {
   }
 
   /** alpha in [0,1]: how far we are from the last snapshot to the current state. */
-  draw(w: World, alpha: number): void {
+  draw(w: RenderState, alpha: number): void {
     const { ctx, px, X, Y, zoom: z } = this
     const k = px / w.L.SIZE
     this.place(w, alpha)
@@ -178,7 +178,7 @@ export class Renderer {
     for (const b of brains) {
       if (!vis(b)) continue
       for (let s = 0; s < 4; s++) {
-        const l = w.limbs[b * 4 + s]
+        const l = w.limbOf(b, s)
         if (l < 0) continue
         ctx.strokeStyle = COLORS[w.type[l]]
         ctx.beginPath()
@@ -270,7 +270,7 @@ export class Renderer {
     ctx.fill()
   }
 
-  private drawField(w: World): void {
+  private drawField(w: RenderState): void {
     const N = w.L.fieldN
     const fc = this.fieldCanvas
     fc.width = fc.height = N

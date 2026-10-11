@@ -1,7 +1,8 @@
-import { type Perf, canShare, makeBackend } from './compute/select'
+import type { Perf } from './compute/select'
 import type { Init } from './core/params'
-import { World } from './core/world'
 import { Renderer } from './render/renderer'
+import { H, type FrameBuffers, type FrameLayout, type RenderState, frameState } from './sim/frames'
+import type { FromSim, StatsSnapshot, ToSim } from './sim/protocol'
 import { mountStart } from './ui/start'
 import { StatsPanel } from './ui/stats'
 
@@ -17,18 +18,29 @@ const bPlay = $('b-play')
 const bPause = $('b-pause')
 const bRate = $('b-rate')
 
-let world: World | null = null
+/**
+ * The page only draws. The world runs in a worker (sim/sim.worker.ts) and publishes
+ * snapshots into three shared frame buffers; this side picks the newest one each frame.
+ */
+interface Link {
+  worker: Worker
+  layout: FrameLayout
+  frames: FrameBuffers[]
+  states: RenderState[]
+  header: Int32Array
+  note: string
+}
+
+let link: Link | null = null
+let latest: StatsSnapshot | null = null
 let rate = 1 // requested ticks per second
 let paused = false
-let acc = 0
-let last = 0
-let session = 0
-let busy = false
-let perfNote = ''
-let tps = 0 // achieved ticks per second
-let tpsCount = 0
-let tpsSince = 0
+let seenCounter = -1
+let shown: RenderState | null = null
+let frameAt = 0
+let frameGap = 1000
 
+const send = (m: ToSim) => link?.worker.postMessage(m)
 const rateLabel = () => (paused ? 'paused' : `${rate} tick/s`)
 
 function syncControls(): void {
@@ -38,104 +50,100 @@ function syncControls(): void {
 }
 function play(): void {
   paused = false
-  last = performance.now()
+  send({ kind: 'pause', paused: false })
   syncControls()
 }
 function pause(): void {
   paused = true
+  send({ kind: 'pause', paused: true })
   syncControls()
 }
-function faster(): void {
-  rate = Math.min(MAX_RATE, rate * 2)
-  syncControls()
-}
-function slower(): void {
-  rate = Math.max(MIN_RATE, rate / 2)
+function setRate(r: number): void {
+  rate = Math.min(MAX_RATE, Math.max(MIN_RATE, r))
+  send({ kind: 'rate', rate })
   syncControls()
 }
 function stop(): void {
-  session++
-  world?.backend.dispose?.()
-  world = null
+  link?.worker.terminate() // also ends its force workers
+  link = null
+  latest = null
+  shown = null
   worldEl.hidden = true
   start.show()
 }
 
-const start = mountStart(startEl, async (init: Init, perf: Perf) => {
-  session++
-  busy = false
-  const w = new World(init, { shared: canShare })
-  const { backend, note } = await makeBackend(w, perf)
-  w.backend = backend
-  perfNote = note
-  world = w
-  renderer.reset()
-  renderer.snapshot(w)
-  rate = 1
-  acc = 0
-  tps = tpsCount = 0
-  tpsSince = performance.now()
-  stats.reset()
-  start.hide()
-  worldEl.hidden = false
-  play()
+const start = mountStart(startEl, (init: Init, perf: Perf) => {
+  link?.worker.terminate()
+  const worker = new Worker(new URL('./sim/sim.worker.ts', import.meta.url), { type: 'module' })
+  worker.onmessage = (e: MessageEvent<FromSim>) => {
+    const m = e.data
+    if (m.kind === 'ready') {
+      link = { worker, layout: m.layout, frames: m.frames, states: m.frames.map((f) => frameState(m.layout, f)), header: m.header, note: m.note }
+      shown = null
+      seenCounter = -1
+      renderer.reset()
+      stats.reset()
+      rate = 1
+      paused = false
+      start.hide()
+      worldEl.hidden = false
+      syncControls()
+    } else if (m.kind === 'stats') latest = m.stats
+    else console.error('simulation error:', m.message)
+  }
+  worker.postMessage({ kind: 'start', init, perf } satisfies ToSim)
 })
 
 bPlay.addEventListener('click', play)
 bPause.addEventListener('click', pause)
 $('b-stop').addEventListener('click', stop)
-$('b-fast').addEventListener('click', faster)
-$('b-slow').addEventListener('click', slower)
+$('b-fast').addEventListener('click', () => setRate(rate * 2))
+$('b-slow').addEventListener('click', () => setRate(rate / 2))
 
 addEventListener('keydown', (e) => {
-  if (!world) return
+  if (!link) return
   if (e.key === 'Escape') stop()
   else if (e.key === ' ') {
     e.preventDefault()
     paused ? play() : pause()
-  } else if (e.key === 'ArrowRight') faster()
-  else if (e.key === 'ArrowLeft') slower()
-  else if (e.key === '.' && !busy) {
-    pause()
-    acc = 0
-    renderer.snapshot(world)
-    void world.stepAsync()
+  } else if (e.key === 'ArrowRight') setRate(rate * 2)
+  else if (e.key === 'ArrowLeft') setRate(rate / 2)
+  else if (e.key === '.') {
+    paused = true
+    syncControls()
+    send({ kind: 'step' })
   }
 })
 
-async function advance(w: World, mine: number): Promise<void> {
-  busy = true
-  const deadline = performance.now() + 12
-  try {
-    while (mine === session && acc >= 1 && performance.now() < deadline) {
-      renderer.snapshot(w)
-      await w.stepAsync()
-      acc -= 1
-      tpsCount++
-    }
-  } finally {
-    if (mine === session) busy = false
+/** Mark the newest published buffer as "being read" so the simulation will not overwrite it. */
+function acquire(l: Link): number {
+  for (;;) {
+    const a = Atomics.load(l.header, H.ACTIVE)
+    Atomics.store(l.header, H.READING, a)
+    if (Atomics.load(l.header, H.ACTIVE) === a) return a
   }
 }
 
 function frame(now: number): void {
   requestAnimationFrame(frame)
-  if (!world) return
-  const dt = Math.min(0.25, (now - last) / 1000)
-  last = now
-  if (!paused && !busy) {
-    acc = Math.min(acc + dt * rate, Math.max(3, rate * 0.05))
-    void advance(world, session)
+  const l = link
+  if (!l) return
+
+  if (Atomics.load(l.header, H.COUNTER) !== seenCounter) {
+    // remember the frame we are leaving (still protected as "being read") for gliding between ticks
+    if (shown) renderer.snapshot(shown)
+    const a = acquire(l)
+    shown = l.states[a]
+    seenCounter = Atomics.load(l.header, H.COUNTER)
+    const gap = now - frameAt
+    if (frameAt > 0 && gap < 2000) frameGap = frameGap * 0.7 + gap * 0.3
+    frameAt = now
   }
-  if (now - tpsSince > 1000) {
-    tps = (tpsCount * 1000) / (now - tpsSince)
-    tpsCount = 0
-    tpsSince = now
-  }
+  if (!shown) return
+
   // glide between ticks only when ticks are slow enough to see
   const smooth = !paused && rate <= 10
-  renderer.draw(world, smooth ? Math.min(1, acc) : 1)
-  const w = world
-  stats.update(w, rateLabel(), `${w.backend.name} · ${tps.toFixed(tps < 10 ? 1 : 0)} tick/s achieved · ${w.cap} slots${perfNote ? ' · ' + perfNote : ''}`)
+  renderer.draw(shown, smooth ? Math.min(1, (now - frameAt) / frameGap) : 1)
+  if (latest) stats.update(latest, rateLabel(), `${latest.backend} · ${latest.tps.toFixed(latest.tps < 10 ? 1 : 0)} tick/s achieved · ${latest.cap} slots${l.note ? ' · ' + l.note : ''}`)
 }
 requestAnimationFrame(frame)

@@ -47,3 +47,13 @@ Single thread, ms per tick (Node):
 Browser, 16×, ticks per second: serial 148 → 215, 2 threads 150 → 296, 4 → 350, 8 → 392,
 14 → 395 (was 311). Threads now split evenly because the kernel runs over the dense list of live
 particles instead of raw slot indices.
+
+## After phase 2 (simulation in its own worker, triple-buffered frames)
+
+The page now only draws; results are bit-identical (the core is untouched). Ticks per second the
+app actually sustains (requested rate maxed), measured from the stats panel:
+
+| World | Threads | Before | After |
+|---|---|---|---|
+| 8× | 8 | 238 | 624 |
+| 16× | 14 | – | 174 (1024 organisms, 27k food) |
