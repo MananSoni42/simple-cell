@@ -11,12 +11,15 @@ export class InspectPanel {
   ) {}
 
   get open(): boolean {
-    return !this.root.hidden
+    return this.current !== null
   }
 
+  /** The rail is always present, so "nothing selected" is a hint rather than an empty box. */
   hide(): void {
-    this.root.hidden = true
     this.current = null
+    this.root.innerHTML = `<div class="hd"><span>Organism</span></div>
+      <div class="empty-hint">click an organism in the world to look inside it<br><br>
+      you will see its age, lineage and limbs, and can save it or drop a copy back in</div>`
   }
 
   show(o: OrganismFile | null): void {
@@ -35,14 +38,13 @@ export class InspectPanel {
       ['weights', `${o.wLimb.length} limb, ${o.wBrain.length} brain`],
     ]
     this.root.innerHTML = `
-      <h3>Organism</h3>
+      <div class="hd"><span>Organism</span><span class="dim">gen ${o.generation}</span></div>
       <div class="kv">${rows.map(([k, v]) => `<span>${k}</span><b>${v}</b>`).join('')}</div>
       <div class="row">
         <button id="o-save">save</button>
         <button id="o-copy">copy</button>
         <button id="o-clone">re-seed</button>
         <button id="o-load">load…</button>
-        <button id="o-close">close</button>
       </div>
       <input type="file" id="o-file" accept="application/json" hidden />
       <div class="dim" id="o-note" style="margin-top:6px"></div>`
@@ -84,7 +86,6 @@ export class InspectPanel {
         note.textContent = `could not read that: ${(err as Error).message}`
       }
     })
-    q('#o-close').addEventListener('click', () => this.hide())
     this.root.hidden = false
   }
 }

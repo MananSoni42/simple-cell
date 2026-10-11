@@ -1,7 +1,8 @@
 import { makeBackend, canShare } from '../compute/select'
 import { census, lifeStats } from '../core/metrics'
 import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, writeSnapshot } from '../core/snapshot'
-import { exportOrganism } from '../core/organism'
+import { type OrganismFile, exportOrganism } from '../core/organism'
+import { Recorder } from '../core/recorder'
 import { World } from '../core/world'
 import { H, N_FRAMES, allocFrame, layoutOf, writeFrame, type FrameBuffers } from './frames'
 import type { FromSim, StatsSnapshot, ToSim } from './protocol'
@@ -23,6 +24,7 @@ let note = ''
 let world: World | null = null
 let historyEvery = 1
 let rewindTo = -1 // a pending request, applied between ticks
+let recorder = new Recorder()
 
 const HISTORY_BUDGET = 192 << 20 // bytes of snapshots we are willing to hold
 const HISTORY_HZ = 20 // snapshots per second of wall clock, however fast the world runs
@@ -104,6 +106,25 @@ function publish(w: World): void {
   Atomics.add(header, H.COUNTER, 1)
 }
 
+/** Everything the summary screen needs: the record, who survived, and a small hall of fame. */
+function report(w: World): { record: ReturnType<Recorder['finish']>; organisms: OrganismFile[]; notable: { label: string; organism: OrganismFile }[] } {
+  const organisms: OrganismFile[] = []
+  let oldest: { age: number; o: OrganismFile } | null = null
+  let prolific: { n: number; o: OrganismFile } | null = null
+  for (let b = w.nIntr; b < w.nMatter; b++) {
+    if (!w.alive[b] || !w.isBrain(b)) continue
+    const o = exportOrganism(w, b)
+    if (!o) continue
+    organisms.push(o)
+    if (!oldest || o.age > oldest.age) oldest = { age: o.age, o }
+    if (!prolific || o.children > prolific.n) prolific = { n: o.children, o }
+  }
+  const notable: { label: string; organism: OrganismFile }[] = []
+  if (oldest) notable.push({ label: 'oldest survivor', organism: oldest.o })
+  if (prolific && prolific.n > 0 && prolific.o !== oldest?.o) notable.push({ label: 'most children', organism: prolific.o })
+  return { record: recorder.finish(w), organisms, notable }
+}
+
 function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnapshot {
   return {
     tick: w.tick,
@@ -145,6 +166,7 @@ async function run(w0: World, mine: number): Promise<void> {
   let tps = 0
   publish(w)
   remember(w)
+  recorder.observe(w)
 
   while (mine === session) {
     if (rewindTo >= 0) {
@@ -164,6 +186,7 @@ async function run(w0: World, mine: number): Promise<void> {
       stepRequests = 0
       await w.stepAsync()
       remember(w)
+      recorder.observe(w)
       tickCount++
       dirty = true
       lastPublish = 0 // publish immediately
@@ -173,6 +196,7 @@ async function run(w0: World, mine: number): Promise<void> {
       while (mine === session && acc >= 1 && performance.now() < deadline) {
         await w.stepAsync()
         remember(w)
+        recorder.observe(w)
         acc -= 1
         tickCount++
         dirty = true
@@ -216,6 +240,7 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       note = made.note
       world = w
       planHistory(w)
+      recorder = new Recorder()
       retune()
       const layout = layoutOf(w)
       frames = Array.from({ length: N_FRAMES }, () => allocFrame(layout))
@@ -239,6 +264,9 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
         for (let k = 0; k < m.n; k++) w.feedAt(m.x, m.y, m.radius)
         publish(w)
       }
+    } else if (m.kind === 'finish') {
+      const w = world
+      if (w) post({ kind: 'finished', report: report(w) })
     } else if (m.kind === 'inspect') {
       const w = world
       if (w) {

@@ -3,98 +3,36 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Cell Life</title>
-<style>
-  :root { color-scheme: dark; --bg:#06080d; --fg:#cfd6e4; --dim:#6b7589; --line:#1b2230; --accent:#7aa2ff; }
-  * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--fg); font:13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow:hidden; }
-  [hidden] { display:none !important; }
-  #start { height:100%; display:grid; place-items:center; }
-  .card { width:min(600px, 92vw); max-height:100vh; overflow:auto; padding:18px 0; }
-  h1 { font-size:22px; font-weight:600; letter-spacing:.08em; margin:0 0 4px; }
-  .sub { color:var(--dim); margin-bottom:22px; }
-  .row { display:flex; gap:10px; align-items:center; margin-bottom:18px; }
-  select { background:#0d121b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; }
-  input, button { background:#0d121b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px 10px; font:inherit; }
-  input { width:150px; } input:focus { outline:1px solid var(--accent); }
-  input[type=checkbox] { width:auto; margin:0 6px 0 0; vertical-align:-1px; }
-  .check { display:flex; align-items:baseline; gap:2px; flex-wrap:wrap; }
-  button { cursor:pointer; } button:hover { border-color:var(--accent); }
-  table.m { border-collapse:separate; border-spacing:3px; margin-bottom:6px; }
-  table.m td { width:58px; height:34px; text-align:center; border-radius:5px; font-size:12px; cursor:ns-resize; user-select:none; }
-  table.m td:focus { outline:1px solid var(--accent); }
-  table.m td.locked { cursor:default; opacity:.45; }
-  .stab { margin:4px 0 16px; font-size:11px; line-height:1.5; }
-  .stab b.ok { color:#3ddc97; } .stab b.warn { color:#ff6b81; }
-  textarea { width:100%; height:120px; background:#0d121b; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; font:inherit; margin-bottom:14px; }
-  table.m th { color:var(--dim); font-weight:400; padding:0 4px; }
-  .legend { color:var(--dim); font-size:11px; margin-bottom:18px; }
-  dl { display:grid; grid-template-columns:auto 1fr; gap:2px 18px; margin:0 0 22px; }
-  dt { color:var(--dim); } dd { margin:0; }
-  .presets { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:16px; }
-  .presets button { font-size:11px; padding:4px 9px; }
-  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; }
-  .tabs button { border:0; border-bottom:2px solid transparent; border-radius:0; padding:7px 13px; color:var(--dim); background:none; }
-  .tabs button.on { color:var(--accent); border-bottom-color:var(--accent); }
-  .panel[hidden] { display:none; }
-  .panel { min-height:250px; }
-  table.m td.empty { background:none; cursor:default; }
-  .counts { display:grid; grid-template-columns:repeat(2,1fr); gap:8px 14px; margin-bottom:22px; }
-  .counts label { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--dim); }
-  .counts input { width:72px; }
-  .check { color:var(--fg); margin-bottom:8px; } .check .dim { color:var(--dim); font-size:11px; }
-  .go { color:var(--accent); letter-spacing:.06em; }
-  #explain { height:100%; overflow:auto; display:flex; justify-content:center; }
-  .explain { width:min(1100px, 96vw); }
-  .explain h2 { font-size:13px; font-weight:600; letter-spacing:.06em; color:var(--accent); margin:0 0 8px; }
-  .explain p { margin:0 0 9px; color:var(--fg); font-size:12px; line-height:1.6; }
-  .explain code { color:var(--dim); }
-  .ex-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px,1fr)); gap:26px 32px; margin-bottom:24px; }
-  .ex-svg { width:100%; height:auto; background:#0a0d14; border:1px solid var(--line); border-radius:8px; margin-bottom:10px; }
-  #world { position:fixed; inset:0; }
-  #c { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); }
-  #stats { position:absolute; left:14px; top:12px; width:250px; padding:10px 12px; background:rgba(11,14,20,.78); border:1px solid var(--line); border-radius:8px; pointer-events:none; font-size:12px; }
-  #stats .hd { display:flex; justify-content:space-between; font-weight:600; }
-  #stats .dim, #stats .sub { color:var(--dim); font-size:11px; line-height:1.35; }
-  #stats .blk { margin-top:9px; }
-  #stats .row { display:flex; justify-content:space-between; align-items:baseline; }
-  #stats i { font-style:normal; }
-  #stats canvas { width:100%; height:26px; display:block; margin-top:2px; }
-  #controls { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); display:flex; gap:8px; align-items:center; padding:6px 10px; background:rgba(11,14,20,.82); border:1px solid var(--line); border-radius:10px; }
-  #controls button { padding:5px 12px; }
-  #controls button.on { border-color:var(--accent); color:var(--accent); }
-  #controls .sep { width:1px; height:18px; background:var(--line); margin:0 4px; }
-  #b-rate { min-width:78px; text-align:center; color:var(--dim); }
-  #b-seek { width:120px; accent-color:var(--accent); }
-  #inspect { position:absolute; right:14px; top:12px; width:260px; max-height:88vh; overflow:auto; padding:10px 12px; background:rgba(11,14,20,.9); border:1px solid var(--line); border-radius:8px; font-size:12px; }
-  #inspect h3 { margin:0 0 6px; font-size:12px; font-weight:600; }
-  #inspect .kv { display:grid; grid-template-columns:auto 1fr; gap:1px 10px; color:var(--dim); font-size:11px; margin-bottom:8px; }
-  #inspect .kv b { color:var(--fg); font-weight:400; }
-  #inspect .row { gap:5px; margin:0; flex-wrap:wrap; }
-  #inspect button { padding:4px 7px; font-size:11px; white-space:nowrap; }
-  #help { position:absolute; left:14px; bottom:12px; color:var(--dim); pointer-events:none; }
-</style>
+<title>SimpleCell</title>
 </head>
 <body>
-<div id="start"></div>
-<div id="explain" hidden></div>
-<div id="world" hidden>
-  <canvas id="c"></canvas>
-  <div id="stats"></div>
-  <div id="inspect" hidden></div>
-  <div id="controls">
-    <button id="b-play" title="start / resume (space)">▶ Start</button>
-    <button id="b-pause" title="pause (space)">❚❚ Pause</button>
-    <button id="b-stop" title="stop and return to the start screen (esc)">■ Stop</button>
-    <span class="sep"></span>
-    <button id="b-rewind" title="rewind (backspace / J)">◀◀</button>
-    <input type="range" id="b-seek" min="0" max="1000" value="1000" title="scrub through held history" />
-    <span class="sep"></span>
-    <button id="b-slow" title="half speed (←)">0.5×</button>
-    <span id="b-rate">1 tick/s</span>
-    <button id="b-fast" title="double speed (→)">2×</button>
-  </div>
-  <div id="help">fill level = energy · red = starving · . single-step · ◀◀ rewind · shift-drag to drop food · click an organism to inspect</div>
+<div id="app">
+  <section class="page" id="page-landing"></section>
+  <section class="page" id="page-explain" hidden></section>
+  <section class="page" id="page-setup" hidden></section>
+
+  <section class="page" id="page-world" hidden>
+    <div class="world-grid">
+      <aside class="rail" id="stats"></aside>
+      <main id="stage"><canvas id="c"></canvas></main>
+      <aside class="rail" id="inspect"></aside>
+      <div class="bar">
+        <button id="b-play" title="start / resume (space)">▶ Start</button>
+        <button id="b-pause" title="pause (space)">❚❚ Pause</button>
+        <button id="b-stop" title="end the run and see the summary (esc)">■ Stop</button>
+        <span class="sep"></span>
+        <button id="b-rewind" title="rewind (backspace / J)">◀◀</button>
+        <input type="range" id="b-seek" min="0" max="1000" value="1000" title="scrub through held history" />
+        <span class="sep"></span>
+        <button id="b-slow" title="half speed (←)">0.5×</button>
+        <span id="b-rate">1 tick/s</span>
+        <button id="b-fast" title="double speed (→)">2×</button>
+        <span id="help">shift-drag to feed · click an organism · . steps</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="page" id="page-summary" hidden></section>
 </div>
 <script type="module" src="/src/main.ts"></script>
 </body>

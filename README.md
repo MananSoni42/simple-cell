@@ -1,4 +1,4 @@
-# Cell Life
+# SimpleCell
 
 A toy cellular world. Continuous space, discrete time, symmetric chemistry, and an
 energy flux — built to find out whether membranes, metabolism, and self-repair can
@@ -22,8 +22,13 @@ preferred spacing, structures that hold a chemical gradient, bodies that heal, b
 multi-thread / GPU force computation, discrete-time guardrails, organism-aggregate and lifetime
 metrics, rewind, and config export/import. Learning is paused.
 
-Start with **"how it works"** on the start screen (or `H`) — one page explaining the whole model.
-[PLAN.md](PLAN.md) carries the staged backlog and the measurements behind it.
+The app has four screens: a **title** page, **setup** (grouped into physics / chemistry / food /
+life / compute, with sliders that say what each value *means*), the **world** (stats rail, canvas,
+organism inspector, controls), and a **run summary** when you stop — hero numbers, observations
+written from the recorded run, charts, and exports.
+
+Start with **"how it works"** — one page explaining the whole model, generated from the live
+constants. [PLAN.md](PLAN.md) carries the staged backlog and the measurements behind it.
 
 ## Quick start
 
@@ -55,7 +60,7 @@ let evolution run headless, thousands of generations without a browser.
 ```
 src/core/     pure headless model: chemistry, physics, energy, organisms, neurons
 src/render/   canvas drawing — glow sprites, rods, signal field wash
-src/ui/       matrix heatmap editor, parameter panel, tick-rate control
+src/ui/       the four screens, shared controls, charts, design tokens
 tests/        unit, invariant, phenomenology, and performance suites
 ```
 

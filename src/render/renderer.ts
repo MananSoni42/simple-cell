@@ -10,6 +10,15 @@ const R_FOOD = 2
 
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v))
 
+/** Pointer capture is a convenience, and throws for synthetic pointers; never let it break a handler. */
+export function capture(el: Element, e: PointerEvent): void {
+  try {
+    el.setPointerCapture(e.pointerId)
+  } catch {
+    /* no live pointer with that id */
+  }
+}
+
 /**
  * Flat shapes only: circles for matter, squares for brains, diamonds for food.
  * Energy is shown on the organism itself: a brain is a gauge that fills from the
@@ -33,10 +42,21 @@ export class Renderer {
   private ox = 0
   private oy = 0
 
-  constructor(private canvas: HTMLCanvasElement) {
+  /** Ripples left where food was dropped, and a ring around the last organism clicked. */
+  private flashes: { x: number; y: number; at: number }[] = []
+  private ring: { x: number; y: number; at: number } | null = null
+  private worldSize = 300
+  /** The last state drawn, so a resize can repaint rather than leaving the canvas cleared. */
+  private last: RenderState | null = null
+
+  constructor(
+    private canvas: HTMLCanvasElement,
+    private host?: HTMLElement,
+  ) {
     this.ctx = canvas.getContext('2d')!
     this.resize()
     addEventListener('resize', () => this.resize())
+    if (host && typeof ResizeObserver === 'function') new ResizeObserver(() => this.resize()).observe(host)
     const toCanvas = (e: MouseEvent) => {
       const r = canvas.getBoundingClientRect()
       return [((e.clientX - r.left) * canvas.width) / r.width, ((e.clientY - r.top) * canvas.height) / r.height]
@@ -57,7 +77,7 @@ export class Renderer {
     let drag: [number, number] | null = null
     canvas.addEventListener('pointerdown', (e) => {
       drag = toCanvas(e) as [number, number]
-      canvas.setPointerCapture(e.pointerId)
+      capture(canvas, e)
     })
     canvas.addEventListener('pointermove', (e) => {
       if (!drag) return
@@ -77,7 +97,7 @@ export class Renderer {
   }
 
   /** Where a client-space point lands in the world, accounting for zoom and pan. */
-  toWorld(clientX: number, clientY: number, size: number): [number, number] {
+  toWorld(clientX: number, clientY: number, size = this.worldSize): [number, number] {
     const r = this.canvas.getBoundingClientRect()
     const cx = ((clientX - r.left) * this.canvas.width) / r.width
     const cy = ((clientY - r.top) * this.canvas.height) / r.height
@@ -92,12 +112,31 @@ export class Renderer {
     this.oy = Math.min(0, Math.max(lim, this.oy))
   }
 
+  /** The canvas is square and fills its column, not the window. */
   private resize(): void {
-    const side = Math.floor(Math.min(innerWidth, innerHeight))
-    const dpr = devicePixelRatio || 1
+    const box = this.host?.getBoundingClientRect()
+    const avail = box && box.width > 40 ? Math.min(box.width, box.height) : Math.min(innerWidth, innerHeight)
+    const side = Math.max(120, Math.floor(avail - 16))
+    const dpr = Math.min(2, devicePixelRatio || 1)
     this.canvas.style.width = this.canvas.style.height = side + 'px'
     this.canvas.width = this.canvas.height = Math.floor(side * dpr)
     this.px = this.canvas.width
+    if (this.last) this.draw(this.last, 1)
+  }
+
+  /** Called when a world starts, so pointer maths knows the world's edge length. */
+  fit(size: number): void {
+    this.worldSize = size
+    this.resize()
+  }
+
+  flash(x: number, y: number): void {
+    this.flashes.push({ x, y, at: performance.now() })
+    if (this.flashes.length > 40) this.flashes.shift()
+  }
+
+  markOrganism(x: number, y: number): void {
+    this.ring = { x, y, at: performance.now() }
   }
 
   /** Call right before each world step so the next frames can glide from these states. */
@@ -156,7 +195,8 @@ export class Renderer {
   }
 
   /** alpha in [0,1]: how far we are from the last snapshot to the current state. */
-  draw(w: RenderState, alpha: number): void {
+  draw(w: RenderState, alpha: number, now = performance.now()): void {
+    this.last = w
     const { ctx, px, X, Y, zoom: z } = this
     const k = px / w.L.SIZE
     this.place(w, alpha)
@@ -306,8 +346,41 @@ export class Renderer {
       const r = R_BRAIN * 0.8 * k
       for (const [ox, oy] of tiles(X[b], Y[b])) ctx.strokeRect(X[b] + ox - r, Y[b] + oy - r, 2 * r, 2 * r)
     }
+    this.drawCues(w, now, k)
     ctx.globalAlpha = 1
     ctx.setTransform(1, 0, 0, 1, 0, 0)
+  }
+
+  /**
+   * Feedback for things the player did: an expanding ripple where food was dropped, and a ring
+   * that pulses once around an organism that was clicked. Both fade and then cost nothing.
+   */
+  private drawCues(w: RenderState, now: number, k: number): void {
+    const { ctx } = this
+    const LIFE = 520
+    this.flashes = this.flashes.filter((f) => now - f.at < LIFE)
+    for (const f of this.flashes) {
+      const t = (now - f.at) / LIFE
+      ctx.globalAlpha = (1 - t) * 0.5
+      ctx.strokeStyle = COLORS[FOOD]
+      ctx.lineWidth = Math.max(1, 1.2 * k)
+      ctx.beginPath()
+      ctx.arc(f.x * k, f.y * k, (6 + 26 * t) * k, 0, Math.PI * 2)
+      ctx.stroke()
+    }
+    if (this.ring) {
+      const t = (now - this.ring.at) / 900
+      if (t >= 1) this.ring = null
+      else {
+        ctx.globalAlpha = (1 - t) * 0.85
+        ctx.strokeStyle = COLORS[BRAIN]
+        ctx.lineWidth = Math.max(1, 1.6 * k)
+        ctx.beginPath()
+        ctx.arc(this.ring.x * k, this.ring.y * k, (w.L.L_rod + 8 + 10 * t) * k, 0, Math.PI * 2)
+        ctx.stroke()
+      }
+    }
+    ctx.globalAlpha = 1
   }
 
   private circle(x: number, y: number, r: number, color: string): void {

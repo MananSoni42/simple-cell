@@ -1,9 +1,9 @@
 {
-  "name": "cell-life",
+  "name": "simplecell",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A toy cellular world: continuous space, discrete time, symmetric chemistry.",
+  "description": "SimpleCell \u2014 a toy cellular world: continuous space, discrete time, symmetric chemistry.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

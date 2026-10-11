@@ -6,9 +6,14 @@ const L = LAWS
 /** One page explaining what an organism is and every mechanism that acts on it. */
 export function explainHTML(): string {
   return `
-  <div class="card explain">
-    <h1>WHAT AN ORGANISM IS</h1>
-    <div class="sub">everything below follows from the laws in RULES.md — nothing here is special-cased</div>
+  <div class="explain">
+    <div class="setup-head">
+      <div>
+        <h1>WHAT AN ORGANISM IS</h1>
+        <div class="note">everything below follows from the rules — nothing here is special-cased</div>
+      </div>
+      <button id="ex-back">← back</button>
+    </div>
 
     <div class="ex-grid">
       <section>
@@ -86,7 +91,7 @@ export function explainHTML(): string {
         brains sat 0.3 units apart, and nothing stayed assembled.</p>
       </section>
     </div>
-    <div class="go">press ENTER or ESC to go back</div>
+    <div class="go" id="ex-back-2">← back (Esc)</div>
   </div>`
 }
 

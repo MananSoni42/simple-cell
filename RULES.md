@@ -499,67 +499,40 @@ stayed assembled. R2.4 and R2.5 are the enforcement; this table is the budget.
 
 ## 10. Interface
 
-**Start screen.** Split into four tabs — **world** (food regime, rates, starting population),
-**chemistry** (the matrix), **life** (temperature, sub-steps, decay, food lifetime, the three
-toggles) and **compute** (threads, GPU, export/import). `Tab` cycles them.
+Four screens.
 
-A row of **presets** sits above the tabs: *Membrane, Grazers, Crowd, Desert, Cold soup*. Each is
-just a seeded world with its chemistry and economy overridden — nothing a preset does could not
-be typed by hand.
+**Title.** What the world is, and two ways in: *Init world*, or *How it works* (§15).
 
-The matrix is shown as a **lower triangle only**, because it is symmetric by law and showing both
-halves is the same numbers twice. Editing a cell edits the pair.
+**Setup.** Grouped by what each setting governs, not by which code reads it: **physics** (size,
+temperature, sub-steps, terrain, matter, bonds, inflow), **chemistry** (the matrix), **food**
+(pattern, rate, lifetime, cap), **life** (arrivals, reproduction, decay) and **compute** (threads,
+GPU, import/export). `1`–`5` switch tabs.
 
-Inputs:
+Numeric settings are **sliders**, each printing its value and a line of plain English about what
+that value *means* — "cold: structures hold together", "each tick split into 4, so no single move
+is long enough to pass through anything". Exclusive choices are chips. The seed is the one free-text
+field, and preset worlds sit above the tabs. The chemistry matrix shows only its lower triangle,
+because it is symmetric by law. The stability budget (§9) is displayed live.
 
-- the **seed** (type one, or press `R` to re-roll), which fixes everything above;
-- the **starting population** — particles, brains, organisms at start, food at start;
-- the **chemistry matrix**: drag a cell vertically, use the arrow keys, or double-click to type.
-  Edits clamp to `[-1, 1]` and snap to the bond set while `quantized` is on. Food×Food stays 0;
-- **temperature** and **free-particle decay**, with the stability budget shown live;
-- **export / import**: download the config as JSON, copy it, or load one back. The whole config
-  also lives in the URL hash, so a world is a link.
+**World.** Three columns: a stats rail, the canvas, and an organism inspector that holds a hint
+until something is clicked. Controls along the bottom: start, pause, stop, rewind and a history
+scrubber, and 0.5× / 2× between 1/8 and 8192 ticks/s. `Space` pauses, `←`/`→` change speed,
+`.` single-steps, `Backspace`/`J` rewinds, `Esc` closes the inspector or ends the run.
+**Shift-drag** scatters food; a **plain click** inspects an organism and rings it.
 
-All of these default from the seed; re-rolling or retyping the seed resets them.
+**Run summary.** Stopping ends the run and hands back a record: hero numbers, observations written
+from the data (each with a threshold, so an uneventful run says so), charts of population, the
+energy split, lifespans, togetherness and lineages, and exports for the whole run, the survivors,
+and the notable individuals. The run is sampled into a fixed number of buckets that merge as it
+grows, so a 200-tick run and a 20-million-tick run cost the same to record.
 
-**World options** (all editable): scale, reproduction, food drifts, continuous inflow.
-
-**Compute** (editable): thread count (1 … cores) and **GPU forces**. They change only
-*where* pair forces are computed, never what the world does (see below).
-
-**`Enter` enters the world.**
-
-**World screen.**
-
-- **Controls** (buttons along the bottom, with keys): **Start** resumes, **Pause** holds
-  (`Space` toggles), **Stop** discards the world and returns to the start screen (`Esc`),
-  **0.5×** / **2×** halve or double the speed (`←` / `→`) between 1/8 and **8192** ticks/s.
-  The default is **1 tick / second**; the panel also shows the rate actually achieved.
-  `.` single-steps.
-- **Camera:** wheel zooms about the cursor (up to 80×), drag pans, double-click resets.
-  Only what is on screen is drawn, and particles smaller than a pixel become dots.
-- **Mean lifespan** as a two-line graph — particles and organisms — of the average completed
-  lifespan per bucket over a trailing `life_window` (10k ticks, 100 buckets). Gaps are left
-  where nothing died in a bucket rather than bridged. The all-time
-  `min / median / mean / p90 / max` is printed underneath. A particle is *live* while it is
-  active with reserve `> 0`: a life starts when it is spawned or refed from empty and ends when
-  it runs dry, and a slot that dies and is reborn in the same tick counts as two lives.
-- **Lineages**: a spawned organism founds a lineage and its descendants inherit it. The panel
-  shows lineages alive, the biggest one, children produced, the most by any one organism, and
-  the oldest and record ages.
-- **Stats panel** with sparklines for organisms, food and total energy, plus: born /
-  died / budded, free matter, limbs per organism, the energy split (in organisms, in free
-  particles, in food), cumulative burned, and how often the motion clamp bit
-- **Rendering:** flat shapes only — circles for P1–P4 (coral, amber, mint, blue), a
-  square for a brain, a lime diamond for food. Free particles are smaller and
-  translucent. Each organism has a thick rod per limb and a faint disc marking its
-  body. **Energy is drawn on the organism:** a brain is a gauge that fills from the
-  bottom, a limb is a dim disc with a bright core that grows with its reserve, and
-  either turns red when nearly empty. Between ticks the renderer interpolates, and it
-  rebuilds every limb from its brain's interpolated position and angle, so rods and
-  tips always move as one rigid body.
-
----
+**Colour.** Two palettes, because they do two jobs. The canvas keeps bright hues for glowing marks
+on near-black. Charts use the same four hues stepped into the dark-mode lightness band, validated
+with a palette checker rather than by eye: all checks pass on the adjacent pairlist (worst adjacent
+CVD ΔE 8.4, normal-vision 15.7, every slot ≥3:1 on the surface). Two consequences are designed
+around — mint↔amber sits at the CVD floor, so stacks and lines carry direct labels and a 2px gap as
+secondary encoding; and the set fails an all-pairs check, so there is no scatter with four
+colour-coded series, and no chart anywhere has two y-axes.
 
 ## 11. Deliberately not in v0
 

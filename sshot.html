@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SimpleCell</title>
+</head>
+<body>
+<div id="app">
+  <section class="page" id="page-landing"></section>
+  <section class="page" id="page-explain" hidden></section>
+  <section class="page" id="page-setup" hidden></section>
+
+  <section class="page" id="page-world" hidden>
+    <div class="world-grid">
+      <aside class="rail" id="stats"></aside>
+      <main id="stage"><canvas id="c"></canvas></main>
+      <aside class="rail" id="inspect"></aside>
+      <div class="bar">
+        <button id="b-play" title="start / resume (space)">▶ Start</button>
+        <button id="b-pause" title="pause (space)">❚❚ Pause</button>
+        <button id="b-stop" title="end the run and see the summary (esc)">■ Stop</button>
+        <span class="sep"></span>
+        <button id="b-rewind" title="rewind (backspace / J)">◀◀</button>
+        <input type="range" id="b-seek" min="0" max="1000" value="1000" title="scrub through held history" />
+        <span class="sep"></span>
+        <button id="b-slow" title="half speed (←)">0.5×</button>
+        <span id="b-rate">1 tick/s</span>
+        <button id="b-fast" title="double speed (→)">2×</button>
+        <span id="help">shift-drag to feed · click an organism · . steps</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="page" id="page-summary" hidden></section>
+</div>
+<script type="module">
+import { initFromSeed } from '/src/core/params.ts'
+import { World } from '/src/core/world.ts'
+import { Recorder } from '/src/core/recorder.ts'
+import { observe } from '/src/core/observations.ts'
+import { exportOrganism } from '/src/core/organism.ts'
+import { mountSummary } from '/src/ui/summary.ts'
+import '/src/ui/style.css'
+const q = new URLSearchParams(location.search)
+for (const p of document.querySelectorAll('.page')) p.hidden = p.id !== 'page-summary'
+const init = { ...initFromSeed(Number(q.get('seed') || 303)), n_start: 6, n_intrinsic: 150, n_brain: 12, T_spawn: 40 }
+const w = new World(init)
+const rec = new Recorder(Number(q.get('every') || 5))
+const T = Number(q.get('t') || 6000)
+for (let i = 0; i < T; i++) { w.step(); rec.observe(w) }
+const record = rec.finish(w)
+const organisms = []
+let oldest = null, prolific = null
+for (let b = w.nIntr; b < w.nMatter; b++) {
+  if (!w.alive[b] || !w.isBrain(b)) continue
+  const o = exportOrganism(w, b); if (!o) continue
+  organisms.push(o)
+  if (!oldest || o.age > oldest.age) oldest = { age: o.age, o }
+  if (!prolific || o.children > prolific.n) prolific = { n: o.children, o }
+}
+const notable = []
+if (oldest) notable.push({ label: 'oldest survivor', organism: oldest.o })
+if (prolific && prolific.n > 0) notable.push({ label: 'most children', organism: prolific.o })
+mountSummary(document.getElementById('page-summary'), { record, observations: observe(record, init), init, organisms, notable }, { again(){}, setup(){} })
+document.title = 'done ' + record.n + ' buckets'
+</script>
+</body>
+</html>

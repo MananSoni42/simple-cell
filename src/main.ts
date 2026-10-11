@@ -1,21 +1,23 @@
-import type { Perf } from './compute/select'
+import './ui/style.css'
+import { type Perf, canShare } from './compute/select'
+import { observe } from './core/observations'
 import type { Init } from './core/params'
-import { Renderer } from './render/renderer'
+import { Renderer, capture } from './render/renderer'
 import { H, type FrameBuffers, type FrameLayout, type RenderState, frameState } from './sim/frames'
 import type { FromSim, StatsSnapshot, ToSim } from './sim/protocol'
 import { explainHTML } from './ui/explain'
 import { InspectPanel } from './ui/inspect'
-import { mountStart } from './ui/start'
+import { mountLanding } from './ui/landing'
+import { Router } from './ui/router'
+import { mountSetup } from './ui/setup'
 import { StatsPanel } from './ui/stats'
+import { mountSummary } from './ui/summary'
 
 const MIN_RATE = 0.125
 const MAX_RATE = 8192 // above this the simulation outruns its own bookkeeping
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
-const startEl = $('start')
-const explainEl = $('explain')
-const worldEl = $('world')
-const renderer = new Renderer($<HTMLCanvasElement>('c'))
+const renderer = new Renderer($<HTMLCanvasElement>('c'), $('stage'))
 const stats = new StatsPanel($('stats'))
 const inspect = new InspectPanel($('inspect'), (o) => send({ kind: 'placeSaved', organism: o }))
 const bPlay = $('b-play')
@@ -23,9 +25,11 @@ const bPause = $('b-pause')
 const bRate = $('b-rate')
 const bSeek = $<HTMLInputElement>('b-seek')
 
+const router = new Router(['landing', 'explain', 'setup', 'world', 'summary'])
+
 /**
- * The page only draws. The world runs in a worker (sim/sim.worker.ts) and publishes
- * snapshots into three shared frame buffers; this side picks the newest one each frame.
+ * The page draws and nothing else. The world runs in a worker, publishing finished ticks into
+ * three shared frame buffers; this side picks the newest each frame and reads stats off messages.
  */
 interface Link {
   worker: Worker
@@ -38,15 +42,19 @@ interface Link {
 
 let link: Link | null = null
 let latest: StatsSnapshot | null = null
-let rate = 1 // requested ticks per second
+let lastInit: Init | null = null
+let cameFrom: 'landing' | 'setup' = 'landing'
+let lastPerf: Perf = { threads: 1, gpu: false }
+let rate = 1
 let paused = false
 let seenCounter = -1
 let shown: RenderState | null = null
 let frameAt = 0
 let frameGap = 1000
 
-const send = (m: ToSim) => link?.worker.postMessage(m)
-const rateLabel = () => (paused ? 'paused' : `${rate} tick/s`)
+const send = (m: ToSim): void => link?.worker.postMessage(m)
+const l0 = (): Link => link as Link
+const rateLabel = (): string => (paused ? 'paused' : `${rate} tick/s`)
 
 function syncControls(): void {
   bPlay.classList.toggle('on', !paused)
@@ -68,100 +76,105 @@ function setRate(r: number): void {
   send({ kind: 'rate', rate })
   syncControls()
 }
-/** Rewind by a visible amount: a few seconds of world time at the current rate. */
 function rewind(): void {
-  const ticks = Math.max(1, Math.round(Math.min(rate, 240) * 3))
-  send({ kind: 'rewind', ticks })
+  send({ kind: 'rewind', ticks: Math.max(1, Math.round(Math.min(rate, 240) * 3)) })
   paused = true
   syncControls()
 }
 
+/** Stop ends the run: the worker hands back a report, and the summary screen takes over. */
 function stop(): void {
-  inspect.hide()
-  link?.worker.terminate() // also ends its force workers
+  if (!link) {
+    router.go('setup')
+    return
+  }
+  pause()
+  send({ kind: 'finish' })
+}
+
+function teardown(): void {
+  link?.worker.terminate()
   link = null
   latest = null
   shown = null
-  worldEl.hidden = true
-  start.show()
+  inspect.hide()
 }
 
-function showExplain(): void {
-  if (!explainEl.innerHTML) explainEl.innerHTML = explainHTML()
-  explainEl.hidden = false
-  startEl.hidden = true
-}
-
-function hideExplain(): void {
-  explainEl.hidden = true
-  startEl.hidden = false
-}
-
-addEventListener('keydown', (e) => {
-  if (explainEl.hidden) return
-  if (e.key === 'Escape' || e.key === 'Enter') {
-    e.preventDefault()
-    hideExplain()
-  }
-})
-
-const start = mountStart(startEl, (init: Init, perf: Perf) => {
-  link?.worker.terminate()
+function startWorld(init: Init, perf: Perf): void {
+  teardown()
+  lastInit = init
+  lastPerf = perf
   const worker = new Worker(new URL('./sim/sim.worker.ts', import.meta.url), { type: 'module' })
   worker.onmessage = (e: MessageEvent<FromSim>) => {
     const m = e.data
     if (m.kind === 'ready') {
-      link = { worker, layout: m.layout, frames: m.frames, states: m.frames.map((f) => frameState(m.layout, f)), header: m.header, note: m.note }
+      link = {
+        worker,
+        layout: m.layout,
+        frames: m.frames,
+        states: m.frames.map((f) => frameState(m.layout, f)),
+        header: m.header,
+        note: m.note,
+      }
       shown = null
       seenCounter = -1
       renderer.reset()
+      renderer.fit(m.layout.SIZE)
       stats.reset()
+      inspect.hide()
       rate = 1
       paused = false
-      start.hide()
-      worldEl.hidden = false
+      router.go('world')
       syncControls()
     } else if (m.kind === 'stats') latest = m.stats
     else if (m.kind === 'organism') inspect.show(m.organism)
-    else console.error('simulation error:', m.message)
+    else if (m.kind === 'finished') {
+      const init2 = lastInit!
+      mountSummary(
+        $('page-summary'),
+        { ...m.report, init: init2, observations: observe(m.report.record, init2) },
+        { again: () => startWorld(init2, lastPerf), setup: () => router.go('setup') },
+      )
+      teardown()
+      router.go('summary')
+    } else if (m.kind === 'error') console.error('simulation error:', m.message)
   }
   worker.postMessage({ kind: 'start', init, perf } satisfies ToSim)
-}, showExplain)
-
-/**
- * Pointer feeding: shift-drag (or middle/right button) scatters food where you point, so a world
- * can be prodded while it runs. A plain drag still pans the camera.
- */
-const canvas = $<HTMLCanvasElement>('c')
-let feeding = false
-const feedAt = (e: PointerEvent): void => {
-  if (!link || !latest) return
-  const [x, y] = renderer.toWorld(e.clientX, e.clientY, l0().layout.SIZE)
-  send({ kind: 'feed', x, y, n: 3, radius: 14 })
 }
-const l0 = (): Link => link as Link
-canvas.addEventListener('click', (e) => {
-  if (e.shiftKey || !link) return
-  const [x, y] = renderer.toWorld(e.clientX, e.clientY, l0().layout.SIZE)
-  send({ kind: 'inspect', x, y })
+
+// ---------------------------------------------------------------- screens
+
+mountLanding($('page-landing'), {
+  explain: () => {
+    cameFrom = 'landing'
+    router.go('explain')
+  },
+  setup: () => router.go('setup'),
 })
-canvas.addEventListener('pointerdown', (e) => {
-  if (!e.shiftKey && e.button === 0) return
-  e.preventDefault()
-  feeding = true
-  canvas.setPointerCapture(e.pointerId)
-  feedAt(e)
+
+$('page-explain').innerHTML = explainHTML()
+$('page-explain').addEventListener('click', (e) => {
+  const t = e.target as HTMLElement
+  if (t.closest('#ex-back') || t.closest('#ex-back-2')) router.go(cameFrom)
 })
-canvas.addEventListener('pointermove', (e) => {
-  if (feeding) feedAt(e)
+
+mountSetup($('page-setup'), {
+  start: startWorld,
+  back: () => router.go('landing'),
+  explain: () => {
+    cameFrom = 'setup'
+    router.go('explain')
+  },
 })
-canvas.addEventListener('pointerup', () => (feeding = false))
-canvas.addEventListener('contextmenu', (e) => e.preventDefault())
+
+// ---------------------------------------------------------------- world controls
 
 bPlay.addEventListener('click', play)
 bPause.addEventListener('click', pause)
 $('b-stop').addEventListener('click', stop)
 $('b-rewind').addEventListener('click', rewind)
+$('b-fast').addEventListener('click', () => setRate(rate * 2))
+$('b-slow').addEventListener('click', () => setRate(rate / 2))
 bSeek.addEventListener('input', () => {
   if (!latest) return
   const span = latest.tick - latest.oldestTick
@@ -169,16 +182,50 @@ bSeek.addEventListener('input', () => {
   paused = true
   syncControls()
 })
-$('b-fast').addEventListener('click', () => setRate(rate * 2))
-$('b-slow').addEventListener('click', () => setRate(rate / 2))
+
+/**
+ * Pointer: shift-drag (or a non-left button) scatters food where you point, a plain click
+ * inspects whatever organism is there, and a plain drag pans the camera.
+ */
+const canvas = $<HTMLCanvasElement>('c')
+let feeding = false
+const toWorld = (e: PointerEvent | MouseEvent): [number, number] => renderer.toWorld(e.clientX, e.clientY, l0().layout.SIZE)
+canvas.addEventListener('click', (e) => {
+  if (e.shiftKey || !link) return
+  const [x, y] = toWorld(e)
+  renderer.markOrganism(x, y)
+  send({ kind: 'inspect', x, y })
+})
+canvas.addEventListener('pointerdown', (e) => {
+  if (!link || (!e.shiftKey && e.button === 0)) return
+  e.preventDefault()
+  feeding = true
+  capture(canvas, e)
+  const [x, y] = toWorld(e)
+  renderer.flash(x, y)
+  send({ kind: 'feed', x, y, n: 3, radius: 14 })
+})
+canvas.addEventListener('pointermove', (e) => {
+  if (!feeding || !link) return
+  const [x, y] = toWorld(e)
+  renderer.flash(x, y)
+  send({ kind: 'feed', x, y, n: 2, radius: 14 })
+})
+canvas.addEventListener('pointerup', () => (feeding = false))
+canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 
 addEventListener('keydown', (e) => {
-  if (!link) return
+  const page = router.page
+  if (page === 'explain' && (e.key === 'Escape' || e.key === 'Enter')) {
+    e.preventDefault()
+    router.go(cameFrom)
+    return
+  }
+  if (page !== 'world' || !link) return
   if (e.key === 'Escape') {
     if (inspect.open) inspect.hide()
     else stop()
-  }
-  else if (e.key === ' ') {
+  } else if (e.key === ' ') {
     e.preventDefault()
     paused ? play() : pause()
   } else if (e.key === 'ArrowRight') setRate(rate * 2)
@@ -193,7 +240,9 @@ addEventListener('keydown', (e) => {
   }
 })
 
-/** Mark the newest published buffer as "being read" so the simulation will not overwrite it. */
+// ---------------------------------------------------------------- frame loop
+
+/** Mark the newest published buffer as being read, so the worker will not overwrite it. */
 function acquire(l: Link): number {
   for (;;) {
     const a = Atomics.load(l.header, H.ACTIVE)
@@ -205,10 +254,9 @@ function acquire(l: Link): number {
 function frame(now: number): void {
   requestAnimationFrame(frame)
   const l = link
-  if (!l) return
+  if (!l || router.page !== 'world') return
 
   if (Atomics.load(l.header, H.COUNTER) !== seenCounter) {
-    // remember the frame we are leaving (still protected as "being read") for gliding between ticks
     if (shown) renderer.snapshot(shown)
     const a = acquire(l)
     shown = l.states[a]
@@ -221,10 +269,17 @@ function frame(now: number): void {
 
   // glide between ticks only when ticks are slow enough to see
   const smooth = !paused && rate <= 10
-  renderer.draw(shown, smooth ? Math.min(1, (now - frameAt) / frameGap) : 1)
+  renderer.draw(shown, smooth ? Math.min(1, (now - frameAt) / frameGap) : 1, now)
   if (latest) {
-    stats.update(latest, rateLabel(), `${latest.backend} · ${latest.tps.toFixed(latest.tps < 10 ? 1 : 0)} tick/s achieved · ${latest.cap} slots · ${latest.historyTicks}t history${l.note ? ' · ' + l.note : ''}`)
+    stats.update(
+      latest,
+      rateLabel(),
+      `${latest.backend} · ${latest.tps.toFixed(latest.tps < 10 ? 1 : 0)} tick/s · ${latest.historyTicks}t history${l.note ? ' · ' + l.note : ''}`,
+    )
     if (document.activeElement !== bSeek) bSeek.value = '1000'
   }
 }
 requestAnimationFrame(frame)
+
+if (!canShare) console.info('not cross-origin isolated: threads are unavailable, the simulation runs on one')
+router.go('landing')
