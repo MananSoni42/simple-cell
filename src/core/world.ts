@@ -395,6 +395,7 @@ export class World {
     this.think()
     this.costs()
     this.decayFree()
+    this.spoilFood()
     if (this.continuous) this.freeMatterDecay()
     this.deaths()
     // before anything can re-endow a slot this tick, so a death-and-rebirth is still two lives
@@ -696,6 +697,19 @@ export class World {
   }
 
   /** Free particles lose a fraction of their reserve each tick; the loss is burned. */
+  /** Uneaten food spoils, so the world cannot silently fill up with food that waits forever. */
+  private spoilFood(): void {
+    const life = this.init.food_life
+    if (life <= 0) return
+    for (let f = this.nMatter; f < this.cap; f++) {
+      if (!this.alive[f] || this.tick - this.bornAt[f] < life) continue
+      this.burned += this.energy[f]
+      this.energy[f] = 0
+      this.alive[f] = 0
+      this.freeFood.push(f)
+    }
+  }
+
   private decayFree(): void {
     const k = this.init.decay_free
     if (k <= 0) return
@@ -707,6 +721,52 @@ export class World {
       if (e - d < 0.01) d = e // snap the tail to zero so particles actually run dry
       this.energy[i] = e - d
       this.burned += d
+    }
+  }
+
+  /**
+   * A corpse is food. When an organism dissolves, `corpse_frac` of what its body still held is
+   * left behind as food particles and the rest is burned. Energy is converted, never created,
+   * so the ledger still closes - and the loop from death back to life is closed with it.
+   */
+  private dropCorpse(b: number): void {
+    const { L } = this
+    let pool = this.energy[b]
+    for (let s = 0; s < 4; s++) {
+      const l = this.limbs[b * 4 + s]
+      if (l >= 0) pool += this.energy[l]
+    }
+    const give = pool * L.corpse_frac
+    const n = Math.floor(give / L.E_food)
+    if (n <= 0) return
+    // take the cost out of the body before it scatters, brain first
+    let owed = n * L.E_food
+    const take = (i: number) => {
+      const d = Math.min(owed, this.energy[i])
+      this.energy[i] -= d
+      owed -= d
+    }
+    take(b)
+    for (let s = 0; s < 4 && owed > 1e-12; s++) {
+      const l = this.limbs[b * 4 + s]
+      if (l >= 0) take(l)
+    }
+    for (let k = 0; k < n; k++) {
+      const f = this.freeFood.pop()
+      if (f === undefined) {
+        this.burned += L.E_food // nowhere to put it: it dissipates
+        continue
+      }
+      const a = this.rng.next() * TAU
+      const r = L.r_brain * Math.sqrt(this.rng.next())
+      this.alive[f] = 1
+      this.type[f] = FOOD
+      this.bornAt[f] = this.tick
+      this.owner[f] = -1
+      this.socket[f] = -1
+      this.x[f] = this.wrap(this.x[b] + r * Math.cos(a))
+      this.y[f] = this.wrap(this.y[b] + r * Math.sin(a))
+      this.energy[f] = L.E_food
     }
   }
 
@@ -742,6 +802,7 @@ export class World {
     for (let b = this.nIntr; b < this.nMatter; b++) {
       if (!this.isBrain(b)) continue
       if (this.energy[b] <= 1e-12) {
+        this.dropCorpse(b)
         for (let s = 0; s < 4; s++) {
           const l = this.limbs[b * 4 + s]
           if (l >= 0) this.unbind(l)
@@ -900,6 +961,7 @@ export class World {
     const i = this.freeFood.pop()!
     this.alive[i] = 1
     this.type[i] = FOOD
+    this.bornAt[i] = this.tick // so it can spoil
     this.x[i] = px
     this.y[i] = py
     this.energy[i] = this.L.E_food

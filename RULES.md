@@ -202,6 +202,12 @@ The ledger must close exactly: `Σ reserves + Σ food in world + total burned` e
 **R4.1 — Sun.** Every `T_food` ticks, one Food particle appears at a uniformly
 random position.
 
+**R4.1b — Food spoils.** An uneaten food particle expires after `food_life` ticks and its energy
+is burned. Without this the sun simply fills the world to `max_food` and leaves it there:
+measured, food sat at 478/480 for thousands of ticks with no expiry, and at ~250/480 with a
+200-tick life. Scarcity is what makes foraging worth paying for, so this is part of the economy,
+not a tidying measure.
+
 **R4.2 — Uptake.** A particle within `r_eat` of a Food particle consumes it: the Food
 particle is destroyed and `E_food` is added to the consumer's reserve. If several are
 in range, the nearest consumes it. A particle whose reserve would exceed `E_cap`
@@ -329,6 +335,12 @@ records `parent` and `generation = parent + 1`. Parent and child wait `repro_coo
 ticks. In pool mode the supply of free brains and free limbs of the right type limits
 the population; reproduction is decoupled from everything else and costs nothing when off.
 
+**R7.8 — A corpse is food.** When an organism dissolves, `corpse_frac` (50%) of everything its
+body still held — brain plus limbs — is left behind as food particles scattered within
+`r_brain`, and the remainder is burned. Energy is *converted*, never created, so the ledger still
+closes. This is what closes the loop from death back to life, and it is the opening for trophic
+levels: eating the dead is now possible without any new rule.
+
 **R7.5 — Matter is conserved** *(default, `inflow` off).* Intrinsic and brain particles are allocated once at
 init and never created or destroyed. Birth and death only change `owner` and
 `socket`. Scarcity of free particles therefore creates competition for limbs with no
@@ -402,6 +414,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `fieldN` | 64 × scale (max 256) | signal grid resolution |
 | `E_repro` · `E_hold` · `E_birth` | 60 · 20 · 15 | budding threshold; reserve a parent must keep; reserve each child particle starts with |
 | `E_viable` | 1 | minimum reserve for a free particle to be captured as a limb |
+| `corpse_frac` | 0.5 | share of a dead body's energy left behind as food (R7.8) |
 | `repro_cooldown` · `repro_dist` | 80 · 42 | ticks between buds; child placement distance |
 
 ### Initial conditions — derived from the seed
@@ -419,6 +432,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `n_food0` | 30 | food present at tick 0. **Editable** |
 | `max_food` | 120 | the sun pauses while this much food is in the world |
 | `scale` | 1 | world edge multiplier (1, 2, 4 … 32). Counts × scale², and each injection / spawn event repeats scale² times. **Editable** |
+| `food_life` | 200 ticks | how long uneaten food lasts (R4.1b). **Editable** (0 = never) |
 | `decay_free` | 0.2% / tick | free-particle decay. **Editable** (0 = off) |
 | `foodMoves` | off | food drifts and responds to forces. **Editable** |
 | `repro` · `repro_mut` | on · 0.05 | budding (R7.7) and mutation std. **Editable** (on/off) |

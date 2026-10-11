@@ -42,7 +42,8 @@ export const LAWS = {
   repro_cooldown: 80,
   repro_dist: 42, // how far from the parent a child appears
   E_birth: 15, // reserve each particle of a budded child starts with
-  E_viable: 1, // minimum reserve for a free particle to be captured as a limb
+  E_viable: 1,
+  corpse_frac: 0.5, // share of a dead brain's reserve that is left behind as food // minimum reserve for a free particle to be captured as a limb
   substeps_max: 16, // integration sub-steps are capped here when a hot world needs them
   life_window: 10000, // lifetime averages are reported over this many trailing ticks
   life_buckets: 100,
@@ -82,6 +83,7 @@ export interface Init {
   foodMoves: boolean // food drifts and responds to forces; otherwise it stays where it lands
   repro: boolean // budding reproduction
   repro_mut: number // std-dev of weight mutation in children
+  food_life: number // ticks before an uneaten food particle spoils (0 = never)
   decay_free: number // fraction of its reserve a free particle loses each tick (burned)
   inflow: boolean // continuous organism inflow: new matter is created for each spawn, and all matter is mortal
   foodMode: FoodMode
@@ -148,6 +150,7 @@ function seedWorld(seed: number, scale = 1): Init {
     foodMoves: false,
     repro: true,
     repro_mut: 0.05,
+    food_life: 200,
     decay_free: 0.002,
     inflow: false,
     foodMode: FOOD_MODES[rng.int(FOOD_MODES.length)],
