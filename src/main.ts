@@ -124,6 +124,31 @@ const start = mountStart(startEl, (init: Init, perf: Perf) => {
   worker.postMessage({ kind: 'start', init, perf } satisfies ToSim)
 }, showExplain)
 
+/**
+ * Pointer feeding: shift-drag (or middle/right button) scatters food where you point, so a world
+ * can be prodded while it runs. A plain drag still pans the camera.
+ */
+const canvas = $<HTMLCanvasElement>('c')
+let feeding = false
+const feedAt = (e: PointerEvent): void => {
+  if (!link || !latest) return
+  const [x, y] = renderer.toWorld(e.clientX, e.clientY, l0().layout.SIZE)
+  send({ kind: 'feed', x, y, n: 3, radius: 14 })
+}
+const l0 = (): Link => link as Link
+canvas.addEventListener('pointerdown', (e) => {
+  if (!e.shiftKey && e.button === 0) return
+  e.preventDefault()
+  feeding = true
+  canvas.setPointerCapture(e.pointerId)
+  feedAt(e)
+})
+canvas.addEventListener('pointermove', (e) => {
+  if (feeding) feedAt(e)
+})
+canvas.addEventListener('pointerup', () => (feeding = false))
+canvas.addEventListener('contextmenu', (e) => e.preventDefault())
+
 bPlay.addEventListener('click', play)
 bPause.addEventListener('click', pause)
 $('b-stop').addEventListener('click', stop)

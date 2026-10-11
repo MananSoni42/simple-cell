@@ -31,6 +31,14 @@
   .legend { color:var(--dim); font-size:11px; margin-bottom:18px; }
   dl { display:grid; grid-template-columns:auto 1fr; gap:2px 18px; margin:0 0 22px; }
   dt { color:var(--dim); } dd { margin:0; }
+  .presets { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:16px; }
+  .presets button { font-size:11px; padding:4px 9px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; }
+  .tabs button { border:0; border-bottom:2px solid transparent; border-radius:0; padding:7px 13px; color:var(--dim); background:none; }
+  .tabs button.on { color:var(--accent); border-bottom-color:var(--accent); }
+  .panel[hidden] { display:none; }
+  .panel { min-height:250px; }
+  table.m td.empty { background:none; cursor:default; }
   .counts { display:grid; grid-template-columns:repeat(2,1fr); gap:8px 14px; margin-bottom:22px; }
   .counts label { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--dim); }
   .counts input { width:72px; }
@@ -79,7 +87,7 @@
     <span id="b-rate">1 tick/s</span>
     <button id="b-fast" title="double speed (→)">2×</button>
   </div>
-  <div id="help">fill level = energy · red = starving · . single-step · ◀◀ rewind</div>
+  <div id="help">fill level = energy · red = starving · . single-step · ◀◀ rewind · shift-drag to drop food</div>
 </div>
 <script type="module" src="/src/main.ts"></script>
 </body>

@@ -476,14 +476,23 @@ stayed assembled. R2.4 and R2.5 are the enforcement; this table is the budget.
 
 ## 10. Interface
 
-**Start screen.** Shows the 5 × 5 matrix as a heatmap and the seed-derived parameters,
-all read-only: the chemistry is frozen. Two kinds of input:
+**Start screen.** Split into four tabs — **world** (food regime, rates, starting population),
+**chemistry** (the matrix), **life** (temperature, sub-steps, decay, food lifetime, the three
+toggles) and **compute** (threads, GPU, export/import). `Tab` cycles them.
+
+A row of **presets** sits above the tabs: *Membrane, Grazers, Crowd, Desert, Cold soup*. Each is
+just a seeded world with its chemistry and economy overridden — nothing a preset does could not
+be typed by hand.
+
+The matrix is shown as a **lower triangle only**, because it is symmetric by law and showing both
+halves is the same numbers twice. Editing a cell edits the pair.
+
+Inputs:
 
 - the **seed** (type one, or press `R` to re-roll), which fixes everything above;
 - the **starting population** — particles, brains, organisms at start, food at start;
-- the **chemistry matrix** itself: drag a cell vertically, use the arrow keys, or double-click to
-  type. Edits mirror across the diagonal (the matrix is symmetric by law), clamp to `[-1, 1]`,
-  and snap to the bond set while `quantized` is on. Food×Food stays 0;
+- the **chemistry matrix**: drag a cell vertically, use the arrow keys, or double-click to type.
+  Edits clamp to `[-1, 1]` and snap to the bond set while `quantized` is on. Food×Food stays 0;
 - **temperature** and **free-particle decay**, with the stability budget shown live;
 - **export / import**: download the config as JSON, copy it, or load one back. The whole config
   also lives in the URL hash, so a world is a link.
@@ -606,6 +615,10 @@ and no garbage at all.
 
 The world screen has a rewind button, a scrub slider over the held history, and
 `Backspace`/`J`; the panel shows how many ticks are held.
+
+**Hand feeding.** **Shift-drag** (or the right/middle button) scatters food wherever you point,
+so a running world can be prodded — fed, starved on one side, or baited. A plain drag still pans.
+Hand-fed energy is counted as injected, like the sun's.
 
 The same primitive is what state save/load and long-run checkpointing will be built on.
 

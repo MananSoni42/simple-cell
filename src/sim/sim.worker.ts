@@ -230,6 +230,12 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       rewindTo = Math.max(0, (world?.tick ?? 0) - m.ticks)
     } else if (m.kind === 'seek') {
       rewindTo = Math.max(0, m.tick)
+    } else if (m.kind === 'feed') {
+      const w = world
+      if (w) {
+        for (let k = 0; k < m.n; k++) w.feedAt(m.x, m.y, m.radius)
+        publish(w)
+      }
     } else if (m.kind === 'rate') {
       rate = m.rate
       retune()

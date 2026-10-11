@@ -8,6 +8,7 @@ export type ToSim =
   | { kind: 'start'; init: Init; perf: Perf }
   | { kind: 'rewind'; ticks: number } // step back to the newest snapshot at least this far back
   | { kind: 'seek'; tick: number }
+  | { kind: 'feed'; x: number; y: number; n: number; radius: number }
   | { kind: 'rate'; rate: number }
   | { kind: 'pause'; paused: boolean }
   | { kind: 'step' }

@@ -76,6 +76,16 @@ export class Renderer {
     this.ox = this.oy = 0
   }
 
+  /** Where a client-space point lands in the world, accounting for zoom and pan. */
+  toWorld(clientX: number, clientY: number, size: number): [number, number] {
+    const r = this.canvas.getBoundingClientRect()
+    const cx = ((clientX - r.left) * this.canvas.width) / r.width
+    const cy = ((clientY - r.top) * this.canvas.height) / r.height
+    const k = this.px / size
+    const wrap = (v: number) => ((v % size) + size) % size
+    return [wrap((cx - this.ox) / this.zoom / k), wrap((cy - this.oy) / this.zoom / k)]
+  }
+
   private clampPan(): void {
     const lim = this.px * (1 - this.zoom)
     this.ox = Math.min(0, Math.max(lim, this.ox))

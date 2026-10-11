@@ -7,6 +7,7 @@ import { Rng } from '../src/core/rng'
 import { serialBackend } from '../src/core/backend'
 import { World } from '../src/core/world'
 import { configText, parseConfig } from '../src/ui/config'
+import { PRESETS } from '../src/ui/presets'
 
 const L: Laws = { ...LAWS }
 
@@ -670,6 +671,54 @@ describe('food economy', () => {
     for (let f = w.nMatter; f < w.cap; f++) {
       if (!w.alive[f]) continue
       expect(Math.hypot(w.x[f] - 150, w.y[f] - 150)).toBeLessThanOrEqual(w.L.r_brain + 1e-9)
+    }
+  })
+})
+
+describe('hand feeding', () => {
+  it('drops food where asked, counts it as injected, and respects the cap', () => {
+    const init = smallInit({ T_food: 1e9, T_spawn: 1e9, n_start: 0, n_food0: 0, max_food: 4, food_life: 0 })
+    const w = new World(init, SMALL)
+    const before = w.injected
+    expect(w.feedAt(50, 60, 0)).toBe(true)
+    const f = [...Array(w.cap).keys()].find((i) => i >= w.nMatter && w.alive[i])!
+    expect(w.x[f]).toBeCloseTo(50, 9)
+    expect(w.y[f]).toBeCloseTo(60, 9)
+    expect(w.injected).toBe(before + w.L.E_food)
+    expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 9)
+
+    while (w.feedAt(10, 10, 5)) {
+      /* fill the world up */
+    }
+    expect(w.nFood).toBe(4) // max_food, and no more
+    expect(w.feedAt(10, 10, 5)).toBe(false)
+  })
+
+  it('scatters within the radius it is given, wrapping at the edge', () => {
+    const w = new World(smallInit({ T_food: 1e9, T_spawn: 1e9, n_start: 0, n_food0: 0, max_food: 60 }), SMALL)
+    for (let k = 0; k < 40; k++) w.feedAt(2, 2, 10) // right at the corner
+    for (let i = w.nMatter; i < w.cap; i++) {
+      if (!w.alive[i]) continue
+      expect(w.x[i]).toBeGreaterThanOrEqual(0)
+      expect(w.x[i]).toBeLessThan(w.L.SIZE)
+      const S = w.L.SIZE
+      const dx = Math.abs(((w.x[i] - 2 + S / 2) % S) - S / 2)
+      expect(dx).toBeLessThanOrEqual(10 + 1e-9)
+    }
+  })
+})
+
+describe('presets', () => {
+  it('are all stable, quantized and runnable', () => {
+    for (const p of PRESETS) {
+      const init = p.build()
+      expect(stability(init).ok, `${p.name} must be numerically safe`).toBe(true)
+      for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) expect(QUANTA, `${p.name} A[${i}][${j}]`).toContain(init.A[i][j])
+      for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) expect(init.A[i][j]).toBe(init.A[j][i])
+      const w = new World(init)
+      for (let t = 0; t < 400; t++) w.step()
+      expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 6)
+      expect(Number.isFinite(w.totalEnergy())).toBe(true)
     }
   })
 })

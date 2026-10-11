@@ -955,6 +955,24 @@ export class World {
     return [bx, by] // crowded world: take the roomiest spot we saw
   }
 
+  /** Drops one food particle near (px, py). Used by the pointer, so a world can be hand-fed. */
+  feedAt(px: number, py: number, radius = 0): boolean {
+    if (this.freeFood.length === 0) return false
+    const a = this.rng.next() * TAU
+    const r = radius * Math.sqrt(this.rng.next())
+    const i = this.freeFood.pop()!
+    this.alive[i] = 1
+    this.type[i] = FOOD
+    this.bornAt[i] = this.tick
+    this.owner[i] = -1
+    this.socket[i] = -1
+    this.x[i] = this.wrap(px + r * Math.cos(a))
+    this.y[i] = this.wrap(py + r * Math.sin(a))
+    this.energy[i] = this.L.E_food
+    this.injected += this.L.E_food
+    return true
+  }
+
   injectFood(): boolean {
     if (this.freeFood.length === 0) return false
     const [px, py] = this.samplePoint()
