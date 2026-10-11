@@ -85,36 +85,54 @@ x ← x + μ·F·dt + sqrt(2·T·dt)·N(0,1)      then wrap into [0, SIZE)
 
 ## 3. Organisms
 
-**R3.1 — Body.** One brain particle plus up to **4 sockets**. A filled socket holds
-a rigid rod of fixed length `L_rod`, rooted at the brain, with one intrinsic
-particle at its tip. The tip is always exactly `L_rod` from the brain.
+**R3.1 — Body.** One brain particle plus **4 sockets**, one per quadrant. A filled
+socket holds a rigid rod of fixed length `L_rod`, rooted at the brain, with one
+intrinsic particle at its tip. The tip is always exactly `L_rod` from the brain.
 
-**R3.2 — Rod angles are free.** There are no quadrants, no sectors, no reserved
-directions. Angle `θ_i` can take any value, and two rods may be parallel, adjacent,
-or coincident (the hard core keeps their tips `≈ r_0` apart).
+**R3.2 — Quadrants.** Socket `i` owns quadrant `i`, and the four quadrants are
+separated by a small angular `gap` so that rods can never coincide. The body is a
+disc cut by a thin cross:
+
+```
+          │ ╲   gap   ╱ │             θ_i ∈ [ i·π/2 + gap/2 ,
+       ───┼────╳────────┼───                  (i+1)·π/2 − gap/2 ]
+          │ ╱         ╲ │
+        q1 │ q0                      i = 0..3
+       ────┼────                      gap = 0.12 rad (≈7°)
+        q2 │ q3
+```
+
+Within its quadrant a rod is entirely free; at the boundary it stops. `θ_i` is
+clamped, not wrapped — a rod pressed against a limit rests there under load.
 
 **R3.3 — Rod angles are physics, not decisions.** The net force on a tip produces a
-torque about the brain; the rod swings, damped:
+torque about the brain; the rod swings, damped, and clamps at its quadrant limits:
 
 ```
 τ  = L_rod · (F_tip ⟂ rod)        // tangential component of tip force
 ω  ← (1 − d_rot)·ω + μ_rot·τ
-θ  ← θ + ω·dt
+θ  ← clamp(θ + ω·dt, quadrant limits)     // ω → 0 when clamped
 ```
 
-The brain has no control over `θ`. **Consequence:** body shape is an equilibrium of
-the matrix. Limbs whose types attract swing together into parallel rods; limbs whose
-types repel splay into a cross. Every one of these is a valid, stable configuration
-and none of them is enumerated in code:
+The brain has no control over `θ`. **Consequence: body shape is an equilibrium of
+the matrix.** Limbs whose tip types attract swing together and come to rest against
+their shared gap boundary; limbs whose types repel splay to opposite limits. Each of
+the shapes below is a stable resting configuration, and not one of them is
+enumerated in code — they are all the same four clamped rods under different
+chemistry:
 
 ```
-    =O=            ||            |
-                    O          -O-
-                   II            |
+    =O=              ||                │
+                      O              ──O──
+                     II                │
 
-  two limbs      attracting    repelling
-  opposed        pairs         quartet
+  two filled      q0+q1 attract      four limbs,
+  sockets,        up, q2+q3          mutually
+  splayed         attract down       repelling
 ```
+
+The `gap` is what makes `||` legible instead of degenerate: two attracting rods
+settle `gap` apart rather than on top of each other.
 
 **R3.4 — Movement.** The brain outputs a force vector `F_move` applied to the brain
 particle. The body translates as a rigid unit: every tip moves with the brain, then
@@ -205,17 +223,23 @@ shared medium — so there is no messaging code and no concept of "nearby organi
 ## 7. Creation and destruction
 
 **R7.1 — Organism spawn.** Every `T_spawn` ticks, one organism appears at a uniformly
-random position: a free brain particle, 4 sockets filled from the free-particle pool
-with random types, random initial angles, each particle seeded with `E_init`.
-If the pool lacks free particles, fewer sockets are filled.
+random position: a free brain particle plus **1 to 4 filled sockets** (count chosen
+uniformly), each taking a random free intrinsic particle, in a random quadrant, at a
+random angle within it, seeded with `E_init`. If the free pool is short, fewer
+sockets are filled. Organisms are therefore born asymmetric and incomplete, and
+R7.3 lets them finish growing from the soup.
 
 **R7.2 — Limb death.** A limb whose reserve reaches 0 **unbinds** and becomes a free
 particle again. The organism carries on with an empty socket.
 
-**R7.3 — Regeneration.** An empty socket captures any free intrinsic particle that
-drifts within `r_bind` of where its tip would be. This is the *only* other way a
-socket gets filled, and it is why healing costs no extra code: regeneration is
-binding, running again on a body that already exists.
+**R7.3 — Regeneration.** An empty socket captures any free intrinsic particle lying
+within its own quadrant and within `r_bind` of the rod circle (`|r − L_rod| <
+r_bind`, measured from the brain). The particle snaps to `L_rod` and the new rod
+takes the angle the particle already had. A socket's capture zone is therefore an
+arc, not a point — a body reaches for whatever drifts past the right part of it.
+
+This is the *only* other way a socket gets filled, and it is why healing costs no
+extra code: regeneration is binding, running again on a body that already exists.
 
 **R7.4 — Organism death.** A brain whose reserve reaches 0 dissolves: all limbs
 unbind, the brain becomes a free particle, and its residual reserve is emitted as
@@ -268,6 +292,7 @@ universal constants — the same for every particle, hand-set once, not play mat
 | `beta` | 0.1 | core fraction → `r_0 = 4` |
 | `K_core` | 3.0 | hard-core strength; must exceed `max|A| = 1` |
 | `L_rod` | 12 | rod length |
+| `gap` | 0.12 rad | angular gap between quadrants (≈7°) |
 | `mu_rot` | 0.02 | rod angular mobility |
 | `d_rot` | 0.2 | rod angular damping |
 | `r_bind` | 6 | socket capture radius |
@@ -331,6 +356,6 @@ Each of these is a deferred decision with a reason, not an oversight.
 | **Learning, evolution, mutation, reproduction** | v0 is world-building. Brains are hand-wired on purpose, so the policy is a measurable baseline for evolution to beat later |
 | **Food patches** | v0 food is uniformly random, which is the minimal rule. But uniform food makes standing still optimal — **this is the first knob to add** once organisms move at all, because patchiness is what makes locomotion worth paying for |
 | **Organism condensation** | Organisms spawn whole (R7.1) rather than assembling from the soup. Condensation is more elegant, and R7.3 already contains the mechanism — promoting it to full birth is a small change once the world is stable |
-| **Evolvable morphology** | Socket count is fixed at 4. The ceiling this imposes is on morphology, not on dynamics: membranes, gradients, and healing are all reachable without touching it |
+| **Evolvable morphology** | Socket count is fixed at 4 and quadrants are fixed in size. Fill count (1–4), tip types, and rod angles already vary, so shape is not fixed — only the limb budget is. No ceiling on dynamics: membranes, gradients, and healing are all reachable without touching it |
 | **Multiple signal channels** | One channel until something needs two |
 | **Brain chemistry (`B` in `A`)** | Would let bodies bind to bodies through existing physics — the cheapest route to multicellularity, and therefore worth trying early |

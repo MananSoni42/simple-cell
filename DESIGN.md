@@ -215,27 +215,34 @@ Renders as a color wash under the particles.
 
 ## 7. Organisms
 
-**Body.** One brain particle `B` plus up to 4 rods. Rod `i` is rigid, length `L`,
-rooted at the brain, with an intrinsic particle at its tip. Fixed 4-socket body plan
-in v1. **Rod angles are free** — no quadrants, no reserved sectors; two rods may be
-parallel or coincident, with the hard core keeping their tips apart.
+**Body.** One brain particle `B` plus 4 sockets, one per quadrant, each holding a
+rigid rod of length `L` with an intrinsic particle at its tip. Organisms are born
+with 1–4 sockets filled and grow the rest from the soup. Quadrants are separated by
+a small angular `gap`, so rods can never coincide; within its quadrant a rod is
+free, and at the boundary it clamps.
 
 **Rod angles are passive, not commanded.** Forces on the tip particle produce a
-torque about the brain; the rod swings, with angular damping:
+torque about the brain; the rod swings, with angular damping, clamped to its
+quadrant:
 
 ```
 τ = L · (F_tip ⟂ rod)
 ω ← (1 − d_rot)·ω + μ_rot·τ
-θ ← θ + ω·dt
+θ ← clamp(θ + ω·dt, quadrant limits)
 ```
 
 This is the best decision in the design. Limbs **passively orient toward whatever
 attracts them**, so an organism whose tip type likes Food reaches toward food without
 a line of seeking logic. And because sibling tips feel each other (§4), **body shape
-is an equilibrium of the matrix**: limbs with attracting types swing together into
-parallel rods, limbs with repelling types splay into a cross. Every such shape is
-valid and stable, and none of them is enumerated anywhere in the code. The brain only
-translates the body; the morphology is chemistry.
+is an equilibrium of the matrix**: limbs with attracting tip types swing together and
+rest against their shared gap boundary, limbs with repelling types splay to opposite
+limits. Every such shape is a stable resting configuration, and none of them is
+enumerated anywhere in the code. The brain only translates the body; the morphology
+is chemistry.
+
+The `gap` earns its keep twice: it stops rods from degenerating onto each other, and
+it turns "two limbs attract" into a visibly distinct morphology rather than a
+singularity.
 
 **Movement.** The brain outputs a force vector applied to the brain particle. The
 body translates as a unit (rods follow rigidly); the brain pays `c_mv`.
@@ -418,10 +425,11 @@ must hold *always*. These catch real bugs; eyeballing the canvas does not.
    written.
 4. **Wrapped distance** against a reference implementation over random pairs.
 5. **Softmax** sums to 1, is shift-invariant, no NaN on extreme logits.
-6. **Rod kinematics.** Tip position is always exactly `L` from the brain, for any
-   `θ` and any torque. Angular damping drives `ω → 0` under constant torque rather
-   than oscillating — a body must be able to *settle* into a shape (§7), so an
-   underdamped rod is a correctness bug, not an aesthetic one.
+6. **Rod kinematics.** `θ` never leaves its quadrant, under any torque, however
+   absurd; tip position is always exactly `L` from the brain. And angular damping
+   drives `ω → 0` under constant torque rather than oscillating — a body must be
+   able to *settle* into a shape (§7), so an underdamped rod is a correctness bug,
+   not an aesthetic one.
 7. **Binding.** A free particle inside `r_bind` of an empty socket binds within one
    tick; one outside does not; two candidates never bind to the same socket; a
    particle never binds to two sockets.
@@ -457,10 +465,11 @@ These are the tests that say the *world* works, not just the code.
    exactly the kind of failure a pretty canvas hides.
 7. **Regeneration.** Force-starve one limb with free particles nearby; the socket
    is refilled within `k` ticks. With no free particles, it is not.
-8. **Morphology follows chemistry.** One organism, no food, no noise, two tip types.
-   With `A[a][b] = +1` the rods settle to a mean pairwise angle `< 30°` (parallel);
-   with `A[a][b] = −1` they settle to `> 120°` (splayed). Same code, same body plan,
-   opposite shape. This is the test that proves body shape is not encoded.
+8. **Morphology follows chemistry.** One organism, no food, no noise, two filled
+   sockets in adjacent quadrants. With `A[a][b] = +1` both rods come to rest against
+   their shared boundary (separation → `gap`); with `A[a][b] = −1` they rest against
+   their outer limits (separation → `π − gap`). Same code, same body plan, opposite
+   shape. This is the test that proves body shape is not encoded.
 
 ### D. Performance
 
