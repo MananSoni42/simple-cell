@@ -34,7 +34,7 @@ function views(w: World): (Float64Array | Float32Array | Int32Array | Int16Array
     w.foodNear, w.mvx, w.mvy,
     w.type, w.alive,
     w.owner, w.socket, w.cool, w.repCool, w.bornAt, w.gen, w.parent, w.lineage, w.children,
-    w.since, w.limbs,
+    w.since, w.limbs, w.brainSig,
   ]
 }
 

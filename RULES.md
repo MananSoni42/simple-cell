@@ -244,23 +244,39 @@ brain is designed: some organisms will forage, some will wander, some will starv
 **R5.1 — Limb neuron** (one per bound intrinsic particle):
 
 ```
-x   = [ reserve/E_ref , signal_here , foodDensity_here , 1 ]
-out = tanh(W_limb · x)                    // W_limb is 2×4
-sig = out[0]     →  deposited outward into the signal field
-msg = out[1]     →  passed inward to the brain
+x = [ S_brain , S_field , pF_x , pF_y , FF_x , FF_y , reserve/E_ref , 1 ]   // 8
+S = tanh(W_limb · x)                                                        // one output
 ```
+
+That single `S` goes **both ways**: inward to the brain and outward into the signal field. One
+signal with two destinations is simpler than two separate outputs, and halves the weights.
+
+The two force inputs are what a limb can actually act on: `pF` is the force it feels and `FF` the
+part of that which came from food. Both are already computed by the force pass, so they are free,
+and unlike a scalar count they carry a **direction**.
 
 **R5.2 — Brain** (one per organism):
 
 ```
-x = for each of 4 sockets: [ msg_i , onehot4(type_i) , alive_i , food_i ]   // 28
-  ⧺ [ reserve/E_ref , signal_here , 1 ]                                     //  3
-  ⧺ [ tanh(food pull x) , tanh(food pull y) ]                               //  2
-y = W_brain · x                                                             // 33 → 6
+x = for each of 4 sockets: [ alive_i , onehot4(type_i) , S_i ]      // 24
+  ⧺ [ reserve/E_ref , S_field , 1 ]                                  //  3
+  ⧺ [ tanh(food pull x) , tanh(food pull y) ]                        //  2
+y = W_brain · x                                                      // 29 → 10
 
-food split = softmax(y[0..3])        // how to divide releaseFrac among sockets
-F_move     = F_max · tanh(y[4..5])   // where to go
+F_move     = F_max · tanh(y[0..1])   // where to go
+food split = softmax(y[2..5])        // how to divide releaseFrac among sockets
+S_to_limb  = tanh(y[6..9])           // what to tell each limb, read by it next tick
 ```
+
+**The loop is closed.** The brain can now *answer* its limbs rather than only receiving from
+them, and because a limb's `S` is also what it deposits into the field, the brain's state can
+reach the outside world through its limbs. Talking costs `c_sig · |S|`, charged to the brain,
+exactly as a limb pays for its own signal.
+
+Why type stays a one-hot rather than a single number: the four types are not ordered, so one
+value would make the layer encode a ranking that does not exist. And why both neurons keep
+`reserve`: a brain that cannot read its own reserve allocates energy blind, and a limb that
+cannot read its own cannot signal that it is starving — which is the whole healing story.
 
 **R5.4 — The brain can see food.** Two additions beyond the limb messages: each socket's own
 food count, and the **net pull toward food on the whole body** as a vector. The force pass

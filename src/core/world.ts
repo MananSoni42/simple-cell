@@ -2,16 +2,15 @@ import { type ForceBackend, serialBackend } from './backend'
 import { type KernelArrays, type KernelParams } from './forcekernel'
 import { AggregateTracker } from './aggregates'
 import { LifeTracker, RollingMean } from './lifestats'
+import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
 import { type Init, type Laws, LAWS, applyQuantization } from './params'
 import { Rng } from './rng'
 import { BRAIN, FOOD, N_MATRIX } from './types'
 
 const HALF_PI = Math.PI / 2
 const TAU = Math.PI * 2
-// brain inputs: 4 sockets x [msg, type onehot x4, alive, food count] = 28, then
-// [reserve, signal, bias] = 31, then the body's food-gradient direction = 33
-const N_IN = 33
-const N_OUT = 6 // 4 food shares + 2 move
+const N_IN = N_BRAIN_IN
+const N_OUT = N_BRAIN_OUT
 
 export interface WorldOpts {
   laws?: Partial<Laws>
@@ -164,6 +163,8 @@ export class World {
   readonly gen: Int32Array // generation: 0 for spawned organisms, parent + 1 for budded ones
   readonly parent: Int32Array
   readonly repCool: Int16Array
+  /** What the brain last told each socket; the limb neuron reads it next tick. */
+  readonly brainSig: Float64Array
   /** Tick at which a matter particle last became "live" (alive with energy > 0). */
   readonly since: Int32Array
   private wasLive: Uint8Array
@@ -261,6 +262,7 @@ export class World {
     this.gen = new Int32Array(n)
     this.parent = new Int32Array(n).fill(-1)
     this.repCool = new Int16Array(n)
+    this.brainSig = new Float64Array(n * 4)
     this.lineage = new Int32Array(n)
     this.children = new Int32Array(n)
     this.since = new Int32Array(n)
@@ -621,51 +623,62 @@ export class World {
       const wl = this.wLimb[b]!
       const wb = this.wBrain[b]!
       xin.fill(0)
-      // the body's net pull toward food: the force pass already computed it, and it carries a
-      // direction, so chemotaxis is one weight away instead of something to infer from scalars
+      // the body's net pull toward food: already computed by the force pass, and it carries a
+      // direction, so chemotaxis is one weight away rather than an inference from scalars
       let gx = this.ffx[b]
       let gy = this.ffy[b]
       for (let s = 0; s < 4; s++) {
         const l = this.limbs[b * 4 + s]
         if (l < 0) continue
-        const x0 = energy[l] / L.E_ref
-        const x1 = Math.min(1, field[this.fieldIndex(this.x[l], this.y[l])])
-        const x2 = Math.min(1, this.foodNear[l] / 4)
-        this.sig[l] = Math.tanh(wl[0] * x0 + wl[1] * x1 + wl[2] * x2 + wl[3])
-        this.msg[l] = Math.tanh(wl[4] * x0 + wl[5] * x1 + wl[6] * x2 + wl[7])
+        // limb neuron: what the brain told it, what the field says, which way it is being
+        // pulled, which way food is, and how much it is carrying
+        const sig = Math.tanh(
+          wl[0] * this.brainSig[b * 4 + s] +
+            wl[1] * Math.min(1, field[this.fieldIndex(this.x[l], this.y[l])]) +
+            wl[2] * Math.tanh(this.fx[l]) +
+            wl[3] * Math.tanh(this.fy[l]) +
+            wl[4] * Math.tanh(this.ffx[l]) +
+            wl[5] * Math.tanh(this.ffy[l]) +
+            wl[6] * (energy[l] / L.E_ref) +
+            wl[7],
+        )
+        this.sig[l] = sig // one signal, sent both ways
+        this.msg[l] = sig
         gx += this.ffx[l]
         gy += this.ffy[l]
-        const o = s * 7
-        xin[o] = this.msg[l]
+        const o = s * 6
+        xin[o] = 1 // alive
         xin[o + 1 + this.type[l]] = 1
-        xin[o + 5] = 1
-        xin[o + 6] = x2 // food the brain can see directly, not only through the limb neuron
+        xin[o + 5] = sig
       }
-      xin[28] = energy[b] / L.E_ref
-      xin[29] = Math.min(1, field[this.fieldIndex(this.x[b], this.y[b])])
-      xin[30] = 1
-      xin[31] = Math.tanh(gx)
-      xin[32] = Math.tanh(gy)
+      xin[24] = energy[b] / L.E_ref
+      xin[25] = Math.min(1, field[this.fieldIndex(this.x[b], this.y[b])])
+      xin[26] = 1
+      xin[27] = Math.tanh(gx)
+      xin[28] = Math.tanh(gy)
       for (let k = 0; k < N_OUT; k++) {
         let sum = 0
         for (let m = 0; m < N_IN; m++) sum += wb[k * N_IN + m] * xin[m]
         yout[k] = sum
       }
 
-      this.mvx[b] = L.F_max * Math.tanh(yout[4])
-      this.mvy[b] = L.F_max * Math.tanh(yout[5])
+      this.mvx[b] = L.F_max * Math.tanh(yout[BRAIN_OUT.FX])
+      this.mvy[b] = L.F_max * Math.tanh(yout[BRAIN_OUT.FY])
+
+      // signals back out to each limb, read by its neuron on the next tick
+      for (let s = 0; s < 4; s++) this.brainSig[b * 4 + s] = Math.tanh(yout[BRAIN_OUT.SIG + s])
 
       // softmax over all four outputs (R5.2): a share allocated to an empty socket simply
       // stays in the brain, so "hoard by addressing a missing limb" is a usable strategy
       let zmax = -Infinity
-      for (let s = 0; s < 4; s++) zmax = Math.max(zmax, yout[s])
+      for (let s = 0; s < 4; s++) zmax = Math.max(zmax, yout[BRAIN_OUT.FOOD + s])
       let z = 0
-      for (let s = 0; s < 4; s++) z += Math.exp(yout[s] - zmax)
+      for (let s = 0; s < 4; s++) z += Math.exp(yout[BRAIN_OUT.FOOD + s] - zmax)
       const release = L.releaseFrac * energy[b]
       for (let s = 0; s < 4; s++) {
         const l = this.limbs[b * 4 + s]
         if (l < 0) continue
-        const share = (release * Math.exp(yout[s] - zmax)) / z
+        const share = (release * Math.exp(yout[BRAIN_OUT.FOOD + s] - zmax)) / z
         const amt = Math.min(share, L.E_ref - energy[l])
         if (amt > 0) {
           energy[l] += amt
@@ -692,6 +705,7 @@ export class World {
         if (l < 0) continue
         this.pay(l, L.c_up)
         this.pay(l, L.c_sig * Math.abs(this.sig[l]))
+        this.pay(b, L.c_sig * Math.abs(this.brainSig[b * 4 + s])) // talking to a limb costs too
       }
     }
   }
@@ -790,12 +804,14 @@ export class World {
 
   private unbind(l: number): void {
     const b = this.owner[l]
-    this.limbs[b * 4 + this.socket[l]] = -1
+    const s = this.socket[l]
+    this.limbs[b * 4 + s] = -1
     this.owner[l] = -1
     this.socket[l] = -1
     this.cool[l] = this.L.cooldown
     this.sig[l] = 0 // otherwise the next socket to capture it deposits this, unpaid for
     this.msg[l] = 0
+    this.brainSig[b * 4 + s] = 0
   }
 
   private deaths(): void {
@@ -1000,7 +1016,7 @@ export class World {
     this.y[b] = this.wrap(spec.y)
     this.mvx[b] = 0
     this.mvy[b] = 0
-    this.wLimb[b] = spec.wLimb ?? Float64Array.from({ length: 8 }, () => rng.gauss())
+    this.wLimb[b] = spec.wLimb ?? Float64Array.from({ length: N_WLIMB }, () => rng.gauss())
     this.wBrain[b] = spec.wBrain ?? Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
     this.gen[b] = spec.gen ?? 0
     this.parent[b] = spec.parent ?? -1

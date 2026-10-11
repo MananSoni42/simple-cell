@@ -5,6 +5,7 @@ import { census, clusterStats, lifeStats, meanClusterSize, massByType, potential
 import { type Init, LAWS, type Laws, QUANTA, initFromSeed, stability, substepsFor } from '../src/core/params'
 import { Rng } from '../src/core/rng'
 import { serialBackend } from '../src/core/backend'
+import { BRAIN_OUT } from '../src/core/neurons'
 import { World } from '../src/core/world'
 import { configText, parseConfig } from '../src/ui/config'
 import { PRESETS } from '../src/ui/presets'
@@ -720,5 +721,47 @@ describe('presets', () => {
       expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 6)
       expect(Number.isFinite(w.totalEnergy())).toBe(true)
     }
+  })
+})
+
+describe('neuron wiring', () => {
+  it('closes the loop: the brain signals a limb, and the limb reads it next tick', () => {
+    const init = smallInit({ T: 0, n_intrinsic: 2, n_brain: 1, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, repro: false, decay_free: 0 })
+    init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
+    const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
+    const b = 2
+    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    // a brain that always shouts at socket 0, and a limb that only repeats what it is told
+    w.wBrain![b]!.fill(0)
+    w.wBrain![b]![(BRAIN_OUT.SIG + 0) * 29 + 26] = 5 // weight on the bias input
+    w.wLimb![b]!.fill(0)
+    w.wLimb![b]![0] = 5 // weight on S_brain
+    w.step()
+    expect(w.brainSig[b * 4 + 0]).toBeGreaterThan(0.9)
+    expect(w.sig[0]).toBeCloseTo(0, 6) // the limb has not heard it yet
+    w.step()
+    expect(w.sig[0]).toBeGreaterThan(0.9) // now it has
+    expect(w.msg[0]).toBe(w.sig[0]) // one signal, sent both inward and outward
+  })
+
+  it('charges the brain for talking, and clears the channel when a limb leaves', () => {
+    const init = smallInit({ T: 0, n_intrinsic: 2, n_brain: 1, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, repro: false, decay_free: 0 })
+    init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
+    const w = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
+    const b = 2
+    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    w.wBrain![b]!.fill(0)
+    w.wBrain![b]![(BRAIN_OUT.SIG + 0) * 29 + 26] = 8
+    w.step()
+    const quiet = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
+    quiet.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    quiet.wBrain![b]!.fill(0)
+    quiet.step()
+    expect(w.burned).toBeGreaterThan(quiet.burned) // shouting is not free
+
+    w.energy[0] = 0 // starve the limb so it unbinds
+    w.step()
+    expect(w.owner[0]).toBe(-1)
+    expect(w.brainSig[b * 4 + 0]).toBe(0)
   })
 })
