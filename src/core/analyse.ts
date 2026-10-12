@@ -29,6 +29,17 @@ import { MATRIX_NAMES, N_MATRIX } from './types'
 
 const MIN_N = 30
 
+/**
+ * Max and min by reduction, never by spread.
+ *
+ * `Math.max(...xs)` passes every element as an argument, and at two hundred thousand elements that
+ * overflows the call stack — which is how phase 0 completed all 200,000 worlds and then crashed in
+ * the line that was about to report the best score. Every aggregate here can see the whole catalog,
+ * so none of them may spread.
+ */
+const maxOf = (xs: number[]): number => xs.reduce((a, b) => (b > a ? b : a), -Infinity)
+const minOf = (xs: number[]): number => xs.reduce((a, b) => (b < a ? b : a), Infinity)
+
 export interface Cell {
   label: string
   n: number
@@ -60,7 +71,7 @@ function cell(label: string, rows: CatalogEntry[]): Cell {
     mean,
     se: n > 0 ? Math.sqrt(varr / n) : 0,
     aliveFrac: n ? rows.filter((r) => r.level >= 1).length / n : 0,
-    best: n ? Math.max(...scores) : 0,
+    best: n ? maxOf(scores) : 0,
   }
 }
 
@@ -137,7 +148,7 @@ export function chemistryShape(spec: WorldSpec): { nonzero: number; meanAbs: num
     selfRepel: diag.filter((v) => v < 0).length,
     // how differentiated the food couplings are: a feeding layer needs some types to care and
     // others not to, which is a spread rather than a level
-    foodSpread: food.length > 1 ? Math.max(...food) - Math.min(...food) : 0,
+    foodSpread: food.length > 1 ? maxOf(food) - minOf(food) : 0,
   }
 }
 
@@ -194,7 +205,7 @@ export function summarise(rows: CatalogEntry[]): Summary {
     byStop,
     aliveFrac: rows.length ? rows.filter((r) => r.level >= 0).length / rows.length : 0,
     meanScore: rows.length ? rows.reduce((a, r) => a + r.score, 0) / rows.length : 0,
-    bestScore: rows.length ? Math.max(...rows.map((r) => r.score)) : 0,
+    bestScore: rows.length ? maxOf(rows.map((r) => r.score)) : 0,
     ticks,
     hours: ms / 3.6e6,
     factors: { dials: dialFactors(rows), couplings: couplingFactors(rows), shapes: shapeFactors(rows), source: sourceFactor(rows) },

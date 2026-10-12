@@ -88,7 +88,7 @@ export function mountDiscoveries(root: HTMLElement, hooks: DiscoveryHooks): { re
               ${f.cells
                 .slice(0, 4)
                 .map((c) => {
-                  const hi = Math.max(...f.cells.map((x) => x.mean)) || 1
+                  const hi = f.cells.reduce((a, x) => (x.mean > a ? x.mean : a), 0) || 1
                   return `<div class="factor-cell"><span>${c.label}</span>
                     <div class="bar"><i style="width:${Math.round((100 * c.mean) / hi)}%"></i></div>
                     <em>${c.mean.toFixed(2)}±${c.se.toFixed(2)} · n ${fmt.n(c.n)}</em></div>`

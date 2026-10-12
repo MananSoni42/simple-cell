@@ -175,7 +175,16 @@ function runPhase(phase: Phase): void {
      * food pattern — and the best of each stratum is taken. Unfilled quota is redistributed, so
      * nothing is wasted on empty cells.
      */
-    const stratum = (e: CatalogEntry): string => `${chemistryShape(e.spec).selfRepel}|${e.spec.foodMode}`
+    /*
+     * Metabolism is in the strata because phase 0 is biased toward it, and the bias is visible:
+     * every one of the top twenty worlds ran at metabolism 2, the most expensive setting, while
+     * the marginal means say 0.25 is best by a wide margin. Both are true. Several rungs need
+     * *completed lives* before they can report anything, and a cheap-living world has barely any
+     * at five hundred ticks — so a fast-dying world is not better, it is merely measurable sooner.
+     * Stratifying on it stops that artifact deciding what survives the screen.
+     */
+    const stratum = (e: CatalogEntry): string =>
+      `${chemistryShape(e.spec).selfRepel}|${e.spec.foodMode}|${e.spec.metabolism}`
     const cells = new Map<string, CatalogEntry[]>()
     for (const e of survivors) {
       const k = stratum(e)
@@ -185,18 +194,23 @@ function runPhase(phase: Phase): void {
     }
     for (const a of cells.values()) a.sort((x, y) => y.score - x.score)
     const cut: CatalogEntry[] = []
+    const chosen = new Set<CatalogEntry>()
     let quota = Math.max(1, Math.ceil(prev.keep / Math.max(1, cells.size)))
     for (let pass = 0; pass < 4 && cut.length < prev.keep; pass++) {
       for (const a of cells.values()) {
         const want = Math.min(a.length, quota)
+        // a Set rather than Array.includes: at a sixty-thousand promotion budget the linear scan
+        // would be three billion comparisons, which is a hang rather than a slow step
         for (let i = 0; i < want && cut.length < prev.keep; i++) {
-          if (!cut.includes(a[i])) cut.push(a[i])
+          if (!chosen.has(a[i])) {
+            chosen.add(a[i])
+            cut.push(a[i])
+          }
         }
       }
       quota *= 2 // redistribute what thin cells could not use
     }
-    const taken = new Set(cut)
-    const rest = rank(survivors).filter((e) => !taken.has(e))
+    const rest = rank(survivors).filter((e) => !chosen.has(e))
     console.log(`  stratified across ${cells.size} cells (self-repulsion × food pattern)`)
     const rescueN = Math.min(rest.length, Math.max(0, Math.round(prev.keep * 0.02)))
     const rng = new Rng(0xbeef ^ phase.n)
@@ -272,7 +286,8 @@ function runPhase(phase: Phase): void {
       const alive = after.filter(possible).length
       console.log(
         `phase ${phase.n} done in ${fmtDur(secs)} · ${after.length} catalogued · ${alive} possible ` +
-          `(${Math.round((100 * alive) / Math.max(1, after.length))}%) · best score ${Math.max(...after.map((e) => e.score)).toFixed(2)}`,
+          `(${Math.round((100 * alive) / Math.max(1, after.length))}%) · ` +
+          `best score ${after.reduce((a, e) => (e.score > a ? e.score : a), 0).toFixed(2)}`,
       )
       appendFileSync(
         join(DIR, 'phases.log'),
