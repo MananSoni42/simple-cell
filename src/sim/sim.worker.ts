@@ -2,6 +2,7 @@ import { makeBackend, canShare } from '../compute/select'
 import { census, lifeStats } from '../core/metrics'
 import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, writeSnapshot } from '../core/snapshot'
 import { type OrganismFile, defaultName, exportOrganism } from '../core/organism'
+import type { Init } from '../core/params'
 import { Recorder } from '../core/recorder'
 import { World } from '../core/world'
 import { H, N_FRAMES, allocFrame, layoutOf, writeFrame, type FrameBuffers } from './frames'
@@ -143,6 +144,30 @@ function report(w: World): { record: ReturnType<Recorder['finish']>; organisms: 
   return { record: recorder.finish(w), organisms, notable }
 }
 
+/**
+ * The world as a config: whatever is in it right now, recorded so a built world can be saved,
+ * shared and reopened. Placements replace the random counts that produced them, so reloading
+ * gives back the arrangement rather than a fresh roll of the dice.
+ */
+function builtConfig(w: World): Init {
+  const organisms = []
+  for (let b = w.nIntr; b < w.nMatter; b++) {
+    if (!w.alive[b] || !w.isBrain(b)) continue
+    const o = exportOrganism(w, b)
+    if (o) organisms.push({ organism: o as unknown, x: w.x[b], y: w.y[b] })
+  }
+  const food: [number, number][] = []
+  for (let f = w.foodStart; f < w.cap; f++) if (w.alive[f]) food.push([w.x[f], w.y[f]])
+  return {
+    ...w.init,
+    n_start: 0,
+    n_food0: 0,
+    wallPositions: w.wallPositionsNow(),
+    seededFood: food,
+    seededOrganisms: organisms,
+  }
+}
+
 function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnapshot {
   return {
     tick: w.tick,
@@ -265,7 +290,7 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       header = new Int32Array(new SharedArrayBuffer(4 * H.SIZE))
       header[H.READING] = -1
       rate = 1
-      paused = false
+      paused = true // a new world waits, so it can be built before it runs
       stepRequests = 0
       const mine = session
       // first frame is published inside run(); announce once it exists
@@ -294,9 +319,30 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
     } else if (m.kind === 'placeSaved') {
       const w = world
       if (w) {
-        w.placeSaved(m.organism)
+        w.placeSaved(m.organism, m.at)
         publish(w)
       }
+    } else if (m.kind === 'placeRandom') {
+      const w = world
+      if (w) {
+        w.spawnRandom([m.x, m.y])
+        publish(w)
+      }
+    } else if (m.kind === 'wall') {
+      const w = world
+      if (w) {
+        w.addWall(m.x, m.y)
+        publish(w)
+      }
+    } else if (m.kind === 'erase') {
+      const w = world
+      if (w) {
+        w.eraseAt(m.x, m.y, m.radius)
+        publish(w)
+      }
+    } else if (m.kind === 'snapshotConfig') {
+      const w = world
+      if (w) post({ kind: 'builtConfig', init: builtConfig(w) })
     } else if (m.kind === 'rate') {
       rate = m.rate
       retune()

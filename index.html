@@ -16,6 +16,16 @@
       <aside class="rail" id="stats"></aside>
       <main id="stage"><canvas id="c"></canvas></main>
       <aside class="rail" id="inspect"></aside>
+      <div class="tools" id="tools">
+        <button data-tool="pan" title="pan and zoom (V)">✥ Look</button>
+        <button data-tool="organism" title="place an organism (1)">◻ Organism</button>
+        <button data-tool="food" title="drop food (2)">◆ Food</button>
+        <button data-tool="wall" title="paint terrain (3)">▦ Wall</button>
+        <button data-tool="erase" title="erase (4)">⌫ Erase</button>
+        <label class="brush">size <input type="range" id="brush" min="4" max="60" value="16" /></label>
+        <span class="sep"></span>
+        <button id="t-save" title="save this arrangement as a config">save world</button>
+      </div>
       <div class="bar">
         <button id="b-play" title="start / resume (space)">▶ Start</button>
         <button id="b-pause" title="pause (space)">❚❚ Pause</button>
@@ -27,7 +37,7 @@
         <button id="b-slow" title="half speed (←)">0.5×</button>
         <span id="b-rate">1 tick/s</span>
         <button id="b-fast" title="double speed (→)">2×</button>
-        <span id="help">shift-drag to feed · click an organism · . steps</span>
+        <span id="help"></span>
       </div>
     </div>
   </section>

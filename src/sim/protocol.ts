@@ -13,7 +13,11 @@ export type ToSim =
   | { kind: 'seek'; tick: number }
   | { kind: 'feed'; x: number; y: number; n: number; radius: number }
   | { kind: 'inspect'; x: number; y: number }
-  | { kind: 'placeSaved'; organism: OrganismFile }
+  | { kind: 'placeSaved'; organism: OrganismFile; at?: [number, number] }
+  | { kind: 'placeRandom'; x: number; y: number }
+  | { kind: 'wall'; x: number; y: number }
+  | { kind: 'erase'; x: number; y: number; radius: number }
+  | { kind: 'snapshotConfig' } // hand back the world as a config, with everything placed in it
   | { kind: 'finish' } // end the run and hand back everything needed for the summary
   | { kind: 'rate'; rate: number }
   | { kind: 'pause'; paused: boolean }
@@ -53,6 +57,7 @@ export interface RunReport {
 
 export type FromSim =
   | { kind: 'organism'; organism: OrganismFile | null }
+  | { kind: 'builtConfig'; init: Init }
   | { kind: 'finished'; report: RunReport }
   | { kind: 'ready'; layout: FrameLayout; frames: FrameBuffers[]; header: Int32Array; note: string }
   | { kind: 'stats'; stats: StatsSnapshot }

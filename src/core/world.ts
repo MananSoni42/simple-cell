@@ -18,6 +18,8 @@ export interface WorldOpts {
   laws?: Partial<Laws>
   autoSpawn?: boolean
   maxFood?: number
+  /** Spare terrain slots for painting; 0 for a fixed world. */
+  wallRoom?: number
   /** Allocate state in SharedArrayBuffers so worker threads can read and write it. */
   shared?: boolean
 }
@@ -257,7 +259,8 @@ export class World {
       }
     }
 
-    this.nWall = init.walls === 'none' ? 0 : init.n_wall
+    // room for terrain: whatever the world starts with, plus space to paint more
+    this.nWall = Math.min(L.wall_cap, Math.max(init.wallPositions.length, 0) + (opts.wallRoom ?? L.wall_cap))
     this.continuous = init.inflow
     const brainCap = this.continuous ? init.n_brain * 3 : init.n_brain
     this.nIntr = init.n_intrinsic + (this.continuous ? 4 * brainCap : 0)
@@ -353,6 +356,7 @@ export class World {
     if (opts.autoSpawn !== false) {
       for (let i = 0; i < init.n_start; i++) this.spawnRandom()
       for (let i = 0; i < init.n_food0; i++) this.injectFood()
+      this.applySeeded()
     }
   }
 
@@ -382,44 +386,90 @@ export class World {
     return this.nMatter + this.nWall
   }
 
+  /** Terrain actually in the world, as opposed to the slots reserved for painting more. */
+  get wallCount(): number {
+    let n = 0
+    for (let i = this.nMatter; i < this.foodStart; i++) if (this.alive[i]) n++
+    return n
+  }
+
   /**
    * Immovable terrain. Walls never move and have no chemistry — they exclude by their core
    * alone — so they are the one thing in the world that an organism can have a shape *against*.
    */
+  /**
+   * Terrain, from the position list. Slots beyond it stay inactive and are what painting fills,
+   * so a layout is a starting point rather than a fixed world.
+   */
   private placeWalls(): void {
-    const { L, init } = this
-    const S = L.SIZE
     for (let k = 0; k < this.nWall; k++) {
       const i = this.nMatter + k
-      let px = 0
-      let py = 0
-      if (init.walls === 'pillars') {
-        const per = Math.max(2, Math.round(Math.sqrt(this.nWall)))
-        const cell = S / per
-        px = (k % per) * cell + cell / 2
-        py = Math.floor(k / per) * cell + cell / 2
-      } else if (init.walls === 'ring') {
-        const a = (k / this.nWall) * TAU
-        px = S / 2 + S * 0.35 * Math.cos(a)
-        py = S / 2 + S * 0.35 * Math.sin(a)
-      } else {
-        // maze: a few straight runs at right angles, placed by the seeded stream
-        const runs = Math.max(1, Math.round(this.nWall / 12))
-        const run = Math.floor(k / Math.max(1, Math.round(this.nWall / runs)))
-        const step = 2 * L.r_wall
-        const horizontal = run % 2 === 0
-        const base = ((run + 1) / (runs + 1)) * S
-        const along = (k % Math.max(1, Math.round(this.nWall / runs))) * step + S * 0.1
-        px = horizontal ? along : base
-        py = horizontal ? base : along
-      }
+      this.type[i] = WALL
+      this.alive[i] = 0
+      this.energy[i] = 0
+      this.owner[i] = -1
+      this.socket[i] = -1
+    }
+    for (const [px, py] of this.init.wallPositions) this.addWall(px, py)
+  }
+
+  /** Activates a terrain slot at (px, py). Returns false when there is no room left. */
+  addWall(px: number, py: number): boolean {
+    for (let k = 0; k < this.nWall; k++) {
+      const i = this.nMatter + k
+      if (this.alive[i]) continue
       this.x[i] = this.wrap(px)
       this.y[i] = this.wrap(py)
       this.type[i] = WALL
       this.alive[i] = 1
       this.energy[i] = 0
-      this.owner[i] = -1
+      return true
     }
+    return false
+  }
+
+  /** Terrain currently in the world, for saving a built world back into a config. */
+  wallPositionsNow(): [number, number][] {
+    const out: [number, number][] = []
+    for (let k = 0; k < this.nWall; k++) {
+      const i = this.nMatter + k
+      if (this.alive[i] && this.type[i] === WALL) out.push([this.x[i], this.y[i]])
+    }
+    return out
+  }
+
+  /**
+   * Removes whatever is within `radius` of a point: food and terrain vanish, and an organism is
+   * dissolved into its parts rather than deleted, because matter is conserved.
+   */
+  eraseAt(px: number, py: number, radius: number): number {
+    let n = 0
+    const r2 = radius * radius
+    const near = (i: number): boolean => {
+      const dx = this.minImage(this.x[i] - px)
+      const dy = this.minImage(this.y[i] - py)
+      return dx * dx + dy * dy <= r2
+    }
+    for (let i = this.nMatter; i < this.nMatter + this.nWall; i++) {
+      if (this.alive[i] && near(i)) {
+        this.alive[i] = 0
+        n++
+      }
+    }
+    for (let f = this.foodStart; f < this.cap; f++) {
+      if (!this.alive[f] || !near(f)) continue
+      this.burned += this.energy[f]
+      this.energy[f] = 0
+      this.alive[f] = 0
+      this.freeFood.push(f)
+      n++
+    }
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      if (!this.alive[b] || !this.isBrain(b) || !near(b)) continue
+      this.dissolve(b)
+      n++
+    }
+    return n
   }
 
   totalEnergy(): number {
@@ -1023,23 +1073,34 @@ export class World {
     this.brainSig[b * 4 + s] = 0
   }
 
+  /**
+   * Takes an organism apart: its limbs are released, half of what the body held is left behind as
+   * food, and the brain becomes a free particle. The one path out of being alive, used both by
+   * starvation and by erasing a body by hand.
+   */
+  dissolve(b: number): void {
+    if (!this.alive[b] || !this.isBrain(b)) return
+    this.dropCorpse(b)
+    for (let s = 0; s < 4; s++) {
+      const l = this.limbs[b * 4 + s]
+      if (l >= 0) this.unbind(l)
+    }
+    this.owner[b] = -1
+    if (this.continuous) this.kill(b)
+    this.nDeaths++
+    const age = this.tick - this.bornAt[b]
+    this.lifeOrganisms.record(age)
+    this.lifeOrganismsWindow.record(this.tick, age)
+    this.recordAge = Math.max(this.recordAge, age)
+    this.wLimb[b] = undefined
+    this.wBrain[b] = undefined
+  }
+
   private deaths(): void {
     for (let b = this.nIntr; b < this.nMatter; b++) {
       if (!this.isBrain(b)) continue
       if (this.energy[b] <= 1e-12) {
-        this.dropCorpse(b)
-        for (let s = 0; s < 4; s++) {
-          const l = this.limbs[b * 4 + s]
-          if (l >= 0) this.unbind(l)
-        }
-        this.owner[b] = -1
-        if (this.continuous) this.kill(b)
-        this.nDeaths++
-        this.lifeOrganisms.record(this.tick - this.bornAt[b])
-        this.lifeOrganismsWindow.record(this.tick, this.tick - this.bornAt[b])
-        this.recordAge = Math.max(this.recordAge, this.tick - this.bornAt[b])
-        this.wLimb[b] = undefined
-        this.wBrain[b] = undefined
+        this.dissolve(b)
         continue
       }
       for (let s = 0; s < 4; s++) {
@@ -1148,6 +1209,21 @@ export class World {
       p.h += 0.1 * this.rng.gauss()
       p.x = this.wrap(p.x + v * Math.cos(p.h))
       p.y = this.wrap(p.y + v * Math.sin(p.h))
+    }
+  }
+
+  /**
+   * Whatever was placed by hand before the world started: food where it was dropped, and
+   * organisms where they were put. A built world is just a config carrying these.
+   */
+  private applySeeded(): void {
+    for (const [px, py] of this.init.seededFood) this.feedAt(px, py, 0)
+    for (const seed of this.init.seededOrganisms) {
+      const spec = seed.organism as
+        | { reserve: number; limbs: { quad: number; type: number; angle: number; reserve: number }[]; wLimb: number[]; wBrain: number[] }
+        | undefined
+      if (spec && Array.isArray(spec.wBrain)) this.placeSaved(spec, [seed.x, seed.y])
+      else this.spawnRandom([seed.x, seed.y])
     }
   }
 
@@ -1442,12 +1518,15 @@ export class World {
    * Places a saved organism: a free brain, free particles of the right types, somewhere clear.
    * Its energy is injected, like a spawn's, so the ledger still closes.
    */
-  placeSaved(spec: {
-    reserve: number
-    limbs: { quad: number; type: number; angle: number; reserve: number }[]
-    wLimb: number[]
-    wBrain: number[]
-  }): number {
+  placeSaved(
+    spec: {
+      reserve: number
+      limbs: { quad: number; type: number; angle: number; reserve: number }[]
+      wLimb: number[]
+      wBrain: number[]
+    },
+    at?: [number, number],
+  ): number {
     const { L } = this
     const open = (i: number) => (this.continuous ? !this.alive[i] : this.owner[i] === -1)
     let brain = -1
@@ -1470,7 +1549,7 @@ export class World {
     }
     if (limbs.length === 0) return -1
 
-    const [sx, sy] = this.freeSpot()
+    const [sx, sy] = at ?? this.freeSpot()
     // Setting a reserve has to be booked both ways: energy added is injected, energy the chosen
     // particle already held and no longer needs is burned. Only crediting the shortfall silently
     // destroyed energy whenever the particle was richer than the saved organism.
@@ -1500,8 +1579,8 @@ export class World {
     return brain
   }
 
-  /** Spawns one organism at a random place with 1-4 random limbs. Returns false if matter is short. */
-  spawnRandom(): boolean {
+  /** Spawns one organism with 1-4 random limbs, at `at` or anywhere there is room. */
+  spawnRandom(at?: [number, number]): boolean {
     const { rng } = this
     const brains: number[] = []
     const open = (i: number) => (this.continuous ? !this.alive[i] : this.owner[i] === -1)
@@ -1530,7 +1609,7 @@ export class World {
       this.alive[idx] = 1
       this.endow(idx)
     }
-    const [sx, sy] = this.freeSpot()
+    const [sx, sy] = at ?? this.freeSpot()
     this.placeOrganism({ brain, x: sx, y: sy, limbs })
     return true
   }

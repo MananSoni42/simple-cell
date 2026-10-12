@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { IncompatibleOrganism, exportOrganism, parseOrganism } from '../src/core/organism'
-import { initFromSeed } from '../src/core/params'
+import { applyWallStamp, initFromSeed } from '../src/core/params'
 import { WALL } from '../src/core/types'
 import { World } from '../src/core/world'
 
@@ -50,14 +50,15 @@ describe('organism export and import', () => {
 describe('terrain', () => {
   it('never moves, and leaves the ledger and the economy intact', () => {
     for (const walls of ['pillars', 'maze', 'ring'] as const) {
-      const w = new World({ ...initFromSeed(3), walls, n_wall: 40 })
+      const w = new World(applyWallStamp({ ...initFromSeed(3), walls, n_wall: 40 }))
       const at: number[] = []
-      for (let i = 0; i < w.cap; i++) if (w.type[i] === WALL) at.push(w.x[i], w.y[i])
+      for (let i = 0; i < w.cap; i++) if (w.alive[i] && w.type[i] === WALL) at.push(w.x[i], w.y[i])
       expect(at.length / 2, walls).toBe(40)
+      expect(w.wallCount, walls).toBe(40)
       for (let t = 0; t < 800; t++) w.step()
       let k = 0
       for (let i = 0; i < w.cap; i++) {
-        if (w.type[i] !== WALL) continue
+        if (!w.alive[i] || w.type[i] !== WALL) continue
         expect(w.x[i], walls).toBe(at[k])
         expect(w.y[i], walls).toBe(at[k + 1])
         expect(w.energy[i]).toBe(0) // terrain holds no energy
@@ -69,13 +70,14 @@ describe('terrain', () => {
   })
 
   it('keeps particles out: nothing settles inside a wall', () => {
-    const w = new World({ ...initFromSeed(11), walls: 'pillars', n_wall: 36, T: 2 })
+    const w = new World(applyWallStamp({ ...initFromSeed(11), walls: 'pillars', n_wall: 36, T: 2 }))
     for (let t = 0; t < 1200; t++) w.step()
     let inside = 0
     let checks = 0
     for (let i = 0; i < w.nMatter; i++) {
       if (!w.alive[i]) continue
-      for (let j = w.nMatter; j < w.nMatter + w.nWall; j++) {
+      for (let j = w.nMatter; j < w.foodStart; j++) {
+        if (!w.alive[j]) continue
         const S = w.L.SIZE
         let dx = w.x[j] - w.x[i]
         let dy = w.y[j] - w.y[i]
@@ -90,8 +92,8 @@ describe('terrain', () => {
   })
 
   it('adds no walls when the layout is none', () => {
-    const w = new World({ ...initFromSeed(3), walls: 'none', n_wall: 500 })
-    expect(w.nWall).toBe(0)
-    for (let i = 0; i < w.cap; i++) expect(w.type[i]).not.toBe(WALL)
+    const w = new World({ ...initFromSeed(3), walls: 'none', n_wall: 500, wallPositions: [] })
+    expect(w.wallCount).toBe(0)
+    for (let i = 0; i < w.cap; i++) if (w.alive[i]) expect(w.type[i]).not.toBe(WALL)
   })
 })

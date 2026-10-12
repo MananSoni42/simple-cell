@@ -57,3 +57,21 @@ app actually sustains (requested rate maxed), measured from the stats panel:
 |---|---|---|---|
 | 8× | 8 | 238 | 624 |
 | 16× | 14 | – | 174 (1024 organisms, 27k food) |
+
+## Where the time goes now
+
+Measured again after sub-stepping, bonds, per-organism counters and terrain headroom. Scale 8,
+seed 3, single thread: **4.5 ms/tick**, against 1.84 ms after phase 1.
+
+| Phase | ms |
+|---|---|
+| forces | 1.48 |
+| integrate | 1.19 |
+| formBonds | 0.74 |
+| field, grid, uptake, spawn, think | ~0.85 |
+| everything else (bonds apply/prune, captures, separation, decay, orders) | ~0.25 |
+
+The growth is not drift, it is two deliberate features. `integrate` is ~4× because the world is
+now **sub-stepped** for stability, and the whole bond family costs ~0.87 ms. Spare terrain slots
+add about 2% to the grid build. The order-crediting pass, which looked like the obvious suspect,
+costs 0.01 ms.

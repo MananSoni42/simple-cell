@@ -50,6 +50,10 @@ export const LAWS = {
   E_viable: 1,
   corpse_frac: 0.5,
   r_wall: 10, // a wall's exclusion radius
+  // Spare terrain slots kept in every world so it can be painted. Not free: every slot is one
+  // more entry in the grid build, so this is deliberately modest - 300 pieces of radius 10 can
+  // still cover a third of a 300-unit world.
+  wall_cap: 300,
   K_wall: 12,
   // Bonds between particles, with hysteresis: forming is easy, breaking is not. The gap between
   // F_form and F_break is the activation energy, and it is what lets aggregates persist instead
@@ -123,8 +127,15 @@ export interface Init {
   food_batch: number // food particles per injection event (area scaling)
   spawn_batch: number // organisms per spawn event (area scaling)
   foodMoves: boolean // food drifts and responds to forces; otherwise it stays where it lands
-  walls: 'none' | 'pillars' | 'maze' | 'ring' // immovable terrain (R18)
+  /** The stamp a world started from. Terrain itself lives in `wallPositions`. */
+  walls: 'none' | 'pillars' | 'maze' | 'ring'
   n_wall: number
+  /** Every piece of terrain, as placed. A stamp fills this; painting edits it. */
+  wallPositions: [number, number][]
+  /** Food present at tick 0, beyond `n_food0`'s random scatter. */
+  seededFood: [number, number][]
+  /** Organisms placed into the world before it starts. */
+  seededOrganisms: SeededOrganism[]
   bonds: boolean // particles may bond to each other (R16)
   repro: boolean // budding reproduction
   repro_mut: number // std-dev of weight mutation in children
@@ -163,6 +174,56 @@ export function applyQuantization(A: number[][]): number[][] {
  */
 export const WALL_LAYOUTS = ['none', 'pillars', 'maze', 'ring'] as const
 export type WallLayout = (typeof WALL_LAYOUTS)[number]
+
+/** An organism to place before the world starts; `organism` is a saved file, inline. */
+export interface SeededOrganism {
+  /** Serialized OrganismFile, kept as unknown here so core/params stays free of UI types. */
+  organism?: unknown
+  x: number
+  y: number
+}
+
+/** Lays a layout's terrain into an Init, replacing whatever was there. */
+export function applyWallStamp(init: Init, L: Laws = LAWS): Init {
+  init.wallPositions = wallStamp(init.walls, init.n_wall, init.size, L)
+  return init
+}
+
+/**
+ * Terrain for a named layout. A stamp is only a starting point: it fills `wallPositions`, which
+ * can then be painted over, so a layout is a convenience rather than a constraint.
+ */
+export function wallStamp(layout: WallLayout, count: number, size: number, L: Laws = LAWS): [number, number][] {
+  const out: [number, number][] = []
+  if (layout === 'none' || count <= 0) return out
+  const wrap = (v: number): number => ((v % size) + size) % size
+  if (layout === 'pillars') {
+    const per = Math.max(2, Math.round(Math.sqrt(count)))
+    const cell = size / per
+    for (let k = 0; k < count; k++) {
+      out.push([wrap((k % per) * cell + cell / 2), wrap(Math.floor(k / per) * cell + cell / 2)])
+    }
+    return out
+  }
+  if (layout === 'ring') {
+    for (let k = 0; k < count; k++) {
+      const a = (k / count) * Math.PI * 2
+      out.push([wrap(size / 2 + size * 0.35 * Math.cos(a)), wrap(size / 2 + size * 0.35 * Math.sin(a))])
+    }
+    return out
+  }
+  // maze: a few straight runs at right angles
+  const runs = Math.max(1, Math.round(count / 12))
+  const perRun = Math.max(1, Math.round(count / runs))
+  for (let k = 0; k < count; k++) {
+    const run = Math.floor(k / perRun)
+    const horizontal = run % 2 === 0
+    const base = ((run + 1) / (runs + 1)) * size
+    const along = (k % perRun) * 2 * L.r_wall + size * 0.1
+    out.push(horizontal ? [wrap(along), wrap(base)] : [wrap(base), wrap(along)])
+  }
+  return out
+}
 
 export function coreRadius(brainA: boolean, brainB: boolean, L: Laws): number {
   if (brainA && brainB) return L.r_brain
@@ -204,6 +265,9 @@ function seedWorld(seed: number, scale = 1): Init {
     foodMoves: false,
     walls: 'none',
     n_wall: 40 * area,
+    wallPositions: [],
+    seededFood: [],
+    seededOrganisms: [],
     bonds: true,
     repro: true,
     repro_mut: 0.05,
@@ -294,6 +358,7 @@ export function regimeMultiplier(init: Init, tick: number): number {
 /** A seeded world, already sub-stepped enough to be numerically safe and fed to its level. */
 export function initFromSeed(seed: number, scale = 1): Init {
   const init = seedWorld(seed, scale)
+  init.wallPositions = wallStamp(init.walls, init.n_wall, init.size)
   init.substeps = Math.max(1, substepsFor(init) || LAWS.substeps_max)
   return applyFoodLevel(init)
 }

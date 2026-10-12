@@ -764,9 +764,14 @@ One more particle type, `WALL`: immovable, with no chemistry, excluding everythi
 (`r_wall` = 10) alone. It is never integrated, so it is the only thing in the world that stays
 exactly where it was put — and therefore the only thing an organism can have a shape *against*.
 
-Four layouts, chosen on the start screen: `none`, `pillars` (a regular grid), `maze` (straight
-runs at right angles) and `ring`. Walls are allocated once at init, between the matter slots and
-the food slots, so nothing else in the world has to know about them.
+Terrain lives in **`wallPositions`, a list of places**, and the four layouts — `none`, `pillars`,
+`maze`, `ring` — are **stamps** that fill it. A layout is therefore a starting point you can paint
+over rather than a fixed world. Every world also carries `wall_cap` spare slots so terrain can be
+added while it runs; those slots are not free (each is one more entry in the grid build), which is
+why the headroom is a modest 300 rather than thousands.
+
+A config that names a layout but carries no positions is taken to mean "stamp it", so a
+hand-written config behaves the way someone writing one would expect.
 
 Note what this is **not**: a "universal repeller" type would have added nothing, because the
 matrix can already make a type that repels everything — set its row negative. What was missing
@@ -838,3 +843,31 @@ most time joined — rather than by one score. Ranking by a single number would 
 near-copies of the same winner; this way a collection accumulates different kinds of success, and
 nothing had to be collapsed into a single objective. Each arrives with a readable name built from
 where it came from, because unnamed things never get used again.
+
+---
+
+## 21. Building a world by hand
+
+**The world screen is the builder.** A new world arrives **paused at tick 0** with a toolbar, and
+the same tools stay available while it runs. There is no separate editor, so nothing has to be
+compiled and no preview can disagree with the real thing.
+
+| Tool | Key | What it does |
+|---|---|---|
+| Look | `V` | Pan, zoom, and click an organism to inspect it |
+| Organism | `1` | Place one where you click — the armed organism from a collection, or a random one |
+| Food | `2` | Drop food, by click or drag |
+| Wall | `3` | Paint terrain, which never moves |
+| Erase | `4` | Remove food, terrain and organisms within the brush |
+
+Shift-drag always feeds, whatever tool is selected. Erasing an organism **dissolves** it rather
+than deleting it — the same path starvation takes, so its limbs are released and half its energy
+is left behind as food. Matter is conserved, so deleting a body outright would quietly destroy it.
+
+**One distinction the toolbar has to carry:** painting sets *initial conditions*, while the food
+*pattern* governs *ongoing* supply. Paint a pile in a corner and it is there at tick 0, but the sun
+keeps dropping food wherever the pattern says.
+
+**Save world** writes the arrangement back out as a config — every placement recorded, with the
+random starting counts set to zero, so reopening it gives back the world you built rather than a
+fresh roll of the dice.

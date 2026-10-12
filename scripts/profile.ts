@@ -19,8 +19,10 @@ for (const scale of scales.length ? scales : [8, 16, 32]) {
     }
   }
   const anyW = w as any
-  for (const n of ['prepare', 'integrate', 'uptake', 'think', 'costs', 'decayFree', 'freeMatterDecay', 'deaths', 'reproduce', 'captures', 'stepField', 'stepPatches', 'injectFood', 'spawnRandom']) wrap(n, anyW)
+  for (const n of ['prepare', 'integrate', 'uptake', 'think', 'costs', 'decayFree', 'spoilFood', 'freeMatterDecay', 'deaths', 'reproduce', 'captures', 'stepField', 'stepPatches', 'shine', 'spawnRandom', 'applyBonds', 'formBonds', 'pruneBonds', 'creditOrders', 'separateBrains']) wrap(n, anyW)
   wrap('build', anyW.grid, 'gridBuild')
+  wrap('observe', anyW.orders, 'ordersObserve')
+  wrap('observe', anyW.aggregates, 'aggObserve')
   const orig = serialBackend.compute.bind(serialBackend)
   ;(serialBackend as any).compute = (x: World) => {
     const t = performance.now()

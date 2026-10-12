@@ -610,7 +610,7 @@ describe('food sensing', () => {
     w.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
     // one food particle to the right of the limb, inside the interaction range
     w.injectFood()
-    const f = w.nMatter
+    const f = w.foodStart
     w.x[f] = w.x[0] + 22
     w.y[f] = w.y[0]
     w.grid.build()
@@ -624,8 +624,8 @@ describe('food sensing', () => {
     w2.type[0] = 0
     w2.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
     w2.injectFood()
-    w2.x[w2.nMatter] = w2.x[0] + 22
-    w2.y[w2.nMatter] = w2.y[0]
+    w2.x[w2.foodStart] = w2.x[0] + 22
+    w2.y[w2.foodStart] = w2.y[0]
     w2.grid.build()
     serialStep(w2)
     expect(w2.ffx[0]).toBeLessThan(0)

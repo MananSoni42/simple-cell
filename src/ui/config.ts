@@ -1,5 +1,6 @@
 import type { Perf } from '../compute/select'
 import {
+  applyWallStamp,
   type FoodLevel,
   FOOD_LEVELS,
   type FoodMode,
@@ -7,6 +8,7 @@ import {
   type FoodRegime,
   FOOD_REGIMES,
   type Init,
+  type SeededOrganism,
   WALL_LAYOUTS,
   type WallLayout,
   clamp11,
@@ -34,6 +36,15 @@ export function configText(init: Init, perf: Perf): string {
 const num = (v: unknown, fallback: number, lo = -Infinity, hi = Infinity): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback)
+
+/** A list of in-world points, with anything malformed dropped rather than crashing a load. */
+const points = (v: unknown, size: number): [number, number][] =>
+  Array.isArray(v)
+    ? (v as unknown[])
+        .filter((p): p is [number, number] => Array.isArray(p) && p.length >= 2 && p.every((n) => typeof n === 'number' && Number.isFinite(n)))
+        .slice(0, 20000)
+        .map(([x, y]) => [Math.min(size, Math.max(0, x)), Math.min(size, Math.max(0, y))] as [number, number])
+    : []
 
 /**
  * Rebuilds an Init from untrusted JSON. Anything missing or out of range falls back to what the
@@ -77,6 +88,13 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     bonds: bool(src.bonds, base.bonds),
     walls: WALL_LAYOUTS.includes(src.walls as WallLayout) ? (src.walls as WallLayout) : base.walls,
     n_wall: Math.round(num(src.n_wall, base.n_wall, 0, 2e5)),
+    wallPositions: points(src.wallPositions, base.size),
+    seededFood: points(src.seededFood, base.size),
+    seededOrganisms: Array.isArray(src.seededOrganisms)
+      ? (src.seededOrganisms as SeededOrganism[])
+          .slice(0, 500)
+          .map((o) => ({ organism: o?.organism, x: num(o?.x, 0, 0, base.size), y: num(o?.y, 0, 0, base.size) }))
+      : base.seededOrganisms,
     repro_mut: num(src.repro_mut, base.repro_mut, 0, 5),
     decay_free: num(src.decay_free, base.decay_free, 0, 1),
     food_life: Math.round(num(src.food_life, base.food_life, 0, 1e7)),
@@ -95,6 +113,9 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
   init.n_brain = Math.min(init.n_brain, init.n_intrinsic)
   init.n_start = Math.min(init.n_start, init.n_brain)
   init.n_food0 = Math.min(init.n_food0, init.max_food)
+  // a config that names a layout but carries no terrain means "stamp it", so hand-written
+  // configs behave the way someone writing one would expect
+  if (init.wallPositions.length === 0 && init.walls !== 'none') applyWallStamp(init)
 
   const p = raw.perf as Partial<Perf> | undefined
   const perf = p ? { threads: Math.round(num(p.threads, 1, 1, 256)), gpu: bool(p.gpu, false) } : undefined

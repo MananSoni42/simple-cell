@@ -12,6 +12,8 @@ import { Router } from './ui/router'
 import { mountSetup } from './ui/setup'
 import { StatsPanel } from './ui/stats'
 import { mountSummary } from './ui/summary'
+import type { OrganismFile } from './core/organism'
+import { download } from './ui/config'
 
 const MIN_RATE = 0.125
 const MAX_RATE = 8192 // above this the simulation outruns its own bookkeeping
@@ -24,6 +26,9 @@ const bPlay = $('b-play')
 const bPause = $('b-pause')
 const bRate = $('b-rate')
 const bSeek = $<HTMLInputElement>('b-seek')
+const stage = $('stage')
+const brushEl = $<HTMLInputElement>('brush')
+const helpEl = $('help')
 
 const router = new Router(['landing', 'explain', 'setup', 'world', 'summary'])
 
@@ -54,6 +59,24 @@ let frameGap = 1000
 /** Speed to resume at when a run is restarted, so 'run it again' does not look frozen. */
 let resumeRate: number | null = null
 
+/**
+ * The world screen is also the builder: a new world arrives paused, with these tools available.
+ * Building and running are the same screen, so there is nothing to compile and no preview that
+ * could disagree with the real thing.
+ */
+type Tool = 'pan' | 'organism' | 'food' | 'wall' | 'erase'
+let tool: Tool = 'pan'
+/** The organism the palette has armed, if any; otherwise a random one is placed. */
+let armed: OrganismFile | null = null
+
+const HELP: Record<Tool, string> = {
+  pan: 'drag to pan · wheel to zoom · click an organism to inspect · shift-drag to feed',
+  organism: 'click to place an organism · nothing armed means a random one',
+  food: 'click or drag to drop food',
+  wall: 'click or drag to paint terrain, which never moves',
+  erase: 'click or drag to remove food, terrain and organisms',
+}
+
 const send = (m: ToSim): void => link?.worker.postMessage(m)
 const l0 = (): Link => link as Link
 const rateLabel = (): string => (paused ? 'paused' : `${rate} tick/s`)
@@ -62,6 +85,16 @@ function syncControls(): void {
   bPlay.classList.toggle('on', !paused)
   bPause.classList.toggle('on', paused)
   bRate.textContent = `${rate} tick/s`
+  for (const b of Array.from(document.querySelectorAll<HTMLElement>('[data-tool]'))) {
+    b.classList.toggle('on', b.dataset.tool === tool)
+  }
+  stage.classList.toggle('editing', tool !== 'pan')
+  helpEl.textContent = HELP[tool]
+}
+
+function setTool(t: Tool): void {
+  tool = t
+  syncControls()
 }
 function play(): void {
   paused = false
@@ -128,12 +161,16 @@ function startWorld(init: Init, perf: Perf): void {
       // keep the speed the run was using; starting a fast world back at 1 tick/s reads as broken
       rate = resumeRate ?? 1
       resumeRate = null
-      paused = false
+      paused = true // it arrives waiting, so it can be built before it runs
+      setTool('pan')
       send({ kind: 'rate', rate })
       router.go('world')
       syncControls()
     } else if (m.kind === 'stats') latest = m.stats
     else if (m.kind === 'organism') inspect.show(m.organism)
+    else if (m.kind === 'builtConfig') {
+      download(`simplecell-world-${m.init.seed}.json`, JSON.stringify({ version: 1, init: m.init }, null, 2))
+    }
     else if (m.kind === 'finished') {
       const init2 = lastInit!
       mountSummary(
@@ -178,6 +215,11 @@ mountSetup($('page-setup'), {
 
 // ---------------------------------------------------------------- world controls
 
+for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-tool]'))) {
+  b.addEventListener('click', () => setTool(b.dataset.tool as Tool))
+}
+$('t-save').addEventListener('click', () => send({ kind: 'snapshotConfig' }))
+
 bPlay.addEventListener('click', play)
 bPause.addEventListener('click', pause)
 $('b-stop').addEventListener('click', stop)
@@ -197,30 +239,49 @@ bSeek.addEventListener('input', () => {
  * inspects whatever organism is there, and a plain drag pans the camera.
  */
 const canvas = $<HTMLCanvasElement>('c')
-let feeding = false
+let painting = false
 const toWorld = (e: PointerEvent | MouseEvent): [number, number] => renderer.toWorld(e.clientX, e.clientY, l0().layout.SIZE)
+const brush = (): number => Number(brushEl.value) || 16
+
+/** One stroke of whichever tool is selected. Shift always feeds, whatever the tool. */
+function apply(e: PointerEvent, first: boolean): void {
+  if (!link) return
+  const [x, y] = toWorld(e)
+  const feed = e.shiftKey || tool === 'food'
+  if (feed) {
+    renderer.flash(x, y)
+    send({ kind: 'feed', x, y, n: first ? 3 : 2, radius: brush() })
+    return
+  }
+  if (tool === 'wall') send({ kind: 'wall', x, y })
+  else if (tool === 'erase') send({ kind: 'erase', x, y, radius: brush() })
+  else if (tool === 'organism' && first) {
+    renderer.flash(x, y)
+    if (armed) send({ kind: 'placeSaved', organism: armed, at: [x, y] })
+    else send({ kind: 'placeRandom', x, y })
+  }
+}
+
 canvas.addEventListener('click', (e) => {
-  if (e.shiftKey || !link) return
+  // in Look mode a plain click inspects; every other tool is handled on pointerdown
+  if (e.shiftKey || !link || tool !== 'pan') return
   const [x, y] = toWorld(e)
   renderer.markOrganism(x, y)
   send({ kind: 'inspect', x, y })
 })
 canvas.addEventListener('pointerdown', (e) => {
-  if (!link || (!e.shiftKey && e.button === 0)) return
+  if (!link) return
+  const editing = tool !== 'pan' || e.shiftKey || e.button !== 0
+  if (!editing) return
   e.preventDefault()
-  feeding = true
+  painting = true
   capture(canvas, e)
-  const [x, y] = toWorld(e)
-  renderer.flash(x, y)
-  send({ kind: 'feed', x, y, n: 3, radius: 14 })
+  apply(e, true)
 })
 canvas.addEventListener('pointermove', (e) => {
-  if (!feeding || !link) return
-  const [x, y] = toWorld(e)
-  renderer.flash(x, y)
-  send({ kind: 'feed', x, y, n: 2, radius: 14 })
+  if (painting) apply(e, false)
 })
-canvas.addEventListener('pointerup', () => (feeding = false))
+canvas.addEventListener('pointerup', () => (painting = false))
 canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 
 addEventListener('keydown', (e) => {
@@ -246,7 +307,11 @@ addEventListener('keydown', (e) => {
     paused = true
     syncControls()
     send({ kind: 'step' })
-  }
+  } else if (e.key === 'v' || e.key === 'V') setTool('pan')
+  else if (e.key === '1') setTool('organism')
+  else if (e.key === '2') setTool('food')
+  else if (e.key === '3') setTool('wall')
+  else if (e.key === '4') setTool('erase')
 })
 
 // ---------------------------------------------------------------- frame loop
