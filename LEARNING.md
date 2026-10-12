@@ -156,15 +156,22 @@ reverted.
 Still failing: **rung L3, foraging** — and now with a diagnosis rather than a shrug. Harvest per
 tick did not improve under the new conditions, so the obvious next test was to make foraging the
 *objective* instead of a side effect: CEM on `per_tick` directly, 10 paired seeds × 20k ticks.
-It got **0.073 against a baseline of 0.078** — no better than nothing, 3 wins of 6. Conjunctively,
-`offspring × per_tick` raised offspring (0.350 → 0.395) and left `per_tick` untouched.
+Optimised alone it got **0.073 against a baseline of 0.078** on the median — no better than
+nothing, 3 wins of 6. Conjunctively with offspring the medians are flat too, but the *means* are
+not: `per_tick` 0.0969 → 0.1211 (+25%), harvested 147.7 → 165.8, offspring 0.865 → 1.053. With six
+usable pairs and this much variance that is **suggestive and undetermined**, not a result either
+way; the earlier phrasing here said "untouched", which overstated it.
 
-So the bottleneck is not the measure and not the conditions. The likely reason is that `per_tick`
-is **mostly not heritable**: harvested ÷ age is maximised by *sitting in* food rather than by
-finding it, and the best way to sit in food is to be born in a patch, which no offspring inherits.
-Selection on it is largely selection on luck of birthplace. Two measures that would be under the
-organism's own control, and are the next thing to try: **harvested per unit distance moved**, and
-**time from birth to first meal** (§5.25), which is explicitly about finding rather than sitting.
+What the attempt does suggest is that `per_tick` is **mostly not heritable**: harvested ÷ age is
+maximised by *sitting in* food rather than by finding it, and the way to sit in food is to be born
+in a patch, which no offspring inherits. Selection on it is then largely selection on luck of
+birthplace, which would explain a real effect being hard to see. Two measures that are under an
+organism's own control, and the next thing to try: **harvested per unit distance moved**, and
+**time from birth to first meal** (§5.25), which is about finding rather than sitting.
+
+Worth recording separately: the *baseline itself* moved enormously under stages 1–3. Mean lifespan
+over completed lives is now 1,600 ticks against 243 before, offspring 0.865 against 0.335, and time
+spent joined 2,639 against 321. The conditions did far more than any learner has.
 
 ### Archipelago: four islands, then one world
 
