@@ -573,13 +573,19 @@ touched to see life, and the world that arrives is drawn from the combinations t
 something — never the two characters (Skittish chemistry, Plenty food) that make a dull first
 world, though both stay one click away.
 
-**The builder is prominent but optional**, behind a single press, and it is **two dials** rather
+**The builder is prominent but optional**, behind a single press, and it is **three dials** rather
 than a list:
 
 | Dial | Choices | What it decides |
 |---|---|---|
 | What the matter wants | Sticky, Clumpy, Chains, Hungry, Skittish | the chemistry matrix |
 | What the world is like | Plenty, Patches, Harsh, Pulsing, Drifting | food pattern, level, regime, lifetime, decay |
+| How they learn | None, Random search, GA, ES, CEM | where a new organism's weights come from (§23) |
+
+**Learning is a dial, not a setting.** It sits level with the other two rather than inside the
+drawer, and the picker states it next to the Begin button whether it is on or off, because whether
+anything in a world is being optimised changes what the run *means* — it is not a detail of the
+world. `None` is the default and says so: "off — the control".
 
 A dial names a **character, not a world**: it generates its matrix from the seed, so re-rolling
 gives a different world that still has the same nature. Five by five by a seed covers far more
@@ -589,7 +595,8 @@ points. Size and terrain are chips; the seed is the one free-text field.
 
 **Everything else is behind "Every setting"**, grouped by what it governs rather than by which code
 reads it: **physics**, **chemistry** (the matrix), **food**, **life** and **compute**. `1`–`5`
-switch tabs while the builder is open. Numeric settings are **sliders**, each printing its value
+switch tabs while the builder is open. The learner's own hyper-parameters appear under its dial
+when one is chosen, not in the drawer, so no setting appears in two places. Numeric settings are **sliders**, each printing its value
 and a line of plain English about what that value *means* — "cold: structures hold together",
 "each tick split into 4, so no single move is long enough to pass through anything". The chemistry
 matrix shows only its lower triangle, because it is symmetric by law. Changing any of it is named

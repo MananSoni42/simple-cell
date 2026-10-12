@@ -32,7 +32,6 @@ const TABS = [
   ['chemistry', 'Chemistry'],
   ['food', 'Food'],
   ['life', 'Life'],
-  ['learning', 'Learning'],
   ['compute', 'Compute'],
 ] as const
 type Tab = (typeof TABS)[number][0]
@@ -96,6 +95,7 @@ export function mountSetup(
           <p class="pitch-line" id="s-chem"></p>
           <p class="pitch-line" id="s-world"></p>
           <div class="chips-row" id="s-prev-stats"></div>
+          <p class="pitch-line" id="s-learn-line"></p>
           <div class="pitch-go">
             <button class="primary" id="s-start">Begin →</button>
             <button id="s-roll">roll another</button>
@@ -108,7 +108,7 @@ export function mountSetup(
       <div class="builder" id="s-builder" hidden>
         <div class="builder-head">
           <div><b>Build it yourself</b>
-            <div class="note">two dials decide what the world is like. the seed decides the rest.</div>
+            <div class="note">three dials: what the matter wants, what the world is like, and whether anything is learning. the seed decides the rest.</div>
           </div>
           <button id="s-close-build">done</button>
         </div>
@@ -120,6 +120,12 @@ export function mountSetup(
           <div class="presets" id="s-world-chips"></div>
           <div class="field-hint" id="s-world-hint"></div>
         </div>
+        <div class="field"><div class="field-head"><label>how they learn</label>
+            <span class="note" id="s-learn-tag"></span></div>
+          <div class="presets" id="s-algos"></div>
+          <div class="field-hint" id="s-algo-hint"></div>
+        </div>
+        <div id="s-learn-panel"></div>
         <div class="row-wrap">
           <div id="s-size"></div>
           <div id="s-terrain"></div>
@@ -658,33 +664,34 @@ export function mountSetup(
 
   // ------------------------------------------------------------------ learning
   /**
-   * The one tab that has to argue with itself. Everything else here sets up a world; this decides
-   * whether anything in it is being optimised, which is a different kind of choice — so it says
+   * The third dial, and the one that has to argue with itself.
+   *
+   * It sits level with the other two rather than inside the settings drawer, because whether
+   * anything in a world is being optimised is not a detail of that world — it is the most
+   * consequential choice on the screen, and one that changes what the run *means*. So it says
    * plainly that `none` is the control, that a fitness function is an invention rather than a
-   * measurement, and what each algorithm will actually do with the weights.
+   * measurement, and what each algorithm will do with the weights.
    */
   const learning = (): void => {
-    const p = panel('learning')
     const L = init.learn
     const on = L.algo !== 'none'
-    p.innerHTML = `
-      <div class="note" style="margin-bottom:14px">A learner may only choose the weights a
-        <i>new</i> organism is born with, and watch what became of the ones that died. It cannot
-        touch the physics, the chemistry or the energy, and it draws from its own random stream —
-        so switching one on leaves the same world, with the same food in the same places. Budding
-        is left alone: it is already selection plus mutation, and it belongs to the world rather
-        than to an algorithm.</div>
-      <div class="field"><div class="field-head"><label>how new organisms get their weights</label></div>
-        <div class="presets" id="s-algos"></div>
-        <div class="field-hint" id="s-algo-hint"></div>
-      </div>
-      <div class="cols"><div id="s-learn-l"></div><div id="s-learn-r"></div></div>`
+    const host = q('#s-learn-panel')
+    host.innerHTML = on
+      ? `<div class="note" style="margin:2px 0 14px">A learner may only choose the weights a
+           <i>new</i> organism is born with, and watch what became of the ones that died. It cannot
+           touch the physics, the chemistry or the energy, and it draws from its own random stream —
+           so switching one on leaves the same world, with the same food in the same places.
+           Budding is left alone: it is already selection plus mutation, and it belongs to the
+           world rather than to an algorithm.</div>
+         <div class="cols"><div id="s-learn-l"></div><div id="s-learn-r"></div></div>`
+      : ''
 
     q('#s-algos').innerHTML = LEARNERS.map(
       (l) => `<button type="button" data-algo="${l.key}" class="${l.key === L.algo ? 'on' : ''}">${l.name}</button>`,
     ).join('')
     q('#s-algo-hint').textContent = LEARNERS.find((l) => l.key === L.algo)?.blurb ?? ''
-    for (const b of Array.from(p.querySelectorAll<HTMLElement>('[data-algo]'))) {
+    q('#s-learn-tag').textContent = on ? `on ${FITNESS.find((f) => f.key === L.fitness)?.name}` : 'off — the control'
+    for (const b of Array.from(root.querySelectorAll<HTMLElement>('[data-algo]'))) {
       b.addEventListener('click', () => {
         init.learn = { ...init.learn, algo: b.dataset.algo as LearnAlgo }
         refresh()
@@ -1031,6 +1038,13 @@ export function mountSetup(
     q('#s-world').textContent = dialled
       ? worldKindOf(recipe.world).describe()
       : `${init.n_start} organisms to start, ${init.n_intrinsic} loose particles, ${init.size} units across`
+    const lrn = init.learn
+    const lrnName = LEARNERS.find((l) => l.key === lrn.algo)?.name ?? lrn.algo
+    q('#s-learn-line').textContent =
+      lrn.algo === 'none'
+        ? 'nothing is being optimised: every new organism gets random weights, and whatever happens is the world doing it'
+        : `learning: ${lrnName}, scored on ${FITNESS.find((f) => f.key === lrn.fitness)?.name} — a chosen measure, and part of the result`
+    q<HTMLElement>('#s-learn-line').style.color = lrn.algo === 'none' ? '' : 'var(--accent)'
     q('#s-changed').textContent = changeSummary()
     q<HTMLElement>('#s-builder').hidden = !building
     q('#s-toggle-build').textContent = building ? 'hide the builder' : 'Build it yourself →'
