@@ -133,6 +133,7 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     spawn_batch: Math.round(num(src.spawn_batch, base.spawn_batch, 0, 1e5)),
     foodMoves: bool(src.foodMoves, base.foodMoves),
     repro: bool(src.repro, base.repro),
+    fission: bool(src.fission, base.fission),
     bonds: bool(src.bonds, base.bonds),
     walls: WALL_LAYOUTS.includes(src.walls as WallLayout) ? (src.walls as WallLayout) : base.walls,
     n_wall: Math.round(num(src.n_wall, base.n_wall, 0, 2e5)),

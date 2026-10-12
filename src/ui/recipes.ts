@@ -160,7 +160,7 @@ export const WORLD_KINDS: WorldKind[] = [
     describe: () => 'food arrives everywhere, faster than it can be eaten — nothing has to go looking, so whatever happens is not about hunger',
     apply: (init, rng) => {
       init.foodMode = 'random'
-      init.foodLevel = 'abundant'
+      init.foodLevel = 'average'
       init.foodRegime = 'steady'
       init.food_life = pick(rng, [0, 400, 800])
     },
@@ -265,11 +265,13 @@ export function randomRecipe(seed = Math.floor(Math.random() * 1e9)): Recipe {
  *
  * - **Sticky** chemistry, because self-repulsion with cross-attraction is what makes sheets rather
  *   than droplets — and sheets only became possible at all once a particle could hold four bonds.
- * - **Patches, abundant**: food concentrated in space was already the strongest lever on
- *   aggregation, and scarcity was measured to be actively lethal.
+ * - **Patches, average**: food concentrated in space was already the strongest lever on
+ *   aggregation, and scarcity was measured to be actively lethal — but *abundant* with a tight cap
+ *   pinned the population against it, which is worse than either.
+ * - **A hundred and fifty brain slots**, far more than the food can support, so the population is
+ *   set by the ecology rather than by an array length. This single change took the 90th-percentile
+ *   lifespan from 131–173 to 2,104–2,355.
  * - **Metabolism 0.5**, the strongest single lever on how long anything lives.
- * - **Forty brain slots**, which was the largest effect of anything tried: the population pins
- *   against its cap, so fewer slots put living longer and breeding in direct conflict.
  * - **Energy along bonds**, so a bonded group shares one metabolism.
  * - **Cross-entropy** learning, the only algorithm measured to beat its controls (p = 0.003).
  * - Scored on **offspring together with togetherness**, combined so that being poor at either
@@ -284,16 +286,16 @@ export function bestRecipe(seed = Math.floor(Math.random() * 1e9)): Recipe {
 export function bestWorld(seed = Math.floor(Math.random() * 1e9), scale = 1): Init {
   const init = buildRecipe({ ...bestRecipe(seed), scale })
   init.foodMode = 'patchy'
-  init.foodLevel = 'abundant'
+  init.foodLevel = 'average'
   init.foodRegime = 'steady'
   init.n_patch = 2 * scale
   init.r_patch = 50
   init.food_life = 250
   init.metabolism = 0.5
   init.bond_flow = 0.05
-  init.n_brain = 40 * scale * scale
-  init.n_start = 10 * scale * scale
-  init.n_intrinsic = 280 * scale * scale
+  init.n_brain = 150 * scale * scale
+  init.n_start = 16 * scale * scale
+  init.n_intrinsic = 700 * scale * scale
   init.T_spawn = 25
   init.bonds = true
   init.repro = true
@@ -342,9 +344,17 @@ export function buildRecipe(r: Recipe): Init {
    * 40 slots raised best compound order from 7 to 18, lineage depth from 6 to 18 generations, and
    * the 90th-percentile lifespan from 941 to 1,259 — the single largest effect of anything tried.
    */
-  init.n_brain = 40 * r.scale * r.scale
-  init.n_start = Math.max(4, Math.round(init.n_brain * 0.25))
-  init.n_intrinsic = (200 + rng.int(60)) * r.scale * r.scale
+  /*
+   * Slots far beyond what the food can support, so the population is set by the **ecology** rather
+   * than by the size of an array. Measured: moving from 40 slots with abundant food to 150 slots
+   * with average food took the 90th-percentile lifespan from 131–173 to 2,104–2,355, a thirteen-
+   * fold jump, with a structure reaching order 101. A binding cap had been hiding everything: it
+   * put longevity in conflict with breeding, made reproductive strategy invisible to selection,
+   * and left the learner with no free slot to spawn into.
+   */
+  init.n_brain = 150 * r.scale * r.scale
+  init.n_start = 16 * r.scale * r.scale
+  init.n_intrinsic = (650 + rng.int(100)) * r.scale * r.scale
   init.n_food0 = Math.round(init.max_food * 0.25)
   init.bonds = true
   init.repro = true

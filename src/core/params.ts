@@ -99,8 +99,17 @@ export const LAWS = {
   E_bond: 0.1, // energy spent to form a bond, paid by both particles
   bond_cooldown: 30, // ticks before the same particle may bond again after a break // share of a dead brain's reserve that is left behind as food // minimum reserve for a free particle to be captured as a limb
   substeps_max: 16, // integration sub-steps are capped here when a hot world needs them
-  /** Compound time is credited as (n-1)^order_alpha, so bigger groups count superlinearly. */
-  order_alpha: 1.5,
+  /**
+   * Compound time is credited as `(n-1)^order_alpha` per tick.
+   *
+   * It was 1.5, which made order count *superlinearly* while time counted linearly — so a
+   * ten-organism clump that lasted an instant outscored a pair that held together for a lifetime.
+   * That is backwards: **how long a structure lasts matters more than how big it is.** A
+   * four-organism structure that persists for half an organism's life is a better thing than a
+   * ten-organism one that persists for a hundredth of it. At 0.5 order contributes with a square
+   * root while time still contributes in full.
+   */
+  order_alpha: 0.5,
   life_window: 10000, // lifetime averages are reported over this many trailing ticks
   life_buckets: 100,
 }
@@ -200,6 +209,11 @@ export interface Init {
   bond_flow: number
   bonds: boolean // particles may bond to each other (R16)
   repro: boolean // budding reproduction
+  /**
+   * Splitting as well as budding: a well-fed organism with two or more limbs may divide in two,
+   * sharing out its limbs and halving its reserve, instead of building a child from free matter.
+   */
+  fission: boolean
   repro_mut: number // std-dev of weight mutation in children
   food_life: number // ticks before an uneaten food particle spoils (0 = never)
   decay_free: number // fraction of its reserve a free particle loses each tick (burned)
@@ -339,6 +353,7 @@ function seedWorld(seed: number, scale = 1): Init {
     seededOrganisms: [],
     bonds: true,
     repro: true,
+    fission: true,
     repro_mut: 0.05,
     food_life: 200,
     decay_free: 0.002,

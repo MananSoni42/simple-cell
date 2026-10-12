@@ -40,9 +40,11 @@ describe('the best known world', () => {
     const init = bestWorld(77, 1)
     expect(init.metabolism).toBe(0.5)
     expect(init.bond_flow).toBeGreaterThan(0)
-    expect(init.n_brain).toBe(40)
+    // slots far beyond what the food supports, so the ecology sets the population
+    expect(init.n_brain).toBe(150)
+    expect(init.n_brain).toBeGreaterThan(init.n_start * 4)
     expect(init.foodMode).toBe('patchy')
-    expect(init.foodLevel).toBe('abundant')
+    expect(init.foodLevel).toBe('average')
     expect(init.bonds).toBe(true)
     expect(init.learn.algo).toBe('cem')
     expect(keysOf(init.learn.fitness)).toEqual(['offspring', 'together'])
@@ -52,7 +54,7 @@ describe('the best known world', () => {
   it('scales without losing its character', () => {
     const big = bestWorld(77, 2)
     expect(big.size).toBe(600)
-    expect(big.n_brain).toBe(160)
+    expect(big.n_brain).toBe(600)
     expect(big.metabolism).toBe(0.5)
   })
 

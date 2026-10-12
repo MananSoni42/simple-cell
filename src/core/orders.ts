@@ -32,7 +32,19 @@ export interface OrderStats {
    * clump whose members are all original is a clump; one that has replaced half its members and
    * is still there is the first thing in this world worth calling alive.
    */
-  oldest: { order: number; age: number; replacements: number } | null
+  oldest: {
+    order: number
+    age: number
+    replacements: number
+    /**
+     * Its age as a fraction of an organism's life in this world — the number that says whether a
+     * structure is a lasting thing or a passing clump. A pair that holds for a whole lifetime
+     * reads 1.0; a twenty-strong clump that lasts an instant reads ~0.
+     */
+    heldFrac: number
+    /** `(order - 1) × heldFrac^1.5`: duration weighted above size, per the note on `order_alpha`. */
+    score: number
+  } | null
 }
 
 export const MAX_ORDER = 8
@@ -209,9 +221,16 @@ export class OrderTracker {
     }
     out.bestOrder = this.bestOrder
     out.bestAge = this.bestAge
+    // an organism's life, as the yardstick a structure's duration is measured against
+    const life = Math.max(1, w.lifeOrganisms.summary().mean || w.recordAge || 1)
     for (const st of this.structures) {
       const age = w.tick - st.since
-      if (!out.oldest || age > out.oldest.age) out.oldest = { order: st.peak, age, replacements: st.replacements }
+      const heldFrac = age / life
+      // duration outweighs size: the exponent above 1 is what makes a brief giant score poorly
+      const score = Math.max(0, st.peak - 1) * Math.pow(heldFrac, 1.5)
+      if (!out.oldest || score > out.oldest.score) {
+        out.oldest = { order: st.peak, age, replacements: st.replacements, heldFrac, score }
+      }
     }
     return out
   }

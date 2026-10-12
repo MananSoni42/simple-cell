@@ -213,6 +213,18 @@ export class World {
   readonly seeking: Float64Array
   readonly seekTicks: Float64Array
   /**
+   * When an organism is ready to reproduce, and how long it waits afterwards — **per organism**,
+   * inherited with mutation rather than fixed by law.
+   *
+   * These were two constants, `E_repro` and `repro_cooldown`, which made every organism in every
+   * world share one reproductive strategy. Moving them into the genome deletes two laws rather
+   * than adding one, and it makes the strategy itself something the world can discover: whether to
+   * breed early and cheaply or late and well is exactly the kind of question this project is
+   * supposed to let the world answer instead of us.
+   */
+  readonly eRepro: Float64Array
+  readonly repWait: Float64Array
+  /**
    * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
    * learner has to match a death back to the sample that caused it, and recovering the sample from
    * the weights would be wrong the moment its mean moved — so the tag travels with the body.
@@ -369,6 +381,8 @@ export class World {
     this.peakReserve = new Float64Array(n)
     this.seeking = new Float64Array(n)
     this.seekTicks = new Float64Array(n)
+    this.eRepro = new Float64Array(n)
+    this.repWait = new Float64Array(n)
     this.learnId = new Int32Array(n)
     this.island = new Int8Array(n)
     this.since = new Int32Array(n)
@@ -1649,11 +1663,23 @@ export class World {
     this.peakReserve[b] = this.energy[b]
     this.seeking[b] = 0
     this.seekTicks[b] = 0
+    // inherited with noise where there is a parent, straight from the laws where there is not
+    const mut = this.init.repro_mut
+    const jitter = (v: number): number => v * Math.exp(mut * rng.gauss())
+    const from = spec.parent !== undefined && spec.parent >= 0 ? spec.parent : -1
+    this.eRepro[b] = Math.min(
+      this.L.E_cap,
+      Math.max(2 * this.L.E_birth, from >= 0 && this.eRepro[from] > 0 ? jitter(this.eRepro[from]) : this.L.E_repro),
+    )
+    this.repWait[b] = Math.min(
+      4000,
+      Math.max(10, from >= 0 && this.repWait[from] > 0 ? jitter(this.repWait[from]) : this.L.repro_cooldown),
+    )
     if (spec.parent !== undefined && spec.parent >= 0) {
       this.lineage[b] = this.lineage[spec.parent]
       this.children[spec.parent]++
     } else this.lineage[b] = this.lineageCounter++
-    this.repCool[b] = this.L.repro_cooldown
+    this.repCool[b] = this.repWait[b]
     for (const { idx, quad, angle } of spec.limbs) {
       this.owner[idx] = b
       this.socket[idx] = quad
@@ -1671,7 +1697,12 @@ export class World {
    */
   private reproduce(): void {
     for (let b = this.nIntr; b < this.nMatter; b++) {
-      if (!this.isBrain(b) || this.repCool[b] > 0 || this.energy[b] < this.L.E_repro) continue
+      if (!this.isBrain(b) || this.repCool[b] > 0) continue
+      // each organism against its own threshold, not one the laws imposed on everybody
+      if (this.energy[b] < this.eRepro[b]) continue
+      if (this.init.fission && this.limbCount(b) >= 2 && this.energy[b] >= this.eRepro[b] * 1.5) {
+        if (this.split(b)) continue
+      }
       this.bud(b)
     }
   }
@@ -1767,7 +1798,88 @@ export class World {
       learnId: this.learnId[b],
     })
     this.nBudded++
-    this.repCool[b] = L.repro_cooldown
+    this.repCool[b] = this.repWait[b]
+  }
+
+  private limbCount(b: number): number {
+    let n = 0
+    for (let s = 0; s < 4; s++) if (this.limbs[b * 4 + s] >= 0) n++
+    return n
+  }
+
+  /**
+   * Fission: one organism becomes two, dividing what it has rather than paying for a newcomer.
+   *
+   * Budding builds a child out of free matter and tops every particle up to `E_birth`, which costs
+   * energy the parent must have spare. Splitting costs nothing: the limbs are shared out, the
+   * brain's reserve is halved, and no new matter is needed at all. What it costs instead is
+   * *body* — two organisms of two limbs each where there was one of four — so size and
+   * reproduction become a genuine trade-off rather than reproduction being purely a question of
+   * surplus.
+   *
+   * The halves are placed within bonding range of each other and left alone. Whether they stay
+   * together is then a question for the chemistry and for them, which is the only honest way to
+   * ask it: nothing here bonds them, and nothing stops them.
+   */
+  private split(b: number): boolean {
+    const { L, rng } = this
+    const mine: { idx: number; quad: number; angle: number }[] = []
+    for (let s = 0; s < 4; s++) {
+      const l = this.limbs[b * 4 + s]
+      if (l >= 0) mine.push({ idx: l, quad: s, angle: this.theta[l] })
+    }
+    if (mine.length < 2) return false
+
+    let other = -1
+    for (let i = this.nIntr; i < this.nMatter && other < 0; i++) {
+      if (this.continuous ? !this.alive[i] : this.owner[i] === -1) other = i
+    }
+    if (other < 0) return false
+
+    // somewhere to put the other half: close enough that a bond *could* form, far enough that the
+    // two brains are not inside each other's exclusion radius
+    const a = rng.next() * TAU
+    const gap = L.r_brain + 2
+    const cx = this.wrap(this.x[b] + gap * Math.cos(a))
+    const cy = this.wrap(this.y[b] + gap * Math.sin(a))
+    if (this.brainGap2(cx, cy, b) < L.r_brain * L.r_brain * 0.9) return false
+
+    // half the limbs go, chosen from the end so each half keeps a contiguous spread of sockets
+    const handOver = mine.splice(Math.ceil(mine.length / 2))
+    if (handOver.length === 0) return false
+    for (const g of handOver) {
+      this.unbind(g.idx)
+      this.alive[g.idx] = 1
+    }
+    // Energy *moves*, exactly as it does in budding: half the reserve is handed over, and what
+    // will not fit under `E_cap` simply stays with the parent. The first version of this set both
+    // halves to E/2 and booked the difference as injection, which quietly destroyed the parent's
+    // half — 45 units of energy per test run, caught by the ledger invariants within seconds.
+    this.alive[other] = 1
+    this.beginLife(other)
+    const give = this.energy[b] / 2
+    const moved = Math.min(give, Math.max(0, L.E_cap - this.energy[other]))
+    this.energy[other] += moved
+    this.energy[b] -= moved
+
+    const mut = this.init.repro_mut
+    const mutate = (w: Float64Array): Float64Array => Float64Array.from(w, (v) => v + mut * rng.gauss())
+    this.placeOrganism({
+      brain: other,
+      x: cx,
+      y: cy,
+      limbs: handOver.map((g) => ({ idx: g.idx, quad: g.quad, angle: g.angle })),
+      wLimb: mutate(this.wLimb[b]!),
+      wBrain: mutate(this.wBrain[b]!),
+      parent: b,
+      gen: this.gen[b] + 1,
+      island: this.island[b],
+      learnId: this.learnId[b],
+    })
+    this.nBudded++
+    this.repCool[b] = this.repWait[b]
+    this.placeLimbs(b)
+    return true
   }
 
   /** Tops a particle's reserve up to E_init. Energy created here is counted as injected. */

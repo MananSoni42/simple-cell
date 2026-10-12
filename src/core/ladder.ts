@@ -82,16 +82,22 @@ export function ladder(w: World): Ladder {
   add('Seeks food', 'moving toward food rather than stumbling on it', seek.mean >= 0.15, `alignment ${seek.mean.toFixed(3)}`)
   add('Whole bodies', 'three and a half limbs each, kept', limbs >= 3.5, `${limbs.toFixed(2)} limbs`)
   add('Joining', 'two or more organisms bonded into one object', joined > 0, joined > 0 ? `${joined} compounds` : 'none joined')
+  /*
+   * A structure's threshold is its duration *relative to a life*, not an absolute tick count.
+   * Two thousand ticks means something quite different in a world where organisms live two hundred
+   * and one where they live twenty thousand, and what is being asked is whether a structure
+   * outlasts the things it is made of.
+   */
   add(
     'Structure',
-    'one holding together for 2,000 ticks',
-    (struct?.age ?? 0) >= 2000,
-    struct ? `${struct.order}° for ${Math.round(struct.age)}t` : 'none',
+    'one holding for half an organism\'s lifetime',
+    !!struct && struct.order >= 3 && struct.heldFrac >= 0.5,
+    struct ? `${struct.order}° for ${Math.round(100 * struct.heldFrac)}% of a life` : 'none',
   )
   add(
     'Outlives its parts',
     'a structure that has replaced as many members as it has',
-    !!struct && struct.age >= 1000 && struct.replacements >= struct.order,
+    !!struct && struct.heldFrac >= 0.5 && struct.replacements >= struct.order,
     struct ? `${struct.replacements} replaced of ${struct.order}` : 'none',
   )
   add('Heritable joining', 'offspring of joiners join more often than others do', false, 'not measured yet')

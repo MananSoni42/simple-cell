@@ -126,7 +126,7 @@ export class StatsPanel {
       (parts.length ? parts.join(' &nbsp; ') : 'none joined') +
       `<br>${fmt.n(st.bondCount)} bonds standing` +
       (old
-        ? `<br>oldest structure: <b>${old.order}°</b> for ${fmt.n(old.age)}t` +
+        ? `<br>best structure: <b>${old.order}°</b> for ${fmt.n(old.age)}t (${Math.round(100 * old.heldFrac)}% of a life)` +
           (old.replacements > 0
             ? `, <span style="color:${INK.good}">${fmt.n(old.replacements)} members replaced</span>`
             : ', all original')

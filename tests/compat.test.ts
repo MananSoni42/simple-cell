@@ -130,12 +130,18 @@ describe('per-organism fitness', () => {
     expect(total(true)).toBeGreaterThan(0)
   })
 
-  it('weights a bigger compound superlinearly, not proportionally', () => {
+  it('weights how long a compound lasts above how big it is', () => {
     const w = new World(initFromSeed(3))
     const credit = (n: number): number => Math.pow(n - 1, w.L.order_alpha)
-    // an order-5 is worth more than four times an order-2, which is the point of alpha > 1
-    expect(credit(5)).toBeGreaterThan(4 * credit(2))
     expect(credit(1)).toBe(0) // alone is worth nothing
-    expect(w.L.order_alpha).toBeGreaterThan(1)
+
+    // Order counts sub-linearly, so time counts for more. Credit accrues per tick, which means a
+    // pair that holds together for a whole lifetime beats a crowd that holds for an instant —
+    // the opposite of the old alpha of 1.5, under which a brief ten-strong clump outscored it.
+    expect(w.L.order_alpha).toBeLessThan(1)
+    expect(credit(5)).toBeLessThan(4 * credit(2))
+    const pairForAges = credit(2) * 1000
+    const crowdForAMoment = credit(10) * 20
+    expect(pairForAges).toBeGreaterThan(crowdForAMoment)
   })
 })
