@@ -164,6 +164,8 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     v_patch: num(src.v_patch, base.v_patch, 0, 100),
     learn: learnConfig(src.learn, base.learn),
     merge_hold: bool(src.merge_hold, base.merge_hold ?? false),
+    metabolism: num(src.metabolism, base.metabolism, 0.05, 8),
+    bond_flow: num(src.bond_flow, base.bond_flow, 0, 0.5),
     patchOrigins: Array.isArray(src.patchOrigins) ? points(src.patchOrigins, base.size * 64) : base.patchOrigins,
     islandNames: Array.isArray(src.islandNames)
       ? (src.islandNames as unknown[]).slice(0, 32).map((n) => String(n).slice(0, 24))

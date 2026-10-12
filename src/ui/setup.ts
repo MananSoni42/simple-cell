@@ -180,6 +180,28 @@ export function mountSetup(
         onChange: (v) => reseed(init.seed, Math.round(v)),
       }).el,
       new Slider({
+        label: 'metabolism',
+        min: 0.05,
+        max: 4,
+        step: 0.05,
+        value: init.metabolism,
+        curve: 'log',
+        format: (v) => `${v.toFixed(2)}×`,
+        hint: (v) => {
+          const life = Math.round(1 / v)
+          return v === 1
+            ? 'what living costs, at the rate the laws name'
+            : v < 1
+              ? `everything costs ${v.toFixed(2)}× as much to do, so a full reserve lasts about ${life}× longer — the strongest single lever on lifespan there is`
+              : `${v.toFixed(2)}× the cost of upkeep, moving and signalling; short, hectic lives`
+        },
+        onChange: (v) => {
+          init.metabolism = v
+          applyFoodLevel(init) // food is calibrated against what the world costs, so it moves too
+          refresh()
+        },
+      }).el,
+      new Slider({
         label: 'temperature',
         min: 0.1,
         max: 40,
@@ -230,10 +252,12 @@ export function mountSetup(
       new Slider({
         label: 'brains',
         min: 1,
-        max: Math.max(20, 20 * init.scale * init.scale),
+        max: Math.max(120, 120 * init.scale * init.scale),
         step: 1,
         value: init.n_brain,
-        hint: (v) => `at most ${v} organisms alive at once${init.inflow ? ` (×3 with inflow on)` : ''}`,
+        hint: (v) =>
+          `at most ${v} organisms alive at once${init.inflow ? ` (×3 with inflow on)` : ''} — ` +
+          `the hard ceiling on the population, and measured to be the strongest lever on how complex it gets`,
         onChange: (v) => {
           init.n_brain = v
           init.n_start = Math.min(init.n_start, v)
@@ -242,13 +266,33 @@ export function mountSetup(
       }).el,
       new Toggle({
         label: 'particle bonds',
-        hint: 'touching particles with attractive chemistry latch, and hold until pulled much harder — the route to compound organisms',
+        hint: 'touching particles with attractive chemistry latch, and hold until pulled harder — the route to compound organisms',
         value: init.bonds,
         onChange: (v) => {
           init.bonds = v
-          sync()
+          refresh()
         },
       }).el,
+      ...(init.bonds
+        ? [
+            new Slider({
+              label: 'energy flows along bonds',
+              min: 0,
+              max: 0.4,
+              step: 0.01,
+              value: init.bond_flow,
+              format: (v) => (v === 0 ? 'off' : `${Math.round(v * 100)}%`),
+              hint: (v) =>
+                v === 0
+                  ? 'a bond carries force and nothing else — two bonded bodies are neighbours, not partners'
+                  : `${Math.round(v * 100)}% of the difference moves each tick, so bonded bodies share one reserve: a member sitting in food feeds the others, and a member that runs dry can be rescued. Nothing is created — and nothing stops a neighbour draining you`,
+              onChange: (v) => {
+                init.bond_flow = v
+                sync()
+              },
+            }).el,
+          ]
+        : []),
       new Toggle({
         label: 'continuous inflow',
         hint: 'new matter arrives with every organism, and all matter can die — a world that turns over instead of filling up',

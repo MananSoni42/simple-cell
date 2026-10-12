@@ -6,7 +6,7 @@ import { type FitnessSpec, describeSpec } from './fitness'
 import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, makeLearner } from './learning'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
-import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
+import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, randomBrain, randomLimb } from './neurons'
 import { type Init, type Laws, LAWS, applyQuantization, bondRange, regimeMultiplier } from './params'
 import { Rng } from './rng'
 import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX, WALL } from './types'
@@ -267,6 +267,10 @@ export class World {
   backend: ForceBackend = serialBackend
   readonly field: Float64Array
   private fieldTmp: Float64Array
+  /** Scratch for bond energy flow, so a tick allocates nothing. */
+  private readonly flowOut: Float64Array
+  private readonly flowIn: Float64Array
+  private readonly flowE: Float64Array
   private freeFood: number[] = []
   /** Food patches. `ox, oy` is where a patch started, which converging colonies travel from. */
   readonly patches: { x: number; y: number; h: number; ox: number; oy: number }[] = []
@@ -280,7 +284,19 @@ export class World {
 
   constructor(init: Init, opts: WorldOpts = {}) {
     this.init = init
-    this.L = { ...LAWS, SIZE: init.size, fieldN: Math.min(256, Math.round((LAWS.fieldN * init.size) / LAWS.SIZE)), ...opts.laws }
+    // The metabolism dial scales the three per-tick costs here rather than at every call site, so
+    // nothing downstream has to remember it exists — and an explicit `opts.laws` override still
+    // wins, which is what the sweeps rely on.
+    const met = init.metabolism ?? 1
+    this.L = {
+      ...LAWS,
+      SIZE: init.size,
+      fieldN: Math.min(256, Math.round((LAWS.fieldN * init.size) / LAWS.SIZE)),
+      c_up: LAWS.c_up * met,
+      c_mv: LAWS.c_mv * met,
+      c_sig: LAWS.c_sig * met,
+      ...opts.laws,
+    }
     this.rng = new Rng((init.seed ^ 0x9e3779b9) | 0)
     this.learner = makeLearner(init.learn ?? LEARN_DEFAULTS, init.seed)
     this.mergeStart = init.merge_hold ? null : 0
@@ -328,6 +344,9 @@ export class World {
     this.repCool = new Int16Array(n)
     this.brainSig = new Float64Array(n * 4)
     this.bonds = new Bonds(n, this.L.max_bonds)
+    this.flowOut = new Float64Array(n)
+    this.flowIn = new Float64Array(n)
+    this.flowE = new Float64Array(n)
     this.bondCool = new Int16Array(n)
     this.lineage = new Int32Array(n)
     this.children = new Int32Array(n)
@@ -622,6 +641,7 @@ export class World {
     this.integrate()
     this.grid.build()
     this.uptake()
+    this.flowBonds()
     this.think()
     this.costs()
     this.decayFree()
@@ -694,7 +714,18 @@ export class World {
     this.wasLive[i] = 1
   }
 
-  /** Guardrail: no particle may move further than d_max in one tick, whatever the forces say. */
+  /**
+   * Guardrail: no particle may move further than d_max in one tick, whatever the forces say.
+   *
+   * **Known inconsistency, not yet fixed.** The per-sub-step budget shrinks as `1/n`, but the
+   * Brownian part of a sub-step only shrinks as `1/sqrt(n)` — so raising sub-steps makes the
+   * thermal kick *relatively larger* against a linearly smaller cap, and the clamp fires more
+   * often rather than less. Measured in a dense world: 21% of steps clamped at 2 sub-steps,
+   * rising to 35% at 6. Two consequences worth knowing before trusting the number:
+   * the clamp percentage is **not comparable across different sub-step counts**, and the cap
+   * should probably scale as `d_max / sqrt(n)` or be applied per tick rather than per sub-step.
+   * Changing it moves every golden state, so it belongs in its own round.
+   */
   private clampStep(dx: number, dy: number): [number, number] {
     const lim = this.L.d_max / Math.max(1, Math.round(this.init.substeps))
     const d = Math.hypot(dx, dy)
@@ -737,6 +768,97 @@ export class World {
         this.bondCool[j] = L.bond_cooldown
       }
     }, this.cap)
+  }
+
+  /**
+   * Energy moves along bonds, down the gradient.
+   *
+   * This is the only new law in the round, and it is what turns a bonded group from something
+   * sticky into something with a **shared metabolism**: a member sitting in food feeds its
+   * neighbours, and a member that has run dry can be rescued by them. Nothing is created or
+   * destroyed — every transfer is a pair of equal and opposite changes, so the ledger closes
+   * untouched.
+   *
+   * Three decisions worth keeping:
+   *
+   * - It is **passive**, a diffusion down the difference, not a decision. No organism chooses to
+   *   share and no brain output is involved, so nothing in the laws says that cooperating is
+   *   good. What follows — families that survive famine, and neighbours that drain each other —
+   *   follows from one symmetric rule.
+   * - It is computed from a **snapshot** and applied afterwards, so the result does not depend on
+   *   the order particles are visited in. That is what keeps a threaded force backend and a
+   *   replayed snapshot bit-identical.
+   * - A transfer is capped at what the donor actually holds above the receiver, and never pushes
+   *   anyone past `E_cap`, so it cannot invent a reserve or drive one negative.
+   */
+  private flowBonds(): void {
+    const k = Math.min(0.5, Math.max(0, this.init.bond_flow ?? 0))
+    if (k <= 0 || !this.init.bonds) return
+    const { bonds, energy, alive, L } = this
+    const max = bonds.max
+    const out = this.flowOut
+    const inn = this.flowIn
+    // every quantity below is read from this copy, never from the energies being written: without
+    // it the third pass would see its own earlier transfers and the result would depend on the
+    // order particles happen to be visited in
+    const e = this.flowE
+    e.set(energy.subarray(0, this.nIntr))
+    out.fill(0)
+    inn.fill(0)
+
+    // Flow is between particles that belong to *bodies*, not to anything a bond happens to touch.
+    // Measured: with loose matter included the rule was a straight energy sink — a drifting
+    // particle has no use for a reserve and decays, so every unit shared outward was burned, and
+    // organisms died sooner than with no sharing at all. A body sharing with a body is the rule
+    // that was wanted; a body feeding dust is a leak.
+    const shares = (p: number): boolean => alive[p] === 1 && this.owner[p] >= 0
+
+    // Pass one: what every bond would move, from the snapshot. A brain reaches its own limbs
+    // through its food share and a limb passes inward, so this is the step that joins two bodies
+    // into one metabolism.
+    for (let i = 0; i < this.nIntr; i++) {
+      if (!shares(i)) continue
+      for (let s = 0; s < max; s++) {
+        const j = bonds.partner[i * max + s]
+        if (j <= i || !shares(j)) continue // each bond once, both ends in a body
+        const t = k * (e[i] - e[j])
+        if (t > 0) {
+          out[i] += t
+          inn[j] += t
+        } else if (t < 0) {
+          out[j] -= t
+          inn[i] -= t
+        }
+      }
+    }
+
+    // Pass two: per-particle scale factors, so nobody gives more than it holds or takes more than
+    // it can hold. Both are derived from the snapshot, which is what makes the result independent
+    // of visiting order — and therefore identical under a threaded backend or after a rewind.
+    for (let i = 0; i < this.nIntr; i++) {
+      if (!shares(i)) continue
+      out[i] = out[i] > 0 ? Math.min(1, e[i] / out[i]) : 1
+      const room = Math.max(0, L.E_cap - e[i])
+      inn[i] = inn[i] > 0 ? Math.min(1, room / inn[i]) : 1
+    }
+
+    // Pass three: apply, scaled at both ends. Every transfer is one subtraction and one addition
+    // of the same number, so the energy ledger closes exactly.
+    for (let i = 0; i < this.nIntr; i++) {
+      if (!shares(i)) continue
+      for (let s = 0; s < max; s++) {
+        const j = bonds.partner[i * max + s]
+        if (j <= i || !shares(j)) continue
+        const t = k * (e[i] - e[j])
+        if (t === 0) continue
+        const from = t > 0 ? i : j
+        const to = t > 0 ? j : i
+        const moved = Math.abs(t) * out[from] * inn[to]
+        if (moved <= 0) continue
+        energy[from] -= moved
+        energy[to] += moved
+      }
+    }
   }
 
   private applyBonds(): void {
@@ -1484,8 +1606,8 @@ export class World {
     this.y[b] = this.wrap(spec.y)
     this.mvx[b] = 0
     this.mvy[b] = 0
-    this.wLimb[b] = spec.wLimb ?? Float64Array.from({ length: N_WLIMB }, () => rng.gauss())
-    this.wBrain[b] = spec.wBrain ?? Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
+    this.wLimb[b] = spec.wLimb ?? randomLimb(() => rng.gauss())
+    this.wBrain[b] = spec.wBrain ?? randomBrain(() => rng.gauss())
     this.learnId[b] = spec.learnId ?? 0
     this.island[b] = spec.island ?? (spec.parent !== undefined && spec.parent >= 0 ? this.island[spec.parent] : 0)
     this.gen[b] = spec.gen ?? 0
@@ -1730,8 +1852,8 @@ export class World {
     // order placeOrganism would have drawn them. Switching a learner on therefore does not move a
     // single food particle, which is what makes a paired run on one seed an honest comparison —
     // the only kind this world's variance allows.
-    const randLimb = Float64Array.from({ length: N_WLIMB }, () => rng.gauss())
-    const randBrain = Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
+    const randLimb = randomLimb(() => rng.gauss())
+    const randBrain = randomBrain(() => rng.gauss())
     // the one place a learner may act: the weights a new organism is born with
     const g = this.learner.genomeForSpawn(this.tick)
     this.placeOrganism({

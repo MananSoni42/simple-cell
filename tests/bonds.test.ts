@@ -54,7 +54,12 @@ describe('bond hysteresis', () => {
   it('forms only within the forming range', () => {
     const r = bondRange(LAWS)
     expect(r.form).toBeCloseTo(12, 6)
-    expect(r.breakAt).toBeGreaterThan(r.form * 1.3) // the gap is the activation energy
+    // The gap is the activation energy, and it is deliberately narrower than it was: F_break used
+    // to be 4, four times the largest force any chemistry can exert, which made a bond a weld
+    // that only ever ended when a limb starved. At 2.5 the break distance is 14.2 against a
+    // forming distance of 12, so chemistry plus motion can remodel a structure.
+    expect(r.breakAt).toBeGreaterThan(r.form)
+    expect(r.breakAt / r.form).toBeGreaterThan(1.15)
 
     const close = pairWorld()
     place(close, r.form - 1)

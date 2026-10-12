@@ -998,6 +998,28 @@ could not be switched off cleanly.
    on the organism, because recovering a sample from the weights would be wrong the moment the
    mean moved.
 
+### Energy moves along bonds
+
+A bond carries force and, if the world says so, **energy**: each tick a fraction `bond_flow` of the
+difference moves between two bonded particles. This is the one new law of this round and it is
+deliberately the dullest possible version — passive diffusion down a gradient, no decision, no
+brain output, no statement anywhere that cooperating is good. What follows from one symmetric rule
+is that a bonded group has a **shared metabolism**: a member sitting in food feeds its neighbours,
+a member that runs dry can be rescued, and a neighbour can drain you.
+
+Three properties are load-bearing:
+
+- **Nothing is created or destroyed.** Every transfer is one subtraction and one addition of the
+  same number, scaled at both ends so no particle gives more than it holds or exceeds `E_cap`.
+  Measured: the ledger closes to 2×10⁻⁷ over 20,000 ticks at every flow rate tried.
+- **It is computed from a snapshot** of the energies and applied afterwards, so the result cannot
+  depend on the order particles are visited in — which is what keeps a threaded backend and a
+  replayed snapshot bit-identical.
+- **Only particles that belong to bodies share.** Including loose matter was measured to be a
+  straight energy *sink*: a drifting particle has no use for a reserve and decays, so everything
+  shared outward was burned and organisms died sooner than with no sharing at all. A body sharing
+  with a body is the rule; a body feeding dust is a leak.
+
 ### Fitness is a stated choice, and it can be several things at once
 
 Nine scalars are offered, all exactly known at death, and **any combination of them may be
@@ -1066,7 +1088,44 @@ look like a bad result instead of an absent one.
 
 ---
 
-## 24. Archipelagos: several worlds, then one
+## 24. What makes a world support life
+
+Measured over 18 variants × 5 seeds × 20,000 ticks, and then paired old-against-new over 11
+configurations. The results overturned two of this project's assumptions.
+
+**Brain slots are the binding constraint, not food.** `n_brain` is a hard ceiling on the
+population, and at eight or ten the population pins against it — so every birth needs a death, and
+living longer and breeding at all are in direct conflict. Raising slots from 10 to 40 raised best
+compound order from 7 to 18, lineage depth from 6 to 18 generations, and the 90th-percentile
+lifespan from 941 to 1,259. It is the single largest effect of anything tried, and it was invisible
+for as long as food was assumed to be the limit.
+
+**Metabolism is the strongest lever on longevity.** `metabolism` scales upkeep, movement and
+signalling together, and sits in the same tier as temperature: a property of the world, not a law.
+At 0.5 the longest mean life of any setting; at 0.25 an organism lived 16,000 ticks of a
+20,000-tick run, at which point the measurement is censored by the run rather than the world. At 2,
+everything halves. Food is calibrated against what a world costs to run, so the dial reaches
+`sustenanceRate` too — otherwise "average food" would quietly mean something different.
+
+**What does not work:** `E_cap` (banking) has *no* measurable effect at 300 or 1000, because
+organisms never approach 100. A richer newborn endowment (15 → 40) buys 42% more mean life and
+nearly stops reproduction, dropping lineage depth from gen 9 to gen 2 — longer lives, no lineages.
+
+**A metric that was lying.** Mean completed lifespan *falls* when slots, slow metabolism and
+abundant food are combined, while the oldest individual soars past 14,000 ticks. The mean of the
+dead measures turnover, not longevity: a world full of long-lived adults and a flood of newborns
+reads as short-lived. Use quantiles of the living, or the 90th percentile of completed lives.
+
+**And a second one.** Keyed by exact membership, a compound in a crowded world lasts about **ten
+ticks** — somebody is always joining or dying. The same aggregate followed *through* its membership
+persisted **1,000 ticks across 105 member replacements**, peaking at order 21. The old conclusion
+that "compounds form but never last" was substantially a fact about the measure. `OrderStats.oldest`
+now reports the structure with membership turnover, which is the first measurement here that could
+distinguish a clump from something worth calling alive.
+
+---
+
+## 25. Archipelagos: several worlds, then one
 
 Four worlds run to completion on their own, and their survivors are then placed in a single world
 twice as wide, one population per quadrant, with food colonies that migrate inward. `npm run

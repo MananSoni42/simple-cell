@@ -141,7 +141,11 @@ describe('phenomenology', () => {
     expect(cold).toBeGreaterThan(none * 3)
     // heat loosens it, but note it does not fully melt: with the step clamp and sub-stepping in
     // play the world stays condensed far above the bond depth. A real gas phase is still missing.
-    expect(hot).toBeLessThan(cold * 0.8)
+    // Heat loosens a cluster but no longer comes close to melting it. Since a particle may hold
+    // four bonds rather than two, a hot world keeps far more of its structure than it used to —
+    // bonds now dominate temperature over this range, which is worth knowing when reading any
+    // result about heat.
+    expect(hot).toBeLessThan(cold * 0.9)
     expect(hot).toBeGreaterThan(none)
   })
 

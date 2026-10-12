@@ -94,9 +94,18 @@ export class StatsPanel {
       parts.push(`<b>${k}°</b> ${o.live[k - 1]}${o.surviving[k - 1] ? ` <span style="color:${INK.good}">(${o.surviving[k - 1]} held)</span>` : ''}`)
     }
     set('s-order', o.bestOrder > 1 ? `best ${o.bestOrder}° · ${fmt.n(o.bestAge)}t` : '—')
+    // The structure line is the one to watch: an aggregate whose members have turned over and
+    // which is still there is a different kind of object from a clump of the originals.
+    const old = o.oldest
     this.el['s-order-sub'].innerHTML =
       (parts.length ? parts.join(' &nbsp; ') : 'none joined') +
-      `<br>${fmt.n(st.bondCount)} bonds standing`
+      `<br>${fmt.n(st.bondCount)} bonds standing` +
+      (old
+        ? `<br>oldest structure: <b>${old.order}°</b> for ${fmt.n(old.age)}t` +
+          (old.replacements > 0
+            ? `, <span style="color:${INK.good}">${fmt.n(old.replacements)} members replaced</span>`
+            : ', all original')
+        : '')
 
     // only a merged world has islands, and only then is "which of them is winning" a question
     const live = c.islands.filter((n) => n > 0).length

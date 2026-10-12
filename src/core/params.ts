@@ -46,7 +46,16 @@ export const LAWS = {
   E_repro: 60, // brain reserve at which budding is allowed
   E_hold: 20, // reserve a parent must keep after paying for a child
   repro_cooldown: 80,
-  repro_dist: 42, // how far from the parent a child appears
+  /**
+   * How far from the parent a child appears.
+   *
+   * It used to be 42, which put a newborn **out of reach**: a child's limb and its parent's can
+   * get no closer than 42 − L_rod − L_rod = 10, just inside the 12-unit bonding range but only
+   * when both limbs point almost exactly at each other. Brains settle about 26 apart anyway under
+   * their mutual push, and at that separation limbs overlap freely. So families can now form by
+   * the ordinary bonding rule, with nothing in the laws saying that they should.
+   */
+  repro_dist: 28,
   E_birth: 15, // reserve each particle of a budded child starts with
   E_viable: 1,
   corpse_frac: 0.5,
@@ -59,14 +68,32 @@ export const LAWS = {
   // Bonds between particles, with hysteresis: forming is easy, breaking is not. The gap between
   // F_form and F_break is the activation energy, and it is what lets aggregates persist instead
   // of constantly reshuffling.
-  max_bonds: 2, // how many bonds one particle can hold
+  /**
+   * How many bonds one particle can hold — and with it, what shapes can exist at all.
+   *
+   * At two, the only topologies in the world are **chains and rings**: a sheet needs three
+   * attachment points and a lattice four. Every large aggregate measured before this was a
+   * necklace, with no inside and no outside, which is why membranes never appeared however the
+   * chemistry was tuned. Four is the smallest number that admits a two-dimensional fabric.
+   */
+  max_bonds: 4,
   A_form: 0.25, // chemistry must be at least this attractive to bond at all
   k_bond: 0.6, // spring pulling a bond back to its rest length
   r_bond: 10, // rest length, which is also the core radius
   // The hysteresis, as the two forces: a bond forms only while the pair is slack enough to be
   // held by F_form, and survives until stretched hard enough to need F_break. With these
-  // numbers that is "form within 12 units, break beyond 16.7" - a bond can be pulled 40%
-  // further than it could ever have been made at.
+  // numbers that is "form within 12 units, break beyond 14.2".
+  //
+  // F_break sits against F_max, the largest force any chemistry can exert: at 4 a bond is four
+  // times stronger than anything chemistry can do to it, so chemistry alone can never break one
+  // and a bond ends only when a limb starves or detaches.
+  //
+  // That looked like a flaw — a weld rather than a bond — and lowering it was measured instead of
+  // assumed. It was the wrong call. Over 5 seeds × 20k ticks, 2.5 bought 10% longer individual
+  // lives and cost **four fifths of the standing bonds** (42 → 8), dropping best order from 7 to 5
+  // and time-spent-joined from 0.83 to 0.69. Weaker bonds trade structure for longevity, and
+  // structure is the point, so 4 stands. Recorded here because the argument for lowering it is
+  // more persuasive than the evidence.
   F_form: 1.2,
   F_break: 4,
   E_bond: 0.1, // energy spent to form a bond, paid by both particles
@@ -153,6 +180,24 @@ export interface Init {
    * uses it so that four populations meet when you press the button, not on a timer.
    */
   merge_hold?: boolean
+  /**
+   * What living costs, as a multiple of the laws' per-tick rates (upkeep, movement, signalling).
+   *
+   * In the same tier as temperature: not a law but a property of the world you are setting up.
+   * Measured over 18 variants × 5 seeds × 20k ticks, it is the strongest single lever on how long
+   * anything lives — 0.5 gave the longest mean life of any setting tried, 0.25 produced an
+   * organism that lived 16,000 of a 20,000-tick run, and 2 halved everything.
+   */
+  metabolism: number
+  /**
+   * How fast energy moves along a bond, as a fraction of the difference per tick.
+   *
+   * 0 is the old world, where a bond carried force and nothing else. Above 0 a bonded group has a
+   * **shared metabolism**: a member in food feeds its neighbours and a starving one can be
+   * rescued. Nothing is created or destroyed — it is the only new rule in this round, and it is a
+   * universal one rather than a statement that being together is good.
+   */
+  bond_flow: number
   bonds: boolean // particles may bond to each other (R16)
   repro: boolean // budding reproduction
   repro_mut: number // std-dev of weight mutation in children
@@ -309,6 +354,8 @@ function seedWorld(seed: number, scale = 1): Init {
     r_patch: 35 + rng.int(31),
     v_patch: Math.round(rng.range(0.05, 0.2) * 100) / 100,
     learn: { ...LEARN_DEFAULTS },
+    metabolism: 0.5,
+    bond_flow: 0.05,
   }
 }
 
@@ -321,7 +368,11 @@ function seedWorld(seed: number, scale = 1): Init {
  * the average reserve of a loose particle, which is rough but the right order.
  */
 export function sustenanceRate(init: Init, L: Laws = LAWS): number {
-  const bodies = 5 * L.c_up * init.n_brain * (init.inflow ? 3 : 1)
+  // the metabolism dial has to appear here too: food levels are calibrated as multiples of what a
+  // world costs to run, so a world that costs half as much must be fed half as much to mean the
+  // same thing by "average"
+  const m = init.metabolism ?? 1
+  const bodies = 5 * (L.c_up * m) * init.n_brain * (init.inflow ? 3 : 1)
   const loose = init.n_intrinsic * L.E_init * init.decay_free
   return (bodies + loose) / L.E_food
 }

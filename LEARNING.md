@@ -131,6 +131,31 @@ than zero when a world died out before the measured window.
 - **Not yet done:** the ablation (§7) — turn CEM off mid-run and see whether the gain persists.
   And every number here is one world shape; `harsh`, `drifting` and `pulsing` are untested.
 
+### What the world needed, measured
+
+Before any more learning work: the conditions were wrong, and three of the four blockers were
+parameters. `max_bonds` was **2**, which admits only chains and rings — a sheet needs three
+attachment points, so no membrane was ever topologically possible however the chemistry was tuned.
+`repro_dist` was **42** against a bonding range of 12 and a rod length of 16, so a newborn was
+placed just out of reach of its parent and families could not form. Brain slots were the ceiling on
+population, which put longevity and fecundity in direct conflict. And brain weights were drawn at
+`0.5·N(0,1)` with 29 inputs, giving a pre-activation spread near 1.35 — **random brains were born
+saturated**, their outputs pinned near ±1 and barely responding to anything, which is a large part
+of why the only strategy any learner ever found was to spend less.
+
+Paired, 5 seeds × 20k ticks, old laws against new: 90th-percentile lifespan **489 → 1,259**
+(+157%, passing rung L1 for the first time), best compound order **8 → 18**, time spent joined
+**0.71 → 0.98**, lineage depth **gen 5 → 18**. Energy flow along bonds alone took p90 from 710 to
+1,031.
+
+One recommendation of mine was wrong and the data said so: lowering `F_break` from 4 to 2.5 to make
+bonds remodelable cost four fifths of the standing bonds (42 → 8) and dropped order from 7 to 5,
+buying only 10% longer individual lives. Weaker bonds trade structure for longevity. It was
+reverted.
+
+Still failing: **rung L3, foraging.** Harvest per tick alive did not improve — it fell slightly.
+Nothing in this world yet eats better than chance; it only spends less.
+
 ### Archipelago: four islands, then one world
 
 `npm run archipelago` runs four worlds to completion one per core, then places their survivors in
