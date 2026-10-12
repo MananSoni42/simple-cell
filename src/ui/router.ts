@@ -1,6 +1,6 @@
 import { reducedMotion } from './theme'
 
-export type Page = 'landing' | 'explain' | 'setup' | 'world' | 'summary' | 'library'
+export type Page = 'landing' | 'explain' | 'setup' | 'world' | 'summary' | 'library' | 'discoveries'
 
 /**
  * Four screens, one at a time, with a short crossfade. The transition is the only animation that
@@ -12,7 +12,14 @@ export class Router {
   onEnter?: (p: Page) => void
 
   constructor(pages: Page[]) {
-    for (const p of pages) this.els.set(p, document.getElementById(`page-${p}`)!)
+    for (const p of pages) {
+      const el = document.getElementById(`page-${p}`)
+      // A page in the type but missing from the list, or from the markup, fails here rather than
+      // at the first navigation — which is how adding Discoveries produced a blank screen and an
+      // undefined `hidden`, several steps away from the omission that caused it.
+      if (!el) throw new Error(`router: no element for page "${p}"`)
+      this.els.set(p, el)
+    }
   }
 
   get page(): Page | null {

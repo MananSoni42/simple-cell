@@ -9,6 +9,7 @@ import { explainHTML } from './ui/explain'
 import { InspectPanel } from './ui/inspect'
 import { mountLanding } from './ui/landing'
 import { Router } from './ui/router'
+import { mountDiscoveries } from './ui/discoveries'
 import { mountLibrary } from './ui/library'
 import { mountSetup } from './ui/setup'
 import { collection } from './ui/store'
@@ -43,7 +44,7 @@ const stage = $('stage')
 const brushEl = $<HTMLInputElement>('brush')
 const helpEl = $('help')
 
-const router = new Router(['landing', 'explain', 'setup', 'world', 'summary', 'library'])
+const router = new Router(['landing', 'explain', 'setup', 'world', 'summary', 'library', 'discoveries'])
 
 /**
  * The page draws and nothing else. The world runs in a worker, publishing finished ticks into
@@ -280,10 +281,19 @@ const setup = mountSetup($('page-setup'), {
   },
   back: () => router.go('landing'),
   library: () => router.go('library'),
+  discoveries: () => router.go('discoveries'),
   explain: () => {
     cameFrom = 'setup'
     router.go('explain')
   },
+})
+
+const discoveries = mountDiscoveries($('page-discoveries'), {
+  start: (init) => {
+    resumeRate = null
+    startWorld(init, lastPerf, false)
+  },
+  back: () => router.go('setup'),
 })
 
 const library = mountLibrary($('page-library'), {
@@ -300,6 +310,7 @@ const library = mountLibrary($('page-library'), {
 })
 router.onEnter = (page) => {
   if (page === 'library') void library.refresh()
+  if (page === 'discoveries') void discoveries.refresh()
   // the picker's preview is a real world being stepped; it must not keep running off-screen
   if (page === 'setup') setup.refresh()
   else setup.stop()

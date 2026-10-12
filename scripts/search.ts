@@ -275,7 +275,32 @@ function fmtDur(secs: number): string {
   return `${(secs / 3600).toFixed(1)}h`
 }
 
-if (has('report')) {
+if (has('export')) {
+  /*
+   * The top worlds, as a file the browser can read.
+   *
+   * The catalog is hundreds of megabytes of JSONL on disk and the UI has no business reading it;
+   * this writes the handful worth looking at, with the aggregate figures that explain the sort.
+   * Specs rather than worlds, so the page rebuilds each one deterministically and nothing can
+   * drift between what was scored and what is shown.
+   */
+  const all = readCatalog()
+  const cat = best(all)
+  const top = Number(flag('top', '24'))
+  const phases = [...new Set(all.map((e) => e.phase))].sort((a, b) => b - a)
+  const deepest = phases.find((p) => all.filter((e) => e.phase === p).length >= 200) ?? phases[0] ?? 0
+  const out = {
+    kind: 'simplecell-discoveries',
+    at: Date.now(),
+    worlds: cat.length,
+    phases: phases.map((p) => ({ phase: p, worlds: all.filter((e) => e.phase === p).length })),
+    summary: summarise(all.filter((e) => e.phase === deepest)),
+    analysedPhase: deepest,
+    top: rank(cat).slice(0, top),
+  }
+  writeFileSync(flag('out', 'discoveries.json'), JSON.stringify(out))
+  console.log(`wrote ${flag('out', 'discoveries.json')}: ${out.top.length} worlds of ${cat.length} catalogued`)
+} else if (has('report')) {
   const all = readCatalog()
   const cat = best(all)
   if (cat.length === 0) console.log('nothing catalogued yet')

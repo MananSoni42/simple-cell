@@ -65,6 +65,7 @@ export function mountSetup(
     back(): void
     explain(): void
     library(): void
+    discoveries(): void
   },
 ): { refresh(): void; stop(): void } {
   /** The two-dial description of the world, when it came from the dials. */
@@ -96,6 +97,7 @@ export function mountSetup(
         <div class="row">
           <button id="s-back">← back</button>
           <button id="s-lib">collection</button>
+          <button id="s-disco">discoveries</button>
           <button id="s-how">how it works</button>
         </div>
       </div>
@@ -1165,6 +1167,7 @@ export function mountSetup(
   q('#s-back').addEventListener('click', () => hooks.back())
   q('#s-how').addEventListener('click', () => hooks.explain())
   q('#s-lib').addEventListener('click', () => hooks.library())
+  q('#s-disco').addEventListener('click', () => hooks.discoveries())
 
   const go = (build: boolean): void => {
     preview.stop()
