@@ -99,4 +99,26 @@ Also found a gap in the instrumentation while reading this: the catalog did not 
 candidate was drawn from**, so the pre-registered constrained-versus-uniform comparison could only
 be inferred through derived shapes rather than measured. Fixed for phase 1 onward.
 
+**At 96,949 worlds — the couplings.** Every cross-coupling tells the same story, with small but
+consistent effects: `P2×P1` z=6.3, `P3×P2` z=6.1, `P3×P1` z=5.1, and in each case **1.00 scores
+highest and 0.00 lowest** (4.79 against 4.65).
+
+So the refined picture is not that density helps but that **cross-attraction** helps and
+**self-repulsion hurts** — which together say "everything attracts everything", and at four tenths
+of a generation that is exactly what maximises the two things this horizon can see: matter clumping
+and organisms keeping their limbs.
+
+### A prediction, written down before phase 2 can test it
+
+**The sign of the self-repulsion effect will flip by phase 2.** The reasoning: universal attraction
+makes droplets, and a droplet is the best possible thing to be in the first five hundred ticks —
+it clumps immediately and holds limbs. A membrane needs self-repulsion with cross-attraction, and a
+membrane is worth nothing until there is time for structure to persist and matter to differentiate.
+Phase 2 runs sixteen generations and is the first phase entitled to an opinion about structure.
+
+Concretely, at phase 2: `self-repelling types` should favour **2–3** over 0, reversing the z=3.5
+seen here, and `Holds` should separate worlds that this phase cannot distinguish at all. If it does
+not flip, the prior was simply wrong and universal attraction is genuinely the better chemistry —
+which would be a more interesting finding than the one I expected.
+
 _Updates appended below as they land._
