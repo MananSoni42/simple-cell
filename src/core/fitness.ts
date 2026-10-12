@@ -27,6 +27,7 @@ export type FitnessKey =
   | 'efficiency'
   | 'together'
   | 'meals'
+  | 'seeking'
 
 /** What an organism's life came to, in numbers the world already keeps. */
 export interface LifeStats {
@@ -39,6 +40,8 @@ export interface LifeStats {
   meals: number
   orderTicks: number
   peakReserve: number
+  /** Mean cosine between where it moved and where food was, over the ticks it could tell. */
+  seeking: number
 }
 
 export const FITNESS: { key: FitnessKey; name: string; blurb: string; invented: boolean }[] = [
@@ -51,6 +54,13 @@ export const FITNESS: { key: FitnessKey; name: string; blurb: string; invented: 
   { key: 'efficiency', name: 'foraging', blurb: 'energy taken in per unit of distance travelled', invented: true },
   { key: 'together', name: 'togetherness', blurb: 'time spent joined to others, weighted by how large the compound was', invented: true },
   { key: 'meals', name: 'meals', blurb: 'how many times it ate', invented: true },
+  {
+    key: 'seeking',
+    name: 'seeking',
+    blurb:
+      'how well its movement lined up with where food was — 0 is a random walk, 1 is going straight to it. The one foraging measure that cannot be passed by sitting still',
+    invented: true,
+  },
 ]
 
 export const N_SCALARS = FITNESS.length
@@ -78,6 +88,8 @@ export function scalarOf(key: FitnessKey, s: LifeStats): number {
       return s.orderTicks
     case 'meals':
       return s.meals
+    case 'seeking':
+      return s.seeking
   }
 }
 

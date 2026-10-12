@@ -25,6 +25,8 @@ export interface OrganismFitness {
   /** Time spent in a compound, weighted by the compound's order. */
   orderTicks: number
   peakReserve: number
+  /** Mean alignment between movement and the direction of food; 0 is a random walk. */
+  seeking?: number
 }
 
 /** Where an organism came from, so it still means something months later. */
@@ -94,6 +96,7 @@ export function exportOrganism(w: World, b: number): OrganismFile | null {
       meals: w.meals[b],
       orderTicks: w.orderTicks[b],
       peakReserve: w.peakReserve[b],
+      seeking: w.seekTicks[b] > 0 ? w.seeking[b] / w.seekTicks[b] : 0,
     },
     from: {
       seed: w.init.seed,

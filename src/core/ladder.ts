@@ -54,6 +54,7 @@ export function ladder(w: World): Ladder {
   const age = (b: number): number => Math.max(1, w.tick - w.bornAt[b])
   const net = overLiving(w, (b) => w.harvested[b] - w.spent[b])
   const rate = overLiving(w, (b) => w.harvested[b] / age(b))
+  const seek = overLiving(w, (b) => (w.seekTicks[b] > 0 ? w.seeking[b] / w.seekTicks[b] : 0))
   const limbs = c.organisms > 0 ? c.limbs / c.organisms : 0
   const joined = orders.live.slice(1).reduce((a, n) => a + n, 0)
 
@@ -67,6 +68,18 @@ export function ladder(w: World): Ladder {
   add('Lifespan', 'a life of 1,000 ticks', w.recordAge >= 1000, `longest ${Math.round(w.recordAge)}t`)
   add('Self-funding', 'the living have taken in more than they have spent', net.n > 0 && net.mean > 0, `net ${fmt1(net.mean)} each`)
   add('Foraging', 'taking in 0.10 a tick, better than chance', rate.mean >= 0.1, `${rate.mean.toFixed(3)} a tick`)
+  /*
+   * Finding food *on purpose*, which is a different claim from finding it at all.
+   *
+   * Every other foraging measure can be passed by luck or by stillness: harvest totals reward a
+   * long life, harvest rates reward being born in a patch, and neither says anything about whether
+   * the organism went anywhere deliberately. This one is the cosine between where a body moved and
+   * where it could tell food was, averaged over the ticks when there was something to tell — so a
+   * random walk scores 0, an organism that never moves scores nothing at all, and only going
+   * toward food scores. 0.15 is a modest bar deliberately: the sense is noisy and food is often in
+   * several directions at once, so a world that clears it is unambiguously doing something.
+   */
+  add('Seeks food', 'moving toward food rather than stumbling on it', seek.mean >= 0.15, `alignment ${seek.mean.toFixed(3)}`)
   add('Whole bodies', 'three and a half limbs each, kept', limbs >= 3.5, `${limbs.toFixed(2)} limbs`)
   add('Joining', 'two or more organisms bonded into one object', joined > 0, joined > 0 ? `${joined} compounds` : 'none joined')
   add(

@@ -27,6 +27,7 @@ const stats = (over: Partial<LifeStats> = {}): LifeStats => ({
   meals: 5,
   orderTicks: 0,
   peakReserve: 40,
+  seeking: 0,
   ...over,
 })
 

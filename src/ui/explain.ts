@@ -106,6 +106,11 @@ export function explainHTML(): string {
           <li><b>Foraging</b> — taking in energy faster than chance would give. This one is
             deliberately a <i>rate</i>, because any measure of a total can be passed by living a
             long time and doing nothing.</li>
+          <li><b>Seeks food</b> — moving <i>toward</i> food rather than stumbling on it, measured
+            as the cosine between where a body went and where it could tell food was. Every other
+            foraging measure can be passed by luck or by stillness: totals reward a long life,
+            rates reward being born in a patch. A random walk scores zero here, never moving scores
+            nothing at all, and only going somewhere on purpose scores.</li>
           <li><b>Whole bodies</b> — limbs kept rather than lost, which is the first sign of
             anything like repair.</li>
           <li><b>Joining</b> — two or more organisms bonded into one object.</li>

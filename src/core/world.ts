@@ -202,6 +202,17 @@ export class World {
   readonly orderTicks: Float64Array // time spent in a compound, weighted by its order
   readonly peakReserve: Float64Array // the most the brain ever held
   /**
+   * How well a body's movement lines up with where food is, summed over the ticks it could tell.
+   *
+   * The cosine between the direction it moved and the direction food lay, accumulated only on
+   * ticks when there was a direction to compare against. Divided by `seekTicks` it is a number in
+   * [-1, 1]: zero is a random walk, and anything clearly positive is an organism *going to* food
+   * rather than happening upon it. It is the one foraging measure that cannot be passed by sitting
+   * still, because sitting still never adds a term.
+   */
+  readonly seeking: Float64Array
+  readonly seekTicks: Float64Array
+  /**
    * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
    * learner has to match a death back to the sample that caused it, and recovering the sample from
    * the weights would be wrong the moment its mean moved — so the tag travels with the body.
@@ -356,6 +367,8 @@ export class World {
     this.meals = new Int32Array(n)
     this.orderTicks = new Float64Array(n)
     this.peakReserve = new Float64Array(n)
+    this.seeking = new Float64Array(n)
+    this.seekTicks = new Float64Array(n)
     this.learnId = new Int32Array(n)
     this.island = new Int8Array(n)
     this.since = new Int32Array(n)
@@ -583,6 +596,7 @@ export class World {
       meals: this.meals[b],
       orderTicks: this.orderTicks[b],
       peakReserve: this.peakReserve[b],
+      seeking: this.seekTicks[b] > 0 ? this.seeking[b] / this.seekTicks[b] : 0,
     }
   }
 
@@ -1137,6 +1151,16 @@ export class World {
       this.mvx[b] = L.F_max * Math.tanh(yout[BRAIN_OUT.FX])
       this.mvy[b] = L.F_max * Math.tanh(yout[BRAIN_OUT.FY])
 
+      // Did it move toward what it could tell about food? Scored here, where both the perception
+      // and the choice made from it are in hand, and only on ticks where there was something to
+      // perceive — so an organism that never moves never scores rather than scoring zero.
+      const fd = Math.hypot(gx, gy)
+      const mv = Math.hypot(this.mvx[b], this.mvy[b])
+      if (fd > 1e-6 && mv > 1e-6) {
+        this.seeking[b] += (this.mvx[b] * gx + this.mvy[b] * gy) / (fd * mv)
+        this.seekTicks[b]++
+      }
+
       // signals back out to each limb, read by its neuron on the next tick
       for (let s = 0; s < 4; s++) this.brainSig[b * 4 + s] = Math.tanh(yout[BRAIN_OUT.SIG + s])
 
@@ -1623,6 +1647,8 @@ export class World {
     this.meals[b] = 0
     this.orderTicks[b] = 0
     this.peakReserve[b] = this.energy[b]
+    this.seeking[b] = 0
+    this.seekTicks[b] = 0
     if (spec.parent !== undefined && spec.parent >= 0) {
       this.lineage[b] = this.lineage[spec.parent]
       this.children[spec.parent]++

@@ -173,6 +173,37 @@ Worth recording separately: the *baseline itself* moved enormously under stages 
 over completed lives is now 1,600 ticks against 243 before, offspring 0.865 against 0.335, and time
 spent joined 2,639 against 321. The conditions did far more than any learner has.
 
+### Queued, deliberately not built
+
+- **A second, local learning loop**: eating rewards something and rewires the brain within a life.
+  This is C2 (reward-modulated Hebbian) in the catalogue below, and it is the only family that
+  invents no objective — the reward is the food. It would also sidestep the starvation problem
+  below entirely, since it needs no spawn and no death to learn from.
+- **Brain capacity as a function of the rung reached**: more power unlocked as milestones fall.
+  See §9's note on allocating the final shape now and enabling it gradually — a zero-initialised
+  residual block means an unlock is a tilt rather than a cliff, and nothing a learner has already
+  found is invalidated.
+- **Smell was considered and rejected.** Food has no long-range signature, so finding it beyond
+  the 40-unit radius at which it pulls is luck; a diffusing odour field would fix that and was
+  built, measured and reverted, because it is a second sensing channel bolted onto a world whose
+  whole premise is particles and one symmetric matrix. The `seeking` measure survives it: the
+  cosine between where a body moved and where it could tell food was, which is the one foraging
+  number that cannot be passed by sitting still.
+
+### A slower metabolism does not help once the population is capped
+
+Tested directly, 20k ticks on the best world: p90 lifespan **467 → 283 → 108** as metabolism falls
+1 → 0.5 → 0.25, which is the *opposite* of the earlier sweep's result. The two are not in conflict.
+At ten brain slots the cap was not binding and cheaper living bought longer lives; at forty slots
+with abundant food the population sits at the cap permanently, so cheaper living means more
+survivors competing, and what gets measured is the turnover of newborns. **The sign of the
+metabolism effect depends on whether the population is against its ceiling.**
+
+The same run found something better. A **famine/glut cycle at normal metabolism** reached
+**rung 7** — a structure of order 3 or more holding for 2,000 ticks — which is the furthest
+anything has got, against rung 4 for every slower-metabolism variant and rung 6 for the comfortable
+best world. Scarcity and pressure, not comfort, produced the first persistent structure.
+
 ### The learner is inert unless things are dying
 
 Found while watching the rail on the best-known world: **431 lives scored, zero updates.** The
