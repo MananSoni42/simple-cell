@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { CATALOG_VERSION, type CatalogEntry, type WorldSpec, best, parseCatalog, rank, specId } from '../src/core/catalog'
 import type { EvalOptions } from '../src/core/evaluate'
 import { mix } from '../src/core/sample'
-import { report, summarise } from '../src/core/analyse'
+import { chemistryShape, report, summarise } from '../src/core/analyse'
 import { Rng } from '../src/core/rng'
 
 /**
@@ -161,11 +161,43 @@ function runPhase(phase: Phase): void {
     const prev = PHASES[phase.n - 1]
     const pool = best(cat).filter((e) => e.phase === prev.n)
     const survivors = prev.kills === 'impossible-only' ? pool.filter(possible) : pool
-    const ranked = rank(survivors)
-    // the cutoff, plus a random rescue from below it: a short run is a noisy ranker, and the
-    // rescue both insures against that and measures how leaky the screen was
-    const cut = ranked.slice(0, prev.keep)
-    const rest = ranked.slice(prev.keep)
+    /*
+     * Promotion is **stratified**, not top-N, and the reason is a flaw worth naming.
+     *
+     * Phase 0 scores what four tenths of a generation can see: clumping and limb retention. Those
+     * favour universal attraction, so a plain top-N cut would systematically discard the
+     * self-repelling chemistries that a membrane needs — and this search has a written prediction
+     * that self-repulsion wins by phase 2. Ranking globally would quietly make that prediction
+     * untestable, which is the worst kind of experimental error: the screen would confirm the
+     * screen.
+     *
+     * So the budget is divided across strata — how many types repel themselves, crossed with the
+     * food pattern — and the best of each stratum is taken. Unfilled quota is redistributed, so
+     * nothing is wasted on empty cells.
+     */
+    const stratum = (e: CatalogEntry): string => `${chemistryShape(e.spec).selfRepel}|${e.spec.foodMode}`
+    const cells = new Map<string, CatalogEntry[]>()
+    for (const e of survivors) {
+      const k = stratum(e)
+      const a = cells.get(k)
+      if (a) a.push(e)
+      else cells.set(k, [e])
+    }
+    for (const a of cells.values()) a.sort((x, y) => y.score - x.score)
+    const cut: CatalogEntry[] = []
+    let quota = Math.max(1, Math.ceil(prev.keep / Math.max(1, cells.size)))
+    for (let pass = 0; pass < 4 && cut.length < prev.keep; pass++) {
+      for (const a of cells.values()) {
+        const want = Math.min(a.length, quota)
+        for (let i = 0; i < want && cut.length < prev.keep; i++) {
+          if (!cut.includes(a[i])) cut.push(a[i])
+        }
+      }
+      quota *= 2 // redistribute what thin cells could not use
+    }
+    const taken = new Set(cut)
+    const rest = rank(survivors).filter((e) => !taken.has(e))
+    console.log(`  stratified across ${cells.size} cells (self-repulsion × food pattern)`)
     const rescueN = Math.min(rest.length, Math.max(0, Math.round(prev.keep * 0.02)))
     const rng = new Rng(0xbeef ^ phase.n)
     const rescued: CatalogEntry[] = []
@@ -177,7 +209,7 @@ function runPhase(phase: Phase): void {
     for (const s of specs) sources.set(specId(s), 'promoted')
     console.log(
       `phase ${phase.n}: ${pool.length} from phase ${prev.n}, ${survivors.length} possible, ` +
-        `taking ${cut.length} ranked + ${rescueN} rescued, ${specs.length} still to run`,
+        `taking ${cut.length} stratified + ${rescueN} rescued, ${specs.length} still to run`,
     )
   }
 
