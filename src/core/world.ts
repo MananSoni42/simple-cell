@@ -715,16 +715,20 @@ export class World {
   }
 
   /**
-   * Guardrail: no particle may move further than d_max in one tick, whatever the forces say.
+   * Guardrail: no particle may move further than `d_max` **in one tick**, whatever the forces say,
+   * which is why the budget is divided by the sub-step count.
    *
-   * **Known inconsistency, not yet fixed.** The per-sub-step budget shrinks as `1/n`, but the
-   * Brownian part of a sub-step only shrinks as `1/sqrt(n)` — so raising sub-steps makes the
-   * thermal kick *relatively larger* against a linearly smaller cap, and the clamp fires more
-   * often rather than less. Measured in a dense world: 21% of steps clamped at 2 sub-steps,
-   * rising to 35% at 6. Two consequences worth knowing before trusting the number:
-   * the clamp percentage is **not comparable across different sub-step counts**, and the cap
-   * should probably scale as `d_max / sqrt(n)` or be applied per tick rather than per sub-step.
-   * Changing it moves every golden state, so it belongs in its own round.
+   * It looks as though it should be a per-sub-step bound, and it is tempting because the clamp
+   * then fires *less* often as sub-steps rise rather than more. That was tried and it is wrong:
+   * `integrateOnce` reuses the forces computed once at the start of the tick, so a particle
+   * allowed `d_max` per sub-step can travel `n × d_max` through a world whose forces it stopped
+   * consulting — straight through anything in the way. Two tests caught it immediately.
+   *
+   * The odd-looking consequence is therefore real and not a defect: a sub-step's force term
+   * shrinks as `1/n` while its Brownian term shrinks only as `1/sqrt(n)`, so at high sub-step
+   * counts thermal motion is what approaches the budget, and clamping it is the guardrail doing
+   * its job. One thing to remember when reading the number: the clamp percentage is **not
+   * comparable across different sub-step counts.**
    */
   private clampStep(dx: number, dy: number): [number, number] {
     const lim = this.L.d_max / Math.max(1, Math.round(this.init.substeps))
