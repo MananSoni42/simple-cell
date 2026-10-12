@@ -1,7 +1,7 @@
 import { makeBackend, canShare } from '../compute/select'
 import { census, lifeStats } from '../core/metrics'
 import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, writeSnapshot } from '../core/snapshot'
-import { type OrganismFile, exportOrganism } from '../core/organism'
+import { type OrganismFile, defaultName, exportOrganism } from '../core/organism'
 import { Recorder } from '../core/recorder'
 import { World } from '../core/world'
 import { H, N_FRAMES, allocFrame, layoutOf, writeFrame, type FrameBuffers } from './frames'
@@ -109,19 +109,37 @@ function publish(w: World): void {
 /** Everything the summary screen needs: the record, who survived, and a small hall of fame. */
 function report(w: World): { record: ReturnType<Recorder['finish']>; organisms: OrganismFile[]; notable: { label: string; organism: OrganismFile }[] } {
   const organisms: OrganismFile[] = []
-  let oldest: { age: number; o: OrganismFile } | null = null
-  let prolific: { n: number; o: OrganismFile } | null = null
   for (let b = w.nIntr; b < w.nMatter; b++) {
     if (!w.alive[b] || !w.isBrain(b)) continue
     const o = exportOrganism(w, b)
-    if (!o) continue
-    organisms.push(o)
-    if (!oldest || o.age > oldest.age) oldest = { age: o.age, o }
-    if (!prolific || o.children > prolific.n) prolific = { n: o.children, o }
+    if (o) organisms.push(o)
+  }
+
+  // The top three are picked by three *unrelated* measures rather than one score, so a library
+  // accumulates different kinds of success instead of three near-copies of the same winner.
+  const best = (label: string, score: (o: OrganismFile) => number): { label: string; organism: OrganismFile } | null => {
+    let pick: OrganismFile | null = null
+    let top = 0
+    for (const o of organisms) {
+      const v = score(o)
+      if (v > top) {
+        top = v
+        pick = o
+      }
+    }
+    return pick ? { label, organism: { ...pick, name: pick.name ?? defaultName(pick, label.split(' ')[0]) } } : null
   }
   const notable: { label: string; organism: OrganismFile }[] = []
-  if (oldest) notable.push({ label: 'oldest survivor', organism: oldest.o })
-  if (prolific && prolific.n > 0 && prolific.o !== oldest?.o) notable.push({ label: 'most children', organism: prolific.o })
+  const seen = new Set<OrganismFile['wBrain']>()
+  for (const cand of [
+    best('oldest', (o) => o.age),
+    best('most children', (o) => o.children),
+    best('most time joined', (o) => o.fitness?.orderTicks ?? 0),
+  ]) {
+    if (!cand || seen.has(cand.organism.wBrain)) continue
+    seen.add(cand.organism.wBrain)
+    notable.push(cand)
+  }
   return { record: recorder.finish(w), organisms, notable }
 }
 

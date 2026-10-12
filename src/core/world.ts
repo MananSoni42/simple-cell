@@ -182,6 +182,17 @@ export class World {
   /** Lineage: a spawned organism founds one; its descendants inherit the id. */
   readonly lineage: Int32Array
   readonly children: Int32Array
+  /**
+   * Per-organism lifetime tallies, indexed by the brain slot and reset when a body is placed.
+   * Nothing but age and offspring was recorded before, which meant no fitness was computable —
+   * these are what the library and any learner both need.
+   */
+  readonly harvested: Float64Array // energy taken in from food
+  readonly spent: Float64Array // energy burned on upkeep, movement and signalling
+  readonly moved: Float64Array // distance the body has travelled
+  readonly meals: Int32Array // food particles consumed
+  readonly orderTicks: Float64Array // time spent in a compound, weighted by its order
+  readonly peakReserve: Float64Array // the most the brain ever held
   lineageCounter = 1
   nClamped = 0 // how often the per-tick step guardrail has had to bite
   nSteps = 0
@@ -279,6 +290,12 @@ export class World {
     this.bondCool = new Int16Array(n)
     this.lineage = new Int32Array(n)
     this.children = new Int32Array(n)
+    this.harvested = new Float64Array(n)
+    this.spent = new Float64Array(n)
+    this.moved = new Float64Array(n)
+    this.meals = new Int32Array(n)
+    this.orderTicks = new Float64Array(n)
+    this.peakReserve = new Float64Array(n)
     this.since = new Int32Array(n)
     this.wasLive = new Uint8Array(n)
     this.limbs = new Int32Array(n * 4).fill(-1)
@@ -484,6 +501,7 @@ export class World {
     this.stepPatches()
     this.aggregates.observe(this)
     this.orders.observe(this)
+    this.creditOrders()
     this.tick++
     this.shine()
     if (this.tick % this.init.T_spawn === 0) for (let k = 0; k < this.init.spawn_batch; k++) this.spawnRandom()
@@ -491,6 +509,22 @@ export class World {
       if (this.cool[i] > 0) this.cool[i]--
       if (this.repCool[i] > 0) this.repCool[i]--
       if (this.bondCool[i] > 0) this.bondCool[i]--
+    }
+  }
+
+  /**
+   * Credits time spent in a compound to each of its members. Order is a property of a group, so
+   * to drive anything it has to become per-organism: every member earns `(n - 1) ^ order_alpha`
+   * per tick, superlinear so that a long-held large compound counts for much more than a long
+   * small one. Sampled on the tracker's cadence and scaled, rather than recomputed every tick.
+   */
+  private creditOrders(): void {
+    if (this.tick % this.orders.sampleEvery !== 0) return
+    const alpha = this.L.order_alpha
+    for (const members of this.orders.groupsNow(this)) {
+      if (members.length < 2) continue
+      const credit = Math.pow(members.length - 1, alpha) * this.orders.sampleEvery
+      for (const b of members) this.orderTicks[b] += credit
     }
   }
 
@@ -665,6 +699,8 @@ export class World {
       const [bsx, bsy] = this.clampStep(mu * bx + sn * this.kick(), mu * by + sn * this.kick())
       x[b] = this.wrap(x[b] + bsx)
       y[b] = this.wrap(y[b] + bsy)
+      this.moved[b] += Math.hypot(bsx, bsy)
+      if (this.energy[b] > this.peakReserve[b]) this.peakReserve[b] = this.energy[b]
       this.placeLimbs(b)
     }
   }
@@ -772,6 +808,12 @@ export class World {
       } else {
         energy[best] += L.E_food
       }
+      // credit the meal to whichever organism the eater belongs to
+      const credit = o >= 0 ? o : best >= this.nIntr ? best : -1
+      if (credit >= 0) {
+        this.harvested[credit] += L.E_food
+        this.meals[credit]++
+      }
       this.alive[f] = 0
       energy[f] = 0
       this.freeFood.push(f)
@@ -856,6 +898,8 @@ export class World {
     const d = Math.min(amount, this.energy[i])
     this.energy[i] -= d
     this.burned += d
+    const o = this.owner[i]
+    if (o >= 0) this.spent[o] += d
   }
 
   private costs(): void {
@@ -1258,6 +1302,12 @@ export class World {
     this.gen[b] = spec.gen ?? 0
     this.parent[b] = spec.parent ?? -1
     this.children[b] = 0
+    this.harvested[b] = 0
+    this.spent[b] = 0
+    this.moved[b] = 0
+    this.meals[b] = 0
+    this.orderTicks[b] = 0
+    this.peakReserve[b] = this.energy[b]
     if (spec.parent !== undefined && spec.parent >= 0) {
       this.lineage[b] = this.lineage[spec.parent]
       this.children[spec.parent]++

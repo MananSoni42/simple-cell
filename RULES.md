@@ -470,6 +470,7 @@ is a pure function of the seed**: same seed, same world, down to the last tick.
 | `d_max` · `dth_max` · `z_max` | 5 · 0.25 · 3 | motion budget (R2.4) |
 | `substeps_max` | 16 | cap on automatic sub-stepping (R2.6) |
 | `life_window` · `life_buckets` | 10000 · 100 | trailing window for mean-lifespan reporting |
+| `order_alpha` | 1.5 | compound time is credited as `(n−1)^α`, so a large group counts superlinearly |
 | aggregate sampling · stable age | every 10 ticks · 300 ticks | organism-contact sampling, and how old a bond must be to count as lasting (R8) |
 | `L_rod` | 16 | rod length |
 | `gap` | 0.12 rad | angular gap between quadrants (≈7°) |
@@ -793,10 +794,47 @@ Age, limb count and children sit alongside as chips. From there it can be **save
 **copied** as JSON, **re-seeded** (a copy placed into the running world), or a saved one
 **loaded** back in.
 
-An imported file is repaired rather than trusted: quadrants and types are clamped, duplicate
-quadrants dropped, weight vectors padded or truncated to this world's shapes, and a file with no
-body at all still yields something placeable. Imported organisms take free matter of the right
+**An organism is its weights, and weights only mean anything against the brain they were made
+for.** Every file is therefore stamped with that brain's shape, and a file whose stamp does not
+match this build is **refused with a reason**, not loaded. Padding an old vector to fit produces a
+different organism wearing the same name — it fails quietly instead of loudly, which is worse.
+This matters in practice: the brain's shape has already changed twice here, 27 → 33 → 29 inputs.
+
+Everything merely cosmetic is still repaired: quadrants and types are clamped, duplicate
+quadrants dropped, over-long names truncated. Imported organisms take free matter of the right
 types and a clear spot, and their energy is counted as injected, like a spawn's.
 
 This is the beginning of a library of organisms — which is what we will want the moment anything
 starts selecting between them.
+
+---
+
+## 20. What an organism records about its own life
+
+Until now only two things were known about an organism: how long it had lived and how many
+children it had. That made no fitness computable, which blocked both a library worth keeping and
+any learner. Each organism now carries, from birth and reset when a body is placed:
+
+| | |
+|---|---|
+| `harvested` · `meals` | energy taken in from food, and how many particles that was |
+| `spent` | energy burned on upkeep, movement and signalling, charged to whichever organism the particle belonged to |
+| `moved` | distance the body travelled |
+| `peakReserve` | the most its brain ever held |
+| `orderTicks` | time spent in a compound, credited as `(n−1)^α` per tick for every member |
+
+`orderTicks` is the one that needed a decision. Order is a property of a *group*, so to mean
+anything for an individual it has to be credited to each member — which is also how
+group-beneficial traits actually get selected, free riders included. `α > 1` makes it "maximise
+the order **and** the time at it" rather than trading one for the other: an order-5 held for a
+while is worth more than four times an order-2 held equally long.
+
+All of it is state, so snapshots carry it and a rewind restores it.
+
+### The top three of a run
+
+A run offers up three organisms, picked by **three unrelated measures** — oldest, most children,
+most time joined — rather than by one score. Ranking by a single number would save three
+near-copies of the same winner; this way a collection accumulates different kinds of success, and
+nothing had to be collapsed into a single objective. Each arrives with a readable name built from
+where it came from, because unnamed things never get used again.

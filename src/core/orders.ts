@@ -67,6 +67,10 @@ export class OrderTracker {
   }
 
   /** Connected groups of organisms, joined where a bond links two of their particles. */
+  groupsNow(w: World): number[][] {
+    return this.currentGroups(w)
+  }
+
   private currentGroups(w: World): number[][] {
     const parent = new Map<number, number>()
     const find = (a: number): number => {

@@ -67,6 +67,8 @@ export const LAWS = {
   E_bond: 0.1, // energy spent to form a bond, paid by both particles
   bond_cooldown: 30, // ticks before the same particle may bond again after a break // share of a dead brain's reserve that is left behind as food // minimum reserve for a free particle to be captured as a limb
   substeps_max: 16, // integration sub-steps are capped here when a hot world needs them
+  /** Compound time is credited as (n-1)^order_alpha, so bigger groups count superlinearly. */
+  order_alpha: 1.5,
   life_window: 10000, // lifetime averages are reported over this many trailing ticks
   life_buckets: 100,
 }

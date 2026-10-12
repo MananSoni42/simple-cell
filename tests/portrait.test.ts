@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from '../src/core/neurons'
-import { type OrganismFile, exportOrganism } from '../src/core/organism'
+import { BRAIN_SHAPE, type OrganismFile, exportOrganism } from '../src/core/organism'
 import { initFromSeed } from '../src/core/params'
 import { World } from '../src/core/world'
 import { bodyDiagram, reserveBars, weightMap } from '../src/ui/portrait'
@@ -25,7 +25,7 @@ describe('organism portrait', () => {
 
   it('survives an empty body and an over-full reserve without producing nonsense', () => {
     const bare: OrganismFile = {
-      version: 1, at: [0, 0], age: 0, generation: 0, children: 0,
+      version: 2, brain: { ...BRAIN_SHAPE }, at: [0, 0], age: 0, generation: 0, children: 0,
       reserve: 1e6, limbs: [], wLimb: new Array(N_WLIMB).fill(0), wBrain: new Array(N_BRAIN_IN * N_BRAIN_OUT).fill(0),
     }
     const svg = bodyDiagram(bare) + reserveBars(bare) + weightMap(bare)

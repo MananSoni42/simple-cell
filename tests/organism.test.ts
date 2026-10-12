@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { exportOrganism, parseOrganism } from '../src/core/organism'
+import { IncompatibleOrganism, exportOrganism, parseOrganism } from '../src/core/organism'
 import { initFromSeed } from '../src/core/params'
 import { WALL } from '../src/core/types'
 import { World } from '../src/core/world'
@@ -26,15 +26,13 @@ describe('organism export and import', () => {
     expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 6)
   })
 
-  it('repairs a hostile or truncated organism file instead of failing', () => {
-    const o = parseOrganism(JSON.stringify({ limbs: [{ quad: 9, type: 77 }, { quad: 9 }], reserve: -5, wBrain: [1, 2] }))
-    expect(o.limbs.length).toBe(1) // one per quadrant, duplicates dropped
-    expect(o.limbs[0].quad).toBe(3)
-    expect(o.limbs[0].type).toBe(3)
-    expect(o.reserve).toBeGreaterThanOrEqual(0)
-    expect(o.wBrain.length).toBe(29 * 10)
-    expect(o.wBrain.every((v) => Number.isFinite(v))).toBe(true)
-    expect(parseOrganism('{}').limbs.length).toBe(1) // an empty body is still placeable
+  it('refuses a file with no brain stamp rather than padding it into something else', () => {
+    // This used to pad and repair. It must not: a padded brain is a different organism, and the
+    // brain's shape has already changed twice in this project's life.
+    expect(() => parseOrganism(JSON.stringify({ limbs: [{ quad: 9, type: 77 }], reserve: -5, wBrain: [1, 2] }))).toThrow(
+      IncompatibleOrganism,
+    )
+    expect(() => parseOrganism('{}')).toThrow(IncompatibleOrganism)
   })
 
   it('picks the organism nearest a point, and nothing when the point is empty', () => {

@@ -80,11 +80,20 @@ export class InspectPanel {
       const f = (e.target as HTMLInputElement).files?.[0]
       if (!f) return
       try {
-        const { parseOrganism } = await import('../core/organism')
-        const parsed = parseOrganism(await f.text())
-        this.show(parsed)
-        this.onPlace(parsed)
-        this.root.querySelector<HTMLElement>('#o-note')!.textContent = 'loaded and placed'
+        const { IncompatibleOrganism, parseOrganism } = await import('../core/organism')
+        try {
+          const parsed = parseOrganism(await f.text())
+          this.show(parsed)
+          this.onPlace(parsed)
+          this.root.querySelector<HTMLElement>('#o-note')!.textContent = 'loaded and placed'
+        } catch (err) {
+          // A brain from another shape is refused rather than padded: padding gives you a
+          // different organism wearing the same name.
+          note.innerHTML =
+            err instanceof IncompatibleOrganism
+              ? `<b style="color:var(--bad)">cannot load this organism</b><br>${err.reason}`
+              : `could not read that: ${(err as Error).message}`
+        }
       } catch (err) {
         note.textContent = `could not read that: ${(err as Error).message}`
       }
