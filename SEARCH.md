@@ -179,4 +179,57 @@ impossible — phase 1 at 2,000 ticks and phase 2 at 20,000 will say how much of
 And the ladder now reports **rungs met in total** beside the gapped level, because "level 0" about
 a world that clears nine of thirteen is true and useless.
 
+### Phase 1 — complete, and the finding that reframes the project
+
+**60,000 worlds · 105.6M ticks · 44 core-hours in 3.8 hours of wall clock.** Early stopping did
+most of that: two thirds plateaued out early and 17% *earned extensions* past their horizon, so the
+effective speedup came out at 11.6× rather than the 8× the pool was measured at.
+
+**The walls did not move when the horizon quadrupled.**
+
+| rung | 500 ticks | 2,000 ticks |
+|---|---|---|
+| Feeds | 0.2% | 0.1% |
+| Lasts | 0.1% | 0.1% |
+| Seeks | 0.3% | 0.3% |
+
+Five worlds of sixty thousand reached level 1. So this is not a measurement artifact of a short run,
+as I had assumed — it is a fact about the laws.
+
+**Why: organisms eat less than once per lifetime.**
+
+| fed ratio (lifetime harvest ÷ birth endowment) | |
+|---|---|
+| median | **0.067** |
+| p90 | 0.25 |
+| p99 | 0.59 |
+| p99.9 | 0.90 |
+| best of 60,000 | 1.28 |
+
+Uptake is not the problem — a meal is the *whole* food particle, `E_food` = 10, taken when it comes
+within `r_eat` = 6 of a limb. The arithmetic is the problem. A budded child's endowment is
+`E_birth` × about 4.9 particles ≈ 73, so matching it takes **7.3 meals**, and a median fed of 0.067
+means the typical organism eats **0.49 times in its whole life**.
+
+That single number explains most of what this project has measured. No learner ever improved
+foraging because there is almost nothing to forage. Thrift was the only winning strategy because
+spending less is the only lever when intake is 7% of starting capital. `Lasts` fails because
+organisms die at about the moment their inheritance runs out — p90 is 1.38 coasting times.
+Association is easy because bonding costs nothing and requires no food. **These organisms live on
+their inheritance, and the population is subsidised by the energy the world injects when it endows
+a spawn.**
+
+The binding constraint is **encounter rate**: `r_eat` = 6 in a world 300 across. The levers, in the
+order I would pull them: raise `r_eat`, lower `E_birth` (less inheritance to coast on), then
+`E_food` and standing food density. Two constants would make feeding *common*, which is the
+precondition for foraging being learnable at all.
+
+Best world of the 60,000: score 11.89, `converging`/abundant/noisy, metabolism 2, flow 0.05, T 1 —
+fed **1.22**, order 20, generation 12. It does feed itself, which is why it tops the list.
+
+### Phase 2 — running
+
+600 worlds × 20,000 ticks × 2 seeds. Estimated **2.2 hours**. The first phase that can judge
+structure, and the one that tests the pre-registered self-repulsion prediction.
+
 _Updates appended below as they land._
