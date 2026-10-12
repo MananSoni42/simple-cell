@@ -27,10 +27,15 @@ converging or breathing colonies, a fixed spring, a moving comet, a ring), a **l
 average or abundant, as a multiple of what the world actually spends) and a **regime** (steady,
 cycle, bloom, decline, rising, noisy). Nine presets combine them.
 
-The app has four screens: a **title** page, **setup** (grouped into physics / chemistry / food /
+The app has five screens: a **title** page, **setup** (grouped into physics / chemistry / food /
 life / compute, with sliders that say what each value *means*), the **world** (stats rail, canvas,
-organism inspector, controls), and a **run summary** when you stop — hero numbers, observations
-written from the recorded run, charts, and exports.
+organism inspector, controls), a **run summary** when you stop — hero numbers, observations
+written from the recorded run, charts, and exports — and a **collection** of past runs and the
+organisms kept from them, which can be placed back into new worlds.
+
+Setup asks three questions (which world, how big, which seed) and keeps everything else in an
+Advanced drawer that tells you what you have changed. A new world opens **paused**, with tools to
+place organisms, food and terrain wherever you want them before it runs.
 
 Start with **"how it works"** — one page explaining the whole model, generated from the live
 constants. [PLAN.md](PLAN.md) carries the staged backlog and the measurements behind it.

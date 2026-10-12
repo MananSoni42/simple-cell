@@ -6,6 +6,8 @@ import { barChart, lineChart, stackedAreaChart } from './charts'
 import { download } from './config'
 import { stat } from './controls'
 import { CHART, INK, fmt } from './theme'
+import { defaultName } from '../core/organism'
+import { type StoredRun, collection, newId } from './store'
 
 export interface RunResult {
   record: RunRecord
@@ -20,7 +22,52 @@ export interface RunResult {
  * What happened. Hero numbers first, then the observations in prose, then the charts that back
  * them up, then the exports. Every number here comes off the run record — nothing is estimated.
  */
-export function mountSummary(root: HTMLElement, result: RunResult, hooks: { again(): void; setup(): void }): void {
+/**
+ * Files a finished run and the three organisms it offered up. Automatic, because a collection
+ * nobody remembers to fill is empty; short runs are skipped so fiddling does not clog it.
+ */
+async function fileRun(result: RunResult): Promise<{ saved: boolean; note: string }> {
+  const r = result.record
+  if (r.ticks < 300) return { saved: false, note: `too short to keep (${fmt.ticks(r.ticks)})` }
+  const runId = newId('run')
+  const ids: string[] = []
+  for (const n of result.notable) {
+    const id = newId('org')
+    const name = n.organism.name ?? defaultName(n.organism, n.label.split(' ')[0])
+    await collection.putOrganism({
+      id,
+      savedAt: Date.now(),
+      name,
+      label: n.label,
+      runId,
+      organism: { ...n.organism, name, from: { ...n.organism.from!, runId, savedAt: Date.now() } },
+    })
+    ids.push(id)
+  }
+  const f = r.final
+  const run: StoredRun = {
+    id: runId,
+    savedAt: Date.now(),
+    init: result.init,
+    ticks: r.ticks,
+    observations: result.observations,
+    summary: {
+      organisms: f.organisms, births: f.births, budded: f.budded, deaths: f.deaths,
+      recordAge: f.recordAge, bestOrder: f.bestOrder, bestOrderAge: f.bestOrderAge,
+      burned: f.burned, injected: f.injected, peakOrganisms: r.peaks.organisms.value,
+      lineages: f.lineages, maxGen: f.peakGen,
+    },
+    spark: {
+      organisms: Array.from(r.series.organisms).map((v) => Math.round(v * 100) / 100),
+      food: Array.from(r.series.food).map((v) => Math.round(v * 100) / 100),
+    },
+    organismIds: ids,
+  }
+  await collection.putRun(run)
+  return { saved: true, note: `kept this run and ${ids.length} organism${ids.length === 1 ? '' : 's'}` }
+}
+
+export function mountSummary(root: HTMLElement, result: RunResult, hooks: { again(): void; setup(): void; library(): void }): void {
   const r = result.record
   const f = r.final
   const orders = []
@@ -45,6 +92,7 @@ export function mountSummary(root: HTMLElement, result: RunResult, hooks: { agai
         <div class="row">
           <button class="primary" id="x-again">Run it again</button>
           <button id="x-setup">New world</button>
+          <button id="x-lib">Collection</button>
         </div>
       </div>
 
@@ -166,6 +214,10 @@ export function mountSummary(root: HTMLElement, result: RunResult, hooks: { agai
   }
   root.querySelector('#x-again')!.addEventListener('click', () => hooks.again())
   root.querySelector('#x-setup')!.addEventListener('click', () => hooks.setup())
+  root.querySelector('#x-lib')!.addEventListener('click', () => hooks.library())
+  void fileRun(result).then((r) => {
+    note.textContent = r.note + (collection.mode === 'memory' ? ' — but this browser blocks storage, so it will not persist' : '')
+  })
 
   if (result.organisms.length === 0) {
     root.querySelector('#x-orgs')!.setAttribute('disabled', 'true')

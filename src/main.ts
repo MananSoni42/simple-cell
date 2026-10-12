@@ -9,7 +9,9 @@ import { explainHTML } from './ui/explain'
 import { InspectPanel } from './ui/inspect'
 import { mountLanding } from './ui/landing'
 import { Router } from './ui/router'
+import { mountLibrary } from './ui/library'
 import { mountSetup } from './ui/setup'
+import { collection } from './ui/store'
 import { StatsPanel } from './ui/stats'
 import { mountSummary } from './ui/summary'
 import type { OrganismFile } from './core/organism'
@@ -30,7 +32,7 @@ const stage = $('stage')
 const brushEl = $<HTMLInputElement>('brush')
 const helpEl = $('help')
 
-const router = new Router(['landing', 'explain', 'setup', 'world', 'summary'])
+const router = new Router(['landing', 'explain', 'setup', 'world', 'summary', 'library'])
 
 /**
  * The page draws and nothing else. The world runs in a worker, publishing finished ticks into
@@ -68,6 +70,13 @@ type Tool = 'pan' | 'organism' | 'food' | 'wall' | 'erase'
 let tool: Tool = 'pan'
 /** The organism the palette has armed, if any; otherwise a random one is placed. */
 let armed: OrganismFile | null = null
+
+function arm(o: OrganismFile | null): void {
+  armed = o
+  const chip = $('armed')
+  chip.hidden = !o
+  chip.textContent = o ? `armed: ${o.name ?? 'organism'}` : ''
+}
 
 const HELP: Record<Tool, string> = {
   pan: 'drag to pan · wheel to zoom · click an organism to inspect · shift-drag to feed',
@@ -176,7 +185,11 @@ function startWorld(init: Init, perf: Perf): void {
       mountSummary(
         $('page-summary'),
         { ...m.report, init: init2, observations: observe(m.report.record, init2) },
-        { again: () => startWorld(init2, lastPerf), setup: () => router.go('setup') },
+        {
+          again: () => startWorld(init2, lastPerf),
+          setup: () => router.go('setup'),
+          library: () => router.go('library'),
+        },
       )
       teardown()
       router.go('summary')
@@ -188,6 +201,7 @@ function startWorld(init: Init, perf: Perf): void {
 // ---------------------------------------------------------------- screens
 
 mountLanding($('page-landing'), {
+  library: () => router.go('library'),
   explain: () => {
     cameFrom = 'landing'
     router.go('explain')
@@ -207,11 +221,29 @@ mountSetup($('page-setup'), {
     startWorld(init, perf)
   },
   back: () => router.go('landing'),
+  library: () => router.go('library'),
   explain: () => {
     cameFrom = 'setup'
     router.go('explain')
   },
 })
+
+const library = mountLibrary($('page-library'), {
+  replay: (init) => {
+    resumeRate = null
+    startWorld(init, lastPerf)
+  },
+  arm: (o) => {
+    arm(o)
+    setTool('organism')
+    router.go(link ? 'world' : 'setup')
+  },
+  back: () => router.go(lastInit ? 'setup' : 'landing'),
+})
+router.onEnter = (page) => {
+  if (page === 'library') void library.refresh()
+}
+void collection.init()
 
 // ---------------------------------------------------------------- world controls
 

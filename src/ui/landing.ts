@@ -1,7 +1,7 @@
 import { reducedMotion } from './theme'
 
 /** Title screen: what this is, and the two ways in. */
-export function mountLanding(root: HTMLElement, go: { explain(): void; setup(): void }): void {
+export function mountLanding(root: HTMLElement, go: { explain(): void; setup(): void; library(): void }): void {
   root.innerHTML = `
     <canvas class="drift" id="drift"></canvas>
     <div class="landing">
@@ -17,10 +17,12 @@ export function mountLanding(root: HTMLElement, go: { explain(): void; setup(): 
       <div class="row">
         <button class="primary" id="l-init">Init world →</button>
         <button id="l-how">How it works</button>
+        <button id="l-lib">Collection</button>
       </div>
     </div>`
   root.querySelector('#l-init')!.addEventListener('click', () => go.setup())
   root.querySelector('#l-how')!.addEventListener('click', () => go.explain())
+  root.querySelector('#l-lib')!.addEventListener('click', () => go.library())
   drift(root.querySelector<HTMLCanvasElement>('#drift')!)
 }
 

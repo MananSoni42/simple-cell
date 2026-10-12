@@ -44,11 +44,13 @@ function cellColor(a: number): string {
  */
 export function mountSetup(
   root: HTMLElement,
-  hooks: { start(init: Init, perf: Perf): void; back(): void; explain(): void },
+  hooks: { start(init: Init, perf: Perf): void; back(): void; explain(): void; library(): void },
 ): { refresh(): void } {
   let init = initFromSeed(Math.floor(Math.random() * 1e9), 1)
   const perf: Perf = { threads: 1, gpu: false }
   let tab: Tab = 'physics'
+  /** Which preset is selected, or -1 for a seeded world. */
+  let chosen = -1
   const fromHash = readHash()
   if (fromHash) {
     init = fromHash.init
@@ -59,27 +61,40 @@ export function mountSetup(
     <div class="setup">
       <div class="setup-head">
         <div>
-          <h1>SIMPLECELL</h1>
-          <div class="note">set the chemistry and the economy. what they build is not up to you.</div>
+          <h1>PICK A WORLD</h1>
+          <div class="note">three choices is enough to start. the rest of it is down there if you want it.</div>
         </div>
         <div class="row">
           <button id="s-back">← back</button>
+          <button id="s-lib">collection</button>
           <button id="s-how">how it works</button>
         </div>
       </div>
-      <div class="row" style="margin-bottom:14px">
-        <label class="mono-k">seed</label>
-        <input id="s-seed" inputmode="numeric" style="width:130px" />
-        <button id="s-roll">re-roll</button>
-        <span class="note" id="s-io"></span>
+
+      <div class="pick">
+        <div class="field"><div class="field-head"><label>a world</label></div>
+          <div class="presets" id="s-presets"></div>
+          <div class="field-hint" id="s-preset-hint"></div>
+        </div>
+        <div id="s-size"></div>
+        <div class="row" style="margin-bottom:18px">
+          <label class="mono-k">seed</label>
+          <input id="s-seed" inputmode="numeric" style="width:120px" />
+          <button id="s-roll">re-roll</button>
+          <span class="note" id="s-io"></span>
+        </div>
       </div>
-      <div class="presets" id="s-presets"></div>
-      <div class="tabs">${TABS.map(([k, label]) => `<button type="button" data-tab="${k}">${label}</button>`).join('')}</div>
-      ${TABS.map(([k]) => `<div class="panel" data-panel="${k}"></div>`).join('')}
-      <div class="row" style="margin-top:6px">
-        <button class="primary" id="s-start">Enter the world →</button>
-        <span class="note">or press Enter</span>
+
+      <div class="row" style="margin-bottom:20px">
+        <button class="primary" id="s-start">Build it →</button>
+        <span class="note">it opens paused, so you can place things before it runs</span>
       </div>
+
+      <details class="advanced" id="s-adv">
+        <summary>Advanced <span class="note" id="s-changed"></span></summary>
+        <div class="tabs">${TABS.map(([k, label]) => `<button type="button" data-tab="${k}">${label}</button>`).join('')}</div>
+        ${TABS.map(([k]) => `<div class="panel" data-panel="${k}"></div>`).join('')}
+      </details>
     </div>`
 
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!
@@ -675,12 +690,19 @@ export function mountSetup(
   }
 
   // ------------------------------------------------------------------ chrome
-  q('#s-presets').innerHTML = PRESETS.map((p, i) => `<button type="button" data-preset="${i}" title="${p.blurb}">${p.name}</button>`).join('')
+  q('#s-presets').innerHTML =
+    PRESETS.map((p, i) => `<button type="button" data-preset="${i}" title="${p.blurb}">${p.name}</button>`).join('') +
+    '<button type="button" data-preset="-1" title="whatever the seed happens to produce">Surprise me</button>'
   for (const b of Array.from(root.querySelectorAll<HTMLButtonElement>('[data-preset]'))) {
     b.addEventListener('click', () => {
-      const p = PRESETS[Number(b.dataset.preset)]
-      init = p.build()
-      ioEl.textContent = p.blurb
+      const i = Number(b.dataset.preset)
+      if (i < 0) {
+        chosen = -1
+        reseed(Math.floor(Math.random() * 1e9))
+        return
+      }
+      chosen = i
+      init = PRESETS[i].build()
       refresh()
     })
   }
@@ -700,8 +722,52 @@ export function mountSetup(
     writeHash(init, perf)
   }
 
+  /** What the chosen preset would have produced, so changes can be pointed out. */
+  function baseline(): Init {
+    return chosen >= 0 ? PRESETS[chosen].build() : initFromSeed(init.seed, init.scale)
+  }
+
+  /**
+   * Hiding settings is only safe if you can see that you have changed them. This names the
+   * differences from whatever was picked, so a world can never behave oddly for invisible reasons.
+   */
+  function changeSummary(): string {
+    const base = baseline() as unknown as Record<string, unknown>
+    const now = init as unknown as Record<string, unknown>
+    const watch: [string, string][] = [
+      ['T', 'temperature'], ['foodMode', 'food pattern'], ['foodLevel', 'food level'],
+      ['foodRegime', 'food over time'], ['food_life', 'food lifetime'], ['n_intrinsic', 'particles'],
+      ['n_brain', 'brains'], ['n_start', 'organisms at start'], ['n_food0', 'food at start'],
+      ['bonds', 'bonds'], ['repro', 'reproduction'], ['inflow', 'inflow'], ['foodMoves', 'food drift'],
+      ['walls', 'terrain'], ['decay_free', 'decay'], ['substeps', 'sub-steps'], ['quantized', 'quantized'],
+    ]
+    const diffs = watch.filter(([k]) => String(base[k]) !== String(now[k])).map(([k, label]) => `${label} ${now[k]}`)
+    if (diffs.length === 0) return ''
+    return `— ${diffs.slice(0, 3).join(' · ')}${diffs.length > 3 ? ` and ${diffs.length - 3} more` : ''}`
+  }
+
   function refresh(): void {
     if (document.activeElement !== seedEl) seedEl.value = String(init.seed)
+    const sizeHost = q('#s-size')
+    sizeHost.innerHTML = ''
+    sizeHost.append(
+      new Chips<string>({
+        label: 'how big',
+        value: String(init.scale),
+        options: [1, 2, 4, 8].map((n) => ({
+          value: String(n),
+          label: `${n}×`,
+          hint: `${300 * n} units across${n > 4 ? ' — placing things by hand needs a zoom in' : ''}`,
+        })),
+        onChange: (v) => reseed(init.seed, Number(v)),
+      }).el,
+    )
+    for (const b of Array.from(root.querySelectorAll<HTMLElement>('[data-preset]'))) {
+      b.classList.toggle('on', Number(b.dataset.preset) === chosen)
+    }
+    q('#s-preset-hint').textContent =
+      chosen >= 0 ? PRESETS[chosen].blurb : 'a world rolled from the seed — press re-roll until something looks interesting'
+    q('#s-changed').textContent = changeSummary()
     physics()
     chemistry()
     food()
@@ -712,7 +778,10 @@ export function mountSetup(
   }
 
   function reseed(seed: number, scale = init.scale): void {
-    init = initFromSeed(Math.floor(seed), scale)
+    // a preset re-rolled keeps its character and changes only its world; a seeded world rerolls whole
+    init = chosen >= 0 ? { ...PRESETS[chosen].build(), seed: Math.floor(seed) } : initFromSeed(Math.floor(seed), scale)
+    init.scale = scale
+    init.size = 300 * scale
     ioEl.textContent = ''
     refresh()
   }
@@ -724,6 +793,7 @@ export function mountSetup(
   })
   q('#s-back').addEventListener('click', () => hooks.back())
   q('#s-how').addEventListener('click', () => hooks.explain())
+  q('#s-lib').addEventListener('click', () => hooks.library())
   q('#s-start').addEventListener('click', () => hooks.start(init, { ...perf }))
 
   addEventListener('keydown', (e) => {

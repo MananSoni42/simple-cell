@@ -871,3 +871,35 @@ keeps dropping food wherever the pattern says.
 **Save world** writes the arrangement back out as a config — every placement recorded, with the
 random starting counts set to zero, so reopening it gives back the world you built rather than a
 fresh roll of the dice.
+
+---
+
+## 22. The collection
+
+A fifth screen, reachable from the title page, from setup and from a run summary. It persists in
+**IndexedDB** — not localStorage, whose few megabytes would run out exactly when a collection
+became worth having — and falls back to memory when a browser blocks storage, saying so plainly
+rather than pretending things were saved.
+
+**Whole-collection export and import is a requirement, not a nicety.** Browser storage is
+per-browser, can be cleared by its owner and evicted under pressure; without a file there is
+nothing standing between someone and losing months of organisms to a cleared cache. An import
+merges, and skips unreadable records rather than abandoning the file.
+
+**Two record types, kept apart.** A *run* holds the world complete enough to run again, the hero
+numbers, the written observations and references to what it produced. An *organism* holds the file
+plus a name, where it came from (seed, tick, the world's pattern, level and regime) and what it
+achieved.
+
+Every finished run is filed **automatically**, along with its best three, because a collection
+nobody remembers to fill stays empty. Runs under 300 ticks are skipped so that fiddling does not
+clog it.
+
+Organisms are shown as **cards built from the portrait** — the body as it stood and the weight
+fingerprint — because a wall of faces can be browsed where a table of numbers cannot. Names are
+editable in place, and an organism whose brain shape no longer matches says so on its own card and
+offers no way to be used.
+
+**Use in world** arms an organism; switch to the Organism tool and every click places a copy. That
+is the composition step: organisms from different worlds, placed where you want them, meeting for
+the first time.

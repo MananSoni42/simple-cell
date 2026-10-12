@@ -1,6 +1,6 @@
 import { reducedMotion } from './theme'
 
-export type Page = 'landing' | 'explain' | 'setup' | 'world' | 'summary'
+export type Page = 'landing' | 'explain' | 'setup' | 'world' | 'summary' | 'library'
 
 /**
  * Four screens, one at a time, with a short crossfade. The transition is the only animation that
