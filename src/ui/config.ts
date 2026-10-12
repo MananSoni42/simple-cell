@@ -14,7 +14,8 @@ import {
   clamp11,
   initFromSeed,
 } from '../core/params'
-import { FITNESS, LEARNERS, type LearnConfig } from '../core/learning'
+import { COMBINERS, FITNESS, type FitnessKey, type FitnessSpec, specFromKeys } from '../core/fitness'
+import { LEARNERS, type LearnConfig } from '../core/learning'
 import { N_MATRIX } from '../core/types'
 
 export const CONFIG_VERSION = 1
@@ -60,10 +61,9 @@ function learnConfig(src: unknown, base: LearnConfig): LearnConfig {
   if (!src || typeof src !== 'object') return { ...base }
   const r = src as Record<string, unknown>
   const algo = LEARNERS.some((l) => l.key === r.algo) ? (r.algo as LearnConfig['algo']) : base.algo
-  const fitness = FITNESS.some((f) => f.key === r.fitness) ? (r.fitness as LearnConfig['fitness']) : base.fitness
   return {
     algo,
-    fitness,
+    fitness: fitnessSpec(r.fitness, base.fitness),
     warmup: Math.round(num(r.warmup, base.warmup, 0, 1e8)),
     share: num(r.share, base.share, 0, 1),
     sigma: num(r.sigma, base.sigma, 0, 5),
@@ -74,6 +74,28 @@ function learnConfig(src: unknown, base: LearnConfig): LearnConfig {
     lr: num(r.lr, base.lr, 0, 10),
     maxAge: Math.round(num(r.maxAge, base.maxAge, 1, 1e9)),
   }
+}
+
+/**
+ * A measure, from whatever shape the file has.
+ *
+ * Configs written before fitness could be several things carry a bare scalar name, and those must
+ * still open: a string becomes a one-measure spec. Anything unrecognised falls back to the
+ * default rather than throwing, like every other field here.
+ */
+function fitnessSpec(src: unknown, base: FitnessSpec): FitnessSpec {
+  if (typeof src === 'string') {
+    return FITNESS.some((f) => f.key === src) ? specFromKeys([src as FitnessKey], base.combine, base.window) : { ...base }
+  }
+  if (!src || typeof src !== 'object') return { ...base }
+  const r = src as Record<string, unknown>
+  const weights = Array.isArray(r.weights)
+    ? FITNESS.map((_, i) => num((r.weights as unknown[])[i], 0, 0, 1e3))
+    : base.weights.slice()
+  const combine = COMBINERS.some((c) => c.key === r.combine) ? (r.combine as FitnessSpec['combine']) : base.combine
+  const window = Math.round(num(r.window, base.window, 8, 4096))
+  // a spec with nothing selected would score every life identically, so fall back to the default
+  return weights.some((w) => w > 0) ? { weights, combine, window } : { ...base }
 }
 
 export function parseConfig(text: string): { init: Init; perf?: Perf } {

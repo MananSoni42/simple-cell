@@ -614,7 +614,10 @@ pressing the button gives you, and it stops the moment the screen is left.
 
 **World.** Three columns: a stats rail, the canvas, and a right rail that inspects an organism
 when one is clicked and offers the collection to place from while the Organism tool is armed. Controls along the bottom: start, pause, stop, rewind and a history
-scrubber, and 0.5× / 2× between 1/8 and 8192 ticks/s. `Space` pauses, `←`/`→` change speed,
+scrubber, and 0.5× / 2× between 1/8 and 32,768 ticks/s — a *request*, since what you get is
+1000 / (ms per tick) and no control can raise that. Measured with `npm run ceiling`: 13,700
+ticks/s for a default scale-1 world, 32,000 for a 48-particle one with bonds and reproduction off.
+The rail reports the rate achieved next to the one asked for. `Space` pauses, `←`/`→` change speed,
 `.` single-steps, `Backspace`/`J` rewinds, `Esc` closes the inspector or ends the run.
 **Shift-drag** scatters food; a **plain click** inspects an organism and rings it.
 
@@ -704,7 +707,8 @@ The simulation worker keeps a ring of snapshots. Two things keep it affordable: 
 **allocated once and overwritten in place**, and the sampling interval is derived from the *tick
 rate* so the world takes ~20 snapshots per second of wall clock however fast it is running.
 Both matter — allocating one per tick produced 0.5–3.5 GB/s of garbage at high rates and could
-bring the tab down. Measured at the 8192 ticks/s cap: 20 snapshots/s, under 2% of a core,
+bring the tab down. Sampling is derived from the rate, so the cost is flat however fast the world
+runs — at the 32,768 ticks/s cap: 20 snapshots/s, under 2% of a core,
 and no garbage at all.
 
 The world screen has a rewind button, a scrub slider over the held history, and
@@ -994,18 +998,67 @@ could not be switched off cleanly.
    on the organism, because recovering a sample from the weights would be wrong the moment the
    mean moved.
 
-### Fitness is a stated choice
+### Fitness is a stated choice, and it can be several things at once
 
-Nine scalars are offered, all exactly known at death. **Offspring is the default, and the only one
-that is not an invention** — it is the number the world was already keeping for its own reasons.
-Every other scalar is written down by us, so the UI says so, and the run record and the summary
-screen both name the measure that was used. Optimising "energy harvested" produces organisms good
-at harvesting energy, which is not the same as discovering what this world can support.
+Nine scalars are offered, all exactly known at death, and **any combination of them may be
+selected**. **Offspring is the default, and the only one that is not an invention** — it is the
+number the world was already keeping for its own reasons. Every other scalar is written down by
+us, so the UI says so, and the run record and the summary screen both name the measure used.
+Optimising "energy harvested" produces organisms good at harvesting energy, which is not the same
+as discovering what this world can support.
+
+**Several measures become one number by percentile, never by raw addition.** The nine scalars are
+not comparable: offspring is a zero-inflated integer under 15, lifespan runs to thousands, net
+energy goes negative, and foraging is `harvested / moved`, so an organism that barely moved
+produces an enormous outlier. Each selected scalar is therefore converted to its **percentile
+among recent deaths** (midranks for ties, plotting position `(r + ½)/(n + 1)` so the result is
+strictly inside `(0,1)`) before anything is combined. That transform is the only one immune to all
+of those at once, and it costs magnitude: ten times better and one percent better both just mean
+"ranked above".
+
+Three combiners, because they mean genuinely different things:
+
+| | |
+|---|---|
+| **add them up** | a weighted average: being strong at one measure pays for being weak at another |
+| **all of them** | a weighted geometric mean: being useless at any one drags the score down |
+| **no weak spot** | scored on the worst measure, with a small nudge from the rest (augmented Chebyshev) |
+
+All three agree exactly when one measure is selected — the augmenting term is divided back out for
+that reason. Weights are **equal across whatever is selected**: asking someone to balance
+"offspring" against "foraging" numerically is asking a question nobody can answer honestly, while
+ticking two boxes and being told they count the same is a claim that can be understood. Unequal
+weights stay representable in a config.
+
+### The measure can change while the world runs
+
+The right-hand rail is the learning panel whenever no organism is selected, and the measure is
+editable there. Nothing is discarded when it changes, because the cohort, the GA's pool and any
+in-flight batch all hold **raw scalar vectors** rather than scores: a change re-scores what is
+already there. A distribution learner's mean still encodes the old preference, which is real
+rather than a bug.
+
+Two consequences are load-bearing. **Scores are re-derived at every decision**, not at death:
+a percentile taken when an organism died was measured against a different population from one
+taken a thousand ticks later, and putting a whole batch on one footing is what makes a single
+measure behave exactly as it did before percentiles existed — every algorithm here is ordinal (a
+tournament, a rank-weighted sum, a top fraction), and a percentile is a monotone transform.
+And **the change is recorded**: the run keeps a timeline of every measure it optimised and when,
+because a run whose objective moved mid-flight cannot be compared with anything, and the summary
+says so.
 
 ### How a learner gets believed
 
 `npm run experiment` implements the protocol rather than leaving it to discipline: one world per
-seed handed to every variant, the controls always included, a measure fixed before the runs,
-medians with an inter-quartile range, and the paired per-seed difference. A single run proves
-nothing here. The first results are in LEARNING.md §0 — of the four algorithms, one (CEM) clearly
-works, and the measures nobody optimised moved with it.
+seed handed to every variant, the controls always included, a measure fixed before the runs (the
+runner refuses a variant that brings its own), medians with an inter-quartile range, and the
+paired per-seed difference. A single run proves nothing here.
+
+**Raw units are the statistic to believe, and the percentile column is not.** Random search cannot
+affect the world at all — its runs are bit-identical to the baseline — yet it scored +0.0025 with
+7 of 12 "wins" on a percentile statistic. That is the noise floor, and it is the same size as the
+effects being looked for, because percentiles compress a heavily-tied distribution. So the runner
+prints raw units first, per selected scalar, and keeps random search in every comparison as the
+calibration of how little the percentile column can detect. A run where the world died out before
+the measured window reports **no score** rather than zero, which would otherwise make a collapse
+look like a bad result instead of an absent one.

@@ -34,15 +34,12 @@ export class StatsPanel {
         <div class="sub" id="s-order-sub"></div></div>
       <div class="blk"><div class="row-k"><b>Lineages</b><i id="s-lineage"></i></div>
         <div class="sub" id="s-lineage-sub"></div></div>
-      <div class="blk" id="s-learn-blk" hidden><div class="row-k"><b>Learning</b><i id="s-learn"></i></div>
-        <div class="sub" id="s-learn-sub"></div></div>
       <div class="blk"><div class="row-k"><b>Mean lifespan</b><i id="s-life-head" class="dim"></i></div>
         <canvas id="c-life" width="248" height="38"></canvas>
         <div class="sub" id="s-life"></div></div>`
     for (const id of [
       's-tick', 's-rate', 's-world', 's-perf', 's-orgs', 's-orgs-sub', 's-food', 's-energy',
       's-energy-sub', 's-order', 's-order-sub', 's-lineage', 's-lineage-sub', 's-life', 's-life-head',
-      's-learn', 's-learn-sub', 's-learn-blk',
     ]) {
       this.el[id] = root.querySelector<HTMLElement>('#' + id)!
     }
@@ -97,19 +94,6 @@ export class StatsPanel {
     this.el['s-order-sub'].innerHTML =
       (parts.length ? parts.join(' &nbsp; ') : 'none joined') +
       `<br>${fmt.n(st.bondCount)} bonds standing`
-
-    // only when something is learning: an empty "Learning: none" block would be noise in a rail
-    // that is already dense
-    const lr = st.learner
-    this.el['s-learn-blk'].hidden = !lr
-    if (lr) {
-      set('s-learn', `${lr.name}`)
-      set(
-        's-learn-sub',
-        `${fmt.n(lr.seen)} lives scored on ${lr.fitness} · best ${fmt.sig(lr.best)} · ` +
-          `recent ${fmt.sig(lr.recent)} · ${fmt.n(lr.updates)} updates · holding ${fmt.n(lr.held)}`,
-      )
-    }
 
     set('s-lineage', `${fmt.n(c.lineages)} alive`)
     set('s-lineage-sub', `biggest ${fmt.n(c.biggestLineage)} · gen ${fmt.n(c.maxGen)} · children ${fmt.n(c.children)} (most ${fmt.n(c.maxChildren)}) · oldest ${fmt.n(c.oldest)}t`)

@@ -375,3 +375,22 @@ textarea { width: 100%; height: 110px; margin-bottom: 12px; }
 .palette .org-name { pointer-events: none; }
 .palette .org-card { cursor: pointer; }
 button.wide.on { border-color: var(--accent); color: var(--accent); background: rgba(122, 162, 255, 0.08); }
+
+/* the idle right rail: what the world is learning */
+.learn-on, .learn-off { font-size: 11px; line-height: 1.55; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: var(--r-s); background: var(--raised); margin-bottom: 9px; }
+.learn-on { border-color: rgba(122, 162, 255, 0.4); }
+.learn-on b { color: var(--accent); }
+.learn-off { color: var(--ink-3); }
+#c-learn { display: block; width: 100%; height: 52px; }
+.scalars { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
+.scalar { display: flex; justify-content: space-between; gap: 6px; font-size: 10px; color: var(--ink-3);
+  padding: 1px 0; border-bottom: 1px solid transparent; }
+.scalar b { color: var(--ink-2); font-weight: 400; }
+/* the measures being optimised, marked: this row is the reward-hack detector */
+.scalar.counted { color: var(--accent); }
+.scalar.counted b { color: var(--accent); }
+.measure .presets { margin-bottom: 4px; }
+.measure .presets button i.w { font-style: normal; color: var(--ink-3); margin-left: 5px; font-size: 10px; }
+.measure.compact .presets button { font-size: 10px; padding: 3px 7px; }
+.measure.compact .field-hint { font-size: 10px; }

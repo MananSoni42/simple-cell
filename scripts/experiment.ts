@@ -1,13 +1,15 @@
 import { writeFileSync } from 'node:fs'
 import { CONTROLS, type Variant, formatComparison, runExperiment } from '../src/core/experiment'
-import { LEARN_DEFAULTS, type FitnessKey } from '../src/core/learning'
+import { type Combiner, type FitnessKey, KEYS, specFromKeys } from '../src/core/fitness'
+import { LEARN_DEFAULTS } from '../src/core/learning'
 import { type Init, applyFoodLevel, initFromSeed } from '../src/core/params'
 
 /**
  * Paired learner comparison, headless.
  *
  * Usage:
- *   npm run experiment -- [--ticks 6000] [--seeds 10] [--fitness offspring] [--algos ga,es,cem]
+ *   npm run experiment -- [--ticks 6000] [--seeds 10] [--algos ga,es,cem]
+ *                         [--fitness offspring,together] [--combine geometric|sum|chebyshev]
  *                         [--spawn 20] [--out learning-run.json]
  *
  * The protocol is LEARNING.md §7: one world per seed handed to every variant, controls always
@@ -22,7 +24,13 @@ const flag = (name: string, fallback: string): string => {
 
 const ticks = Number(flag('ticks', '6000'))
 const nSeeds = Number(flag('seeds', '10'))
-const fitness = flag('fitness', 'offspring') as FitnessKey
+// several measures, comma-separated, combined the way --combine says: the runner fixes one
+// measure for every variant, since a run whose objective moved cannot be paired against anything
+const keys = flag('fitness', 'offspring')
+  .split(',')
+  .filter((k) => (KEYS as string[]).includes(k)) as FitnessKey[]
+const combine = flag('combine', 'geometric') as Combiner
+const fitness = specFromKeys(keys, combine)
 const algos = flag('algos', 'ga,es,cem').split(',').filter(Boolean)
 const spawnEvery = Number(flag('spawn', '25'))
 const out = flag('out', '')
@@ -81,7 +89,8 @@ const summary = result.comparisons.map((c) => {
     variant: c.variant,
     fitnessMedian: Number(c.median.toFixed(4)),
     pairedMedian: Number(c.medianPaired.toFixed(4)),
-    wins: `${c.wins}/${c.n}`,
+    wins: `${c.wins}/${c.pairs}`,
+    diedOut: c.empty,
     organisms: Number(mean((o) => o.organisms).toFixed(2)),
     peak: Number(mean((o) => o.peakOrganisms).toFixed(2)),
     meanAge: Number(mean((o) => o.meanAge).toFixed(1)),

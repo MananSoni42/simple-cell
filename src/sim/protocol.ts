@@ -2,7 +2,8 @@ import type { Perf } from '../compute/select'
 import type { Init } from '../core/params'
 import type { AggregateStats } from '../core/aggregates'
 import type { Census, LifeStats } from '../core/metrics'
-import type { LearnerStatus } from '../core/learning'
+import type { FitnessSpec } from '../core/fitness'
+import type { LearnAlgo, LearnerStatus } from '../core/learning'
 import type { OrganismFile } from '../core/organism'
 import type { RunRecord } from '../core/recorder'
 import type { OrderStats } from '../core/orders'
@@ -25,6 +26,10 @@ export type ToSim =
   | { kind: 'step' }
   | { kind: 'mark' } // remember the world, so the edit about to happen can be undone
   | { kind: 'undo' }
+  /** Change what counts as doing well, mid-run. The learner re-scores rather than restarting. */
+  | { kind: 'setFitness'; spec: FitnessSpec }
+  /** Change the learner itself, mid-run. This one does start over, and says so. */
+  | { kind: 'setLearner'; algo: LearnAlgo }
 
 export interface StatsSnapshot {
   tick: number
@@ -50,8 +55,11 @@ export interface StatsSnapshot {
   budded: number
   deaths: number
   recordAge: number
-  /** Present only when a learner is running, so the rail can stay quiet otherwise. */
-  learner?: LearnerStatus
+  /** Always present: a rail that cannot say "nothing is learning" is worse than one that can. */
+  learner: LearnerStatus
+  learnAlgo: LearnAlgo
+  /** The last few changes of measure, so a run can show that its objective moved. */
+  fitnessChanges: { tick: number; measure: string }[]
 }
 
 export interface RunReport {

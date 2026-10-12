@@ -93,8 +93,15 @@ export function mountSummary(root: HTMLElement, result: RunResult, hooks: { agai
               ? `<div class="note" style="margin-top:5px;color:var(--accent)">learned with
                  <b>${f.learner.name}</b> on <b>${f.learner.fitness}</b> —
                  ${fmt.n(f.learner.seen)} lives scored, ${fmt.n(f.learner.updates)} updates,
-                 best ${fmt.sig(f.learner.best)}, last ${fmt.sig(f.learner.recent)} on average.
-                 A chosen measure is part of the result, not a property of the world.</div>`
+                 best ${fmt.sig(f.learner.best)}, last ${fmt.sig(f.learner.recent)} on average
+                 (percentiles among recent deaths).
+                 A chosen measure is part of the result, not a property of the world.${
+                   f.fitnessChanges?.length
+                     ? ` <b>The measure changed mid-run</b> — ${f.fitnessChanges
+                         .map((c) => `tick ${fmt.n(c.tick)} → ${c.measure}`)
+                         .join(', ')} — so this run is not comparable with any other.`
+                     : ''
+                 }</div>`
               : ''
           }
         </div>

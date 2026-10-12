@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { FITNESS, type LearnAlgo, LEARN_DEFAULTS, type LifeRecord, type LifeStats, N_GENE_BRAIN, fitnessOf, makeLearner } from '../src/core/learning'
+import { FITNESS, type LifeStats, fitnessOf, isImplicitOnly, keysOf } from '../src/core/fitness'
+import { type LearnAlgo, LEARN_DEFAULTS, type LifeRecord, N_GENE_BRAIN, makeLearner } from '../src/core/learning'
 import { N_WLIMB } from '../src/core/neurons'
 import { type Init, initFromSeed } from '../src/core/params'
 import { Rng } from '../src/core/rng'
@@ -51,7 +52,8 @@ describe('fitness is a stated choice', () => {
 
   it('names offspring as the one scalar the world was already counting', () => {
     expect(FITNESS.filter((f) => !f.invented).map((f) => f.key)).toEqual(['offspring'])
-    expect(LEARN_DEFAULTS.fitness).toBe('offspring')
+    expect(keysOf(LEARN_DEFAULTS.fitness)).toEqual(['offspring'])
+    expect(isImplicitOnly(LEARN_DEFAULTS.fitness)).toBe(true)
   })
 })
 
@@ -76,7 +78,9 @@ describe('the learner seam', () => {
     const st = ga.status()
     expect(st.seen).toBe(20)
     expect(st.held).toBe(8)
-    expect(st.best).toBe(19)
+    // scores are percentiles now, so the best is near the top of its cohort rather than its raw value
+    expect(st.best).toBeGreaterThan(0.9)
+    expect(st.best).toBeLessThanOrEqual(1)
     const g = ga.genomeForSpawn(1000)
     expect(g).not.toBeNull()
     expect(g!.wBrain.length).toBe(N_GENE_BRAIN)
@@ -158,7 +162,7 @@ describe('the learner seam', () => {
     const rs = makeLearner({ ...LEARN_DEFAULTS, algo: 'random', warmup: 0 }, 41)
     const rng = new Rng(43)
     for (let i = 0; i < 10; i++) rs.observe(life(rng, 0, i), 100)
-    expect(rs.status().best).toBe(9)
+    expect(rs.status().best).toBeGreaterThan(0.8)
     expect(rs.status().held).toBe(1)
     expect(rs.genomeForSpawn(100)).toBeNull() // spawns stay random: that is the point
   })

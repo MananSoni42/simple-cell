@@ -73,6 +73,8 @@ export interface RunRecord {
     clampedPct: number
     /** How the run learned, if it did. A run has to record this or its numbers mean nothing. */
     learner?: LearnerStatus
+    /** When the measure changed, if it did. Without this the line above describes only the end. */
+    fitnessChanges?: { tick: number; measure: string }[]
   }
 }
 
@@ -200,6 +202,7 @@ export class Recorder {
         recordAge: Math.max(w.recordAge, c.oldest),
         clampedPct: w.nSteps > 0 ? (100 * w.nClamped) / w.nSteps : 0,
         learner: w.init.learn.algo === 'none' ? undefined : w.learner.status(),
+        fitnessChanges: w.fitnessChanges.length ? w.fitnessChanges.slice() : undefined,
       },
     }
   }

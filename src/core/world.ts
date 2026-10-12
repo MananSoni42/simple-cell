@@ -2,7 +2,8 @@ import { type ForceBackend, serialBackend } from './backend'
 import { type KernelArrays, type KernelParams } from './forcekernel'
 import { AggregateTracker } from './aggregates'
 import { Bonds, bondForce } from './bonds'
-import { LEARN_DEFAULTS, type Learner, type LifeStats, makeLearner } from './learning'
+import { type FitnessSpec, describeSpec } from './fitness'
+import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, makeLearner } from './learning'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
 import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
@@ -208,7 +209,13 @@ export class World {
    * How new organisms get their weights. `none` by default, in which case this object only ever
    * answers "let chance decide" and the world behaves exactly as it did before learning existed.
    */
-  readonly learner: Learner
+  learner: Learner
+  /**
+   * Every time the measure changed, and to what. A run whose objective moved mid-flight cannot be
+   * compared against anything, so it has to be able to say so — otherwise the summary's "learned
+   * with X on Y" is a lie about most of the run.
+   */
+  readonly fitnessChanges: { tick: number; measure: string }[] = []
   lineageCounter = 1
   nClamped = 0 // how often the per-tick step guardrail has had to bite
   nSteps = 0
@@ -492,6 +499,26 @@ export class World {
     let e = 0
     for (let i = 0; i < this.cap; i++) if (this.alive[i]) e += this.energy[i]
     return e
+  }
+
+  /**
+   * Point the learner at a different measure while the world runs. Nothing is discarded: the
+   * cohort and the pool hold raw scalars, so this re-scores what is already there.
+   */
+  retargetFitness(spec: FitnessSpec): void {
+    this.init.learn = { ...this.init.learn, fitness: spec }
+    this.learner.retarget(spec)
+    this.fitnessChanges.push({ tick: this.tick, measure: describeSpec(spec) })
+  }
+
+  /**
+   * Swap the algorithm itself. Unlike a change of measure this *does* start over — a pool of
+   * genomes and a distribution's mean are not interchangeable — so it is recorded as a change too.
+   */
+  setLearner(algo: LearnConfig['algo']): void {
+    this.init.learn = { ...this.init.learn, algo }
+    this.learner = makeLearner(this.init.learn, this.init.seed ^ this.tick)
+    this.fitnessChanges.push({ tick: this.tick, measure: `${algo} from scratch` })
   }
 
   /** Everything one finished life amounts to, as the learner and the collection both want it. */

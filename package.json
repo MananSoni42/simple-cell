@@ -14,7 +14,8 @@
     "golden": "vite-node scripts/golden.ts",
     "profile": "vite-node scripts/profile.ts",
     "baseline": "vite-node scripts/baseline-stats.ts",
-    "experiment": "vite-node scripts/experiment.ts"
+    "experiment": "vite-node scripts/experiment.ts",
+    "ceiling": "vite-node scripts/ceiling.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

@@ -17,10 +17,37 @@ two controls, the spawn source, a Learning tab, and the paired experiment runner
 | Per-organism counters (§8.1) | `core/world.ts` | harvested, spent, moved, meals, order-ticks, peak reserve |
 | `Learner` seam (§8.3) | `core/learning.ts` | two events, one question: `genomeForSpawn`, `observe` |
 | `none`, random search (E1), steady-state GA (A1), ES (A2), CEM (A4) | `core/learning.ts` | one interface, so they are directly comparable |
-| Nine fitness scalars (§5) | `core/learning.ts` | offspring is the default and the only non-invented one |
+| Nine fitness scalars, **any combination** (§5.28) | `core/fitness.ts` | percentile-normalised, three combiners; offspring is the default and the only non-invented one |
+| Changing the measure **while a world runs** | right-hand rail | re-scores rather than restarts; the run keeps a timeline |
 | `share` — the spawn source (§8.4) | `Init.learn.share` | 0 = watching only, 1 = every spawn from the learner |
 | Learning tab (§8.5) | `ui/setup.ts` | carried in the config, the URL and the run record |
 | Paired experiment runner (§8.6) | `core/experiment.ts`, `npm run experiment` | §7's protocol, implemented |
+
+### Several measures, one number
+
+Each selected scalar becomes its **percentile among recent deaths** before anything is combined —
+midranks for ties, plotting position `(r + ½)/(n + 1)` so the result is strictly inside `(0,1)`.
+This is §5.28 made concrete, and the transform is not a preference: offspring is a zero-inflated
+integer under 15, lifespan runs to thousands, net energy goes negative, and foraging is
+`harvested / moved`, so one organism that barely moved produces an outlier large enough to collapse
+a z-score for everyone else. Ranks are immune to all four at once.
+
+Three combiners — a weighted sum (measures substitute for each other), a weighted geometric mean
+(they do not), and augmented Chebyshev (scored on the worst). All three agree exactly when a single
+measure is selected.
+
+**Two properties worth knowing about:**
+
+- **A single measure behaves exactly as it did before percentiles existed.** Every algorithm here
+  is ordinal — a tournament, a rank-weighted sum, a top fraction — and a percentile is a monotone
+  transform, so nothing changes. Verified: the 12-seed result below is numerically identical to the
+  pre-percentile run. This only held once scores were re-derived **at every decision** rather than
+  at death; a percentile taken when an organism died was measured against a different population
+  from one taken a thousand ticks later, and a batch mixing the two is not ordinally faithful.
+- **The score is non-stationary by construction.** The same life scores differently depending on
+  when it ended, because the cohort moves. In a world with food regimes that is arguably the right
+  statement — "better than your contemporaries" — but it makes the optimised number useless as a
+  progress metric. See the measurement trap below, which this caused.
 
 **What is deliberately not built:** anything that changes a brain *during* a life (C1–C3), any
 change to structure (B1–B2), and every LLM path (D). Budding is also untouched — it is already
@@ -56,8 +83,32 @@ the paired per-seed difference against the learner being off.
 | ES | 0.352 | 0.251–0.507 | +0.066 | 8/12 |
 | **CEM** | **0.453** | 0.374–0.593 | **+0.173** | **11/12** |
 
-**On net energy (harvested − spent):** off 9.68 → CEM 33.71, paired +19.90, **11/12** seeds. GA
-−1.65 (4/12), ES +0.74 (7/12).
+**On net energy (harvested − spent):** off 9.68 → CEM 33.71, paired +19.90, **11/12** seeds.
+
+### The measurement trap this uncovered
+
+The runner originally compared variants on the *percentile* score, and reported that CEM — which
+the raw numbers show working — did **nothing**. The reason is structural: a percentile against your
+own cohort is zero-sum, so lifting the whole population lifts the cohort with it and the mean stays
+at 0.5. Scoring every variant against a *frozen* cohort from the baseline run of the same seed
+fixes the zero-sum problem but not the sensitivity one, because percentiles compress a heavily-tied
+distribution — most organisms leave no children, so they all share a rank.
+
+The control settles it. **Random search cannot affect the world at all** (its runs are bit-identical
+to the baseline), yet on the percentile statistic it scored **+0.002 with 7 of 12 "wins"**. That is
+the noise floor, and it is the size of the effects being looked for:
+
+| variant | raw offspring | vs base | wins | percentile | vs base | wins |
+|---|---|---|---|---|---|---|
+| off | 0.283 | — | — | 0.498 | — | — |
+| random search | 0.283 | +0.000 | 0/12 | 0.500 | +0.002 | 7/12 |
+| GA | 0.346 | +0.004 | 7/12 | 0.501 | +0.003 | 9/12 |
+| ES | 0.352 | +0.066 | 8/12 | 0.496 | −0.008 | 5/12 |
+| **CEM** | **0.452** | **+0.173** | **11/12** | 0.496 | −0.002 | 4/12 |
+
+**Percentiles are right for selection and wrong for measurement.** The runner now prints raw units
+first, keeps random search in every comparison as the calibration, and reports *no score* rather
+than zero when a world died out before the measured window.
 
 **Reading it honestly.**
 
@@ -73,6 +124,10 @@ the paired per-seed difference against the learner being off.
 - **`off` and `random search` are identical by construction**, and that is the control working:
   E1 keeps the best genome it sees and never spawns it, so its *fitness* column must match `off`
   exactly. Its `best` column is the luck yardstick.
+- **A combination is harder than one measure.** On `offspring + togetherness` combined
+  geometrically, CEM lands inside the noise floor (−0.020, 3/8 seeds). Plausibly because both
+  scalars are zero for most organisms, so the combined score is nearly flat and there is little
+  to climb — but 8 seeds cannot distinguish that from variance.
 - **Not yet done:** the ablation (§7) — turn CEM off mid-run and see whether the gain persists.
   And every number here is one world shape; `harsh`, `drifting` and `pulsing` are untested.
 

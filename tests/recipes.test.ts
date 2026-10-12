@@ -79,6 +79,7 @@ describe('a world from two dials', () => {
   it('never rolls the two characters that make a dull first world', () => {
     for (let seed = 0; seed < 300; seed++) {
       const r = randomRecipe(seed)
+      expect(r.chemistry).not.toBe('random')
       expect(r.chemistry).not.toBe('skittish')
       expect(r.world).not.toBe('plenty')
       expect(r.scale).toBe(1)

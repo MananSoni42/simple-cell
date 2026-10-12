@@ -1,3 +1,12 @@
+import {
+  Cohort,
+  DEFAULT_SPEC,
+  type FitnessSpec,
+  type LifeStats,
+  N_SCALARS,
+  describeSpec,
+  scalarsOf,
+} from './fitness'
 import { N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
 import { Rng } from './rng'
 
@@ -35,65 +44,8 @@ export const LEARNERS: { key: LearnAlgo; name: string; blurb: string }[] = [
   { key: 'cem', name: 'Cross-entropy', blurb: 'refits a mean and a spread per weight from the best of each batch; narrows as it converges' },
 ]
 
-/** What an organism's life came to, in numbers the world already keeps. */
-export interface LifeStats {
-  age: number
-  children: number
-  generation: number
-  harvested: number
-  spent: number
-  moved: number
-  meals: number
-  orderTicks: number
-  peakReserve: number
-}
-
-export type FitnessKey =
-  | 'offspring'
-  | 'lifespan'
-  | 'harvested'
-  | 'net'
-  | 'per_tick'
-  | 'peak'
-  | 'efficiency'
-  | 'together'
-  | 'meals'
-
-export const FITNESS: { key: FitnessKey; name: string; blurb: string; invented: boolean }[] = [
-  { key: 'offspring', name: 'offspring', blurb: 'children left behind — the only one the world was already counting for its own reasons', invented: false },
-  { key: 'lifespan', name: 'lifespan', blurb: 'ticks lived', invented: true },
-  { key: 'harvested', name: 'energy taken', blurb: 'energy taken in from food over a whole life', invented: true },
-  { key: 'net', name: 'net energy', blurb: 'energy taken in, less everything spent on upkeep, movement and signalling', invented: true },
-  { key: 'per_tick', name: 'energy a tick', blurb: 'energy taken in per tick alive — the cleanest "is it good at living"', invented: true },
-  { key: 'peak', name: 'peak reserve', blurb: 'the most it ever held at once', invented: true },
-  { key: 'efficiency', name: 'foraging', blurb: 'energy taken in per unit of distance travelled', invented: true },
-  { key: 'together', name: 'togetherness', blurb: 'time spent joined to others, weighted by how large the compound was', invented: true },
-  { key: 'meals', name: 'meals', blurb: 'how many times it ate', invented: true },
-]
-
-/** All scalars are known exactly at death, and none of them can be negative-infinite. */
-export function fitnessOf(key: FitnessKey, s: LifeStats): number {
-  switch (key) {
-    case 'offspring':
-      return s.children
-    case 'lifespan':
-      return s.age
-    case 'harvested':
-      return s.harvested
-    case 'net':
-      return s.harvested - s.spent
-    case 'per_tick':
-      return s.harvested / Math.max(1, s.age)
-    case 'peak':
-      return s.peakReserve
-    case 'efficiency':
-      return s.harvested / Math.max(1, s.moved)
-    case 'together':
-      return s.orderTicks
-    case 'meals':
-      return s.meals
-  }
-}
+export { FITNESS, type FitnessKey, type LifeStats, fitnessOf, scalarsOf } from './fitness'
+export { COMBINERS, type Combiner, type FitnessSpec, describeSpec, keysOf, specFromKeys } from './fitness'
 
 /** One organism's weights, flattened. Brain first, then limb. */
 export interface Genome {
@@ -112,9 +64,13 @@ export interface LifeRecord {
   diedAt: number
 }
 
+/** How many progress samples a learner keeps for the graph in the world screen. */
+const HISTORY = 96
+
 export interface LearnConfig {
   algo: LearnAlgo
-  fitness: FitnessKey
+  /** Which measures count, and how they are combined. */
+  fitness: FitnessSpec
   /** Learn nothing before this tick, so startup transients do not poison the first updates. */
   warmup: number
   /** Share of new organisms whose weights come from the learner rather than from chance. */
@@ -135,7 +91,7 @@ export interface LearnConfig {
 
 export const LEARN_DEFAULTS: LearnConfig = {
   algo: 'none',
-  fitness: 'offspring',
+  fitness: DEFAULT_SPEC(),
   warmup: 500,
   share: 1,
   sigma: 0.15,
@@ -155,11 +111,19 @@ export interface LearnerStatus {
   /** Batch updates applied, or pool inserts for the GA. */
   updates: number
   best: number
-  /** Mean fitness of the most recent window of deaths, so progress is visible. */
+  /** Mean score of the most recent window of deaths, so progress is visible. */
   recent: number
   /** How many genomes the learner currently has to draw from. */
   held: number
-  fitness: FitnessKey
+  /** What is being optimised, and in words. */
+  spec: FitnessSpec
+  fitness: string
+  /** Raw mean of every scalar over the cohort, so a reward hack is visible. */
+  means: number[]
+  /** How many deaths the percentiles are measured against. */
+  cohort: number
+  /** Progress: the mean and the best score, sampled as lives are scored. */
+  history: { recent: number[]; best: number[]; tick: number[] }
 }
 
 /**
@@ -172,11 +136,19 @@ export abstract class Learner {
   protected seen = 0
   protected updates = 0
   protected best = -Infinity
-  /** A short window of recent fitness, so "is it improving" can be answered without the archive. */
+  /** A short window of recent scores, so "is it improving" can be answered without the archive. */
   private readonly window = new Float64Array(32)
   private windowN = 0
   protected tick = 0
   private nextId = 1
+  /** The recent dead as raw scalar vectors; percentiles and re-scoring both come from here. */
+  protected cohort: Cohort
+  /** Progress, sampled every few lives, bounded: it is for a graph, not for an archive. */
+  private readonly hRecent = new Float64Array(HISTORY)
+  private readonly hBest = new Float64Array(HISTORY)
+  private readonly hTick = new Float64Array(HISTORY)
+  private hN = 0
+  private readonly scratch = new Float64Array(N_SCALARS)
 
   constructor(
     readonly cfg: LearnConfig,
@@ -184,7 +156,36 @@ export abstract class Learner {
   ) {
     // its own stream, so switching a learner on cannot move a single food particle
     this.rng = new Rng((seed ^ 0x51ed270b) | 0)
+    this.cohort = new Cohort(cfg.fitness.window)
   }
+
+  /**
+   * Point the learner at a different measure, mid-run if need be.
+   *
+   * Nothing is thrown away: the cohort and every stored genome hold *raw* scalar vectors, so the
+   * pool and any in-flight batch are simply re-scored under the new preference. The distribution
+   * learners' means still encode the old one, which is real rather than a bug — a mean that was
+   * moved toward offspring does not forget that because the question changed.
+   */
+  retarget(spec: FitnessSpec): void {
+    this.cfg.fitness = spec
+    this.best = -Infinity
+    this.windowN = 0
+    this.window.fill(0)
+    this.rescore()
+  }
+
+  /**
+   * Re-derive every stored score from the raw scalars, against the cohort as it now stands.
+   *
+   * Called before any decision, not just on a change of measure, and that matters more than it
+   * looks: a percentile is taken against the cohort at the moment of death, so two samples in one
+   * batch that died minutes apart were ranked against different populations. Re-scoring together
+   * puts them on one footing — which is what makes a single measure behave exactly as it did
+   * before percentiles existed, since every algorithm here is ordinal (a tournament, a
+   * rank-weighted sum, a top fraction) and a percentile is a monotone transform of the raw value.
+   */
+  protected rescore(): void {}
 
   abstract readonly algo: LearnAlgo
 
@@ -201,32 +202,70 @@ export abstract class Learner {
   observe(r: LifeRecord, tick: number): void {
     this.tick = tick
     if (tick < this.cfg.warmup) return
-    const f = fitnessOf(this.cfg.fitness, r.stats)
+    const scalars = scalarsOf(r.stats, this.scratch)
+    // the life joins the cohort before it is scored against it, so a percentile always includes
+    // the thing being measured and the first death is not a divide-by-nothing
+    this.cohort.push(scalars)
+    const f = this.cohort.score(scalars, this.cfg.fitness)
     this.seen++
     this.best = Math.max(this.best, f)
     this.window[this.windowN % this.window.length] = f
     this.windowN++
-    this.score(r, f)
+    this.score(r, scalars, f)
+    if (this.seen % 4 === 0) this.remember()
   }
 
-  protected abstract score(r: LifeRecord, fitness: number): void
+  private remember(): void {
+    const i = this.hN % HISTORY
+    this.hRecent[i] = this.recentMean()
+    this.hBest[i] = this.best === -Infinity ? 0 : this.best
+    this.hTick[i] = this.tick
+    this.hN++
+  }
+
+  private recentMean(): number {
+    const n = Math.min(this.windowN, this.window.length)
+    if (n === 0) return 0
+    let sum = 0
+    for (let i = 0; i < n; i++) sum += this.window[i]
+    return sum / n
+  }
+
+  /** Oldest first, so a graph can be drawn straight from it. */
+  private series(): { recent: number[]; best: number[]; tick: number[] } {
+    const n = Math.min(this.hN, HISTORY)
+    const start = this.hN > HISTORY ? this.hN % HISTORY : 0
+    const recent: number[] = []
+    const best: number[] = []
+    const tick: number[] = []
+    for (let k = 0; k < n; k++) {
+      const i = (start + k) % HISTORY
+      recent.push(this.hRecent[i])
+      best.push(this.hBest[i])
+      tick.push(this.hTick[i])
+    }
+    return { recent, best, tick }
+  }
+
+  protected abstract score(r: LifeRecord, scalars: Float64Array, fitness: number): void
 
   /** Periodic hook; only the batch algorithms use it, and only to age things out. */
   review(_tick: number): void {}
 
   status(): LearnerStatus {
-    const n = Math.min(this.windowN, this.window.length)
-    let sum = 0
-    for (let i = 0; i < n; i++) sum += this.window[i]
     return {
       algo: this.algo,
       name: LEARNERS.find((l) => l.key === this.algo)?.name ?? this.algo,
       seen: this.seen,
       updates: this.updates,
       best: this.best === -Infinity ? 0 : this.best,
-      recent: n === 0 ? 0 : sum / n,
+      recent: this.recentMean(),
       held: this.held(),
-      fitness: this.cfg.fitness,
+      spec: this.cfg.fitness,
+      fitness: describeSpec(this.cfg.fitness),
+      means: Array.from(this.cohort.means()),
+      cohort: this.cohort.size,
+      history: this.series(),
     }
   }
 
@@ -249,7 +288,7 @@ export abstract class Learner {
 
   /** Fixed, so a snapshot ring can be allocated once. */
   saveSize(): number {
-    return 8 + this.window.length
+    return 9 + this.window.length + 3 * HISTORY + this.cohort.saveSize()
   }
 
   saveInto(a: Float64Array, off: number): void {
@@ -262,7 +301,13 @@ export abstract class Learner {
     a[off + 5] = s
     a[off + 6] = spare === null ? 0 : spare
     a[off + 7] = spare === null ? 0 : 1
-    a.set(this.window, off + 8)
+    a[off + 8] = this.hN
+    let o = off + 9
+    for (const arr of [this.window, this.hRecent, this.hBest, this.hTick]) {
+      a.set(arr, o)
+      o += arr.length
+    }
+    this.cohort.saveInto(a, o)
   }
 
   loadFrom(a: Float64Array, off: number): void {
@@ -272,7 +317,13 @@ export abstract class Learner {
     this.windowN = a[off + 3]
     this.nextId = a[off + 4]
     this.rng.setState([a[off + 5], a[off + 7] ? a[off + 6] : null])
-    this.window.set(a.subarray(off + 8, off + 8 + this.window.length))
+    this.hN = a[off + 8]
+    let o = off + 9
+    for (const arr of [this.window, this.hRecent, this.hBest, this.hTick]) {
+      arr.set(a.subarray(o, o + arr.length))
+      o += arr.length
+    }
+    this.cohort.loadFrom(a, o)
   }
 }
 
@@ -307,7 +358,7 @@ class RandomSearch extends Learner {
     return null
   }
 
-  protected score(r: LifeRecord, fitness: number): void {
+  protected score(r: LifeRecord, _scalars: Float64Array, fitness: number): void {
     if (fitness >= this.best) {
       this.bestGenome = join(r.wBrain, r.wLimb)
       this.updates++
@@ -348,6 +399,8 @@ class Ga extends Learner {
   private genes: Float64Array
   private fit: Float64Array
   private born: Float64Array
+  /** Raw scalars per pool entry, so changing what counts re-scores the pool instead of voiding it. */
+  private raw: Float64Array
   private n = 0
 
   constructor(cfg: LearnConfig, seed: number) {
@@ -356,6 +409,13 @@ class Ga extends Learner {
     this.genes = new Float64Array(cap * N_GENE)
     this.fit = new Float64Array(cap).fill(-Infinity)
     this.born = new Float64Array(cap)
+    this.raw = new Float64Array(cap * N_SCALARS)
+  }
+
+  protected rescore(): void {
+    for (let i = 0; i < this.n; i++) {
+      this.fit[i] = this.cohort.score(this.raw.subarray(i * N_SCALARS, (i + 1) * N_SCALARS), this.cfg.fitness)
+    }
   }
 
   private get cap(): number {
@@ -390,13 +450,16 @@ class Ga extends Learner {
     return this.genome(wBrain, wLimb)
   }
 
-  protected score(r: LifeRecord, fitness: number): void {
+  protected score(r: LifeRecord, scalars: Float64Array, fitness: number): void {
+    // every entry against the same cohort, so "better than the worst held" is a fair comparison
+    this.rescore()
     // stale entries first: fitness earned under a food regime that has since changed misleads
     const cutoff = this.tick - this.cfg.maxAge
     for (let i = 0; i < this.n; i++) {
       if (this.born[i] < cutoff) {
         this.n--
         this.genes.copyWithin(i * N_GENE, this.n * N_GENE, (this.n + 1) * N_GENE)
+        this.raw.copyWithin(i * N_SCALARS, this.n * N_SCALARS, (this.n + 1) * N_SCALARS)
         this.fit[i] = this.fit[this.n]
         this.born[i] = this.born[this.n]
         this.fit[this.n] = -Infinity
@@ -412,35 +475,34 @@ class Ga extends Learner {
     }
     if (slot < 0) return
     this.genes.set(join(r.wBrain, r.wLimb), slot * N_GENE)
+    this.raw.set(scalars.subarray(0, N_SCALARS), slot * N_SCALARS)
     this.fit[slot] = fitness
     this.born[slot] = this.tick
     this.updates++
   }
 
   saveSize(): number {
-    return super.saveSize() + 1 + this.cap * (N_GENE + 2)
+    return super.saveSize() + 1 + this.cap * (N_GENE + 2 + N_SCALARS)
   }
 
   saveInto(a: Float64Array, off: number): void {
     super.saveInto(a, off)
     let o = off + super.saveSize()
     a[o++] = this.n
-    a.set(this.genes, o)
-    o += this.genes.length
-    a.set(this.fit, o)
-    o += this.fit.length
-    a.set(this.born, o)
+    for (const arr of [this.genes, this.fit, this.born, this.raw]) {
+      a.set(arr, o)
+      o += arr.length
+    }
   }
 
   loadFrom(a: Float64Array, off: number): void {
     super.loadFrom(a, off)
     let o = off + super.saveSize()
     this.n = a[o++]
-    this.genes.set(a.subarray(o, o + this.genes.length))
-    o += this.genes.length
-    this.fit.set(a.subarray(o, o + this.fit.length))
-    o += this.fit.length
-    this.born.set(a.subarray(o, o + this.born.length))
+    for (const arr of [this.genes, this.fit, this.born, this.raw]) {
+      arr.set(a.subarray(o, o + arr.length))
+      o += arr.length
+    }
   }
 }
 
@@ -448,6 +510,13 @@ class Ga extends Learner {
 interface Pending {
   id: number
   eps: Float64Array
+}
+
+/** A sample whose organism has died, waiting for its batch to fill. */
+interface Scored {
+  eps: Float64Array
+  /** Raw scalars, kept so a change of measure re-scores the batch rather than wasting it. */
+  raw: Float64Array
 }
 
 /**
@@ -458,8 +527,14 @@ interface Pending {
 abstract class Distribution extends Learner {
   protected mean = new Float64Array(N_GENE)
   protected pending: Pending[] = []
-  protected batchEps: Float64Array[] = []
+  protected batch: Scored[] = []
   protected batchFit: number[] = []
+
+  protected rescore(): void {
+    for (let i = 0; i < this.batch.length; i++) {
+      this.batchFit[i] = this.cohort.score(this.batch[i].raw, this.cfg.fitness)
+    }
+  }
 
   protected abstract sigmaAt(i: number): number
 
@@ -483,15 +558,16 @@ abstract class Distribution extends Learner {
     return g
   }
 
-  protected score(r: LifeRecord, fitness: number): void {
+  protected score(r: LifeRecord, scalars: Float64Array, fitness: number): void {
     const k = this.pending.findIndex((p) => p.id === r.id)
     if (k < 0) return // not one of ours: a random spawn, or a sample lost to a rewind
     const [p] = this.pending.splice(k, 1)
-    this.batchEps.push(p.eps)
+    this.batch.push({ eps: p.eps, raw: Float64Array.from(scalars.subarray(0, N_SCALARS)) })
     this.batchFit.push(fitness)
     if (this.batchFit.length >= Math.max(2, Math.round(this.cfg.batch))) {
+      this.rescore() // one cohort for the whole batch, not one per death
       this.update()
-      this.batchEps = []
+      this.batch = []
       this.batchFit = []
       this.updates++
     }
@@ -531,7 +607,7 @@ abstract class Distribution extends Learner {
     this.mean.set(a.subarray(o, o + N_GENE))
     // whatever was in flight belonged to a future that no longer exists
     this.pending = []
-    this.batchEps = []
+    this.batch = []
     this.batchFit = []
   }
 }
@@ -550,7 +626,7 @@ class Es extends Distribution {
     const scale = this.cfg.lr / (n * this.cfg.sigma)
     for (let i = 0; i < N_GENE; i++) {
       let g = 0
-      for (let k = 0; k < n; k++) g += u[k] * this.batchEps[k][i]
+      for (let k = 0; k < n; k++) g += u[k] * this.batch[k].eps[i]
       this.mean[i] += scale * g
     }
   }
@@ -578,11 +654,11 @@ class Cem extends Distribution {
     const floor = this.cfg.sigma * 0.1
     for (let i = 0; i < N_GENE; i++) {
       let m = 0
-      for (const k of take) m += this.mean[i] + this.sigma[i] * this.batchEps[k][i]
+      for (const k of take) m += this.mean[i] + this.sigma[i] * this.batch[k].eps[i]
       m /= take.length
       let v = 0
       for (const k of take) {
-        const d = this.mean[i] + this.sigma[i] * this.batchEps[k][i] - m
+        const d = this.mean[i] + this.sigma[i] * this.batch[k].eps[i] - m
         v += d * d
       }
       this.mean[i] = m

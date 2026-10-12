@@ -224,7 +224,10 @@ function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnap
     budded: w.nBudded,
     deaths: w.nDeaths,
     recordAge: w.recordAge,
-    learner: w.init.learn.algo === 'none' ? undefined : w.learner.status(),
+    // sent whether or not anything is learning: "nothing is" is the thing the rail has to say
+    learner: w.learner.status(),
+    learnAlgo: w.init.learn.algo,
+    fitnessChanges: w.fitnessChanges.slice(-8),
   }
 }
 
@@ -398,6 +401,18 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       if (w) markEdit(w)
     } else if (m.kind === 'undo') {
       undoWanted = true
+    } else if (m.kind === 'setFitness') {
+      const w = world
+      if (w) {
+        w.retargetFitness(m.spec)
+        post({ kind: 'stats', stats: snapshot(w, 0, null) })
+      }
+    } else if (m.kind === 'setLearner') {
+      const w = world
+      if (w) {
+        w.setLearner(m.algo)
+        post({ kind: 'stats', stats: snapshot(w, 0, null) })
+      }
     }
     else if (m.kind === 'step') {
       paused = true

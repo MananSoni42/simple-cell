@@ -18,12 +18,23 @@ import { type OrganismFile, checkCompatibility, parseOrganism } from './core/org
 import { download } from './ui/config'
 
 const MIN_RATE = 0.125
-const MAX_RATE = 8192 // above this the simulation outruns its own bookkeeping
+/**
+ * The rate control is a *request*, not a promise: what you get is 1000 / (ms per tick), and no
+ * setting can raise that. The cap sits just above what the smallest sensible world can deliver —
+ * measured at 32,000 ticks/s for a 48-particle world with bonds and reproduction off, and 13,700
+ * for a default one (`npm run ceiling`). Asking for more than the world can give is harmless; the
+ * rail reports the rate actually achieved beside the one requested.
+ */
+const MAX_RATE = 32768
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T
 
 const renderer = new Renderer($<HTMLCanvasElement>('c'), $('stage'))
 const stats = new StatsPanel($('stats'))
 const inspect = new InspectPanel($('inspect'), (o) => send({ kind: 'placeSaved', organism: o }))
+inspect.learningHooks({
+  setFitness: (spec) => send({ kind: 'setFitness', spec }),
+  setLearner: (algo) => send({ kind: 'setLearner', algo }),
+})
 const bPlay = $('b-play')
 const bPause = $('b-pause')
 const bRate = $('b-rate')
@@ -216,7 +227,11 @@ function startWorld(init: Init, perf: Perf, build = true): void {
       send({ kind: 'pause', paused })
       router.go('world')
       syncControls()
-    } else if (m.kind === 'stats') latest = m.stats
+    } else if (m.kind === 'stats') {
+      latest = m.stats
+      // the idle rail is the learning panel, so it follows the stats rather than a click
+      if (!inspect.open && tool !== 'organism') inspect.learning(m.stats.learner, m.stats.learnAlgo, m.stats.fitnessChanges)
+    }
     else if (m.kind === 'undoDepth') bUndo.disabled = m.depth === 0
     else if (m.kind === 'organism') inspect.show(m.organism)
     else if (m.kind === 'builtConfig') {

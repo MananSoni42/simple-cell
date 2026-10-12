@@ -16,7 +16,9 @@ import {
   substepsFor,
   sustenanceRate,
 } from '../core/params'
-import { FITNESS, type FitnessKey, LEARNERS, type LearnAlgo } from '../core/learning'
+import { describeSpec } from '../core/fitness'
+import { LEARNERS, type LearnAlgo } from '../core/learning'
+import { measurePicker } from './measure'
 import { MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
 import { capture } from '../render/renderer'
@@ -690,7 +692,7 @@ export function mountSetup(
       (l) => `<button type="button" data-algo="${l.key}" class="${l.key === L.algo ? 'on' : ''}">${l.name}</button>`,
     ).join('')
     q('#s-algo-hint').textContent = LEARNERS.find((l) => l.key === L.algo)?.blurb ?? ''
-    q('#s-learn-tag').textContent = on ? `on ${FITNESS.find((f) => f.key === L.fitness)?.name}` : 'off — the control'
+    q('#s-learn-tag').textContent = on ? `on ${describeSpec(L.fitness)}` : 'off — the control'
     for (const b of Array.from(root.querySelectorAll<HTMLElement>('[data-algo]'))) {
       b.addEventListener('click', () => {
         init.learn = { ...init.learn, algo: b.dataset.algo as LearnAlgo }
@@ -699,29 +701,15 @@ export function mountSetup(
     }
     if (!on) return
 
-    const chosen = FITNESS.find((f) => f.key === L.fitness)!
     fieldsOf(q('#s-learn-l').appendChild(card('What counts as doing well'))).append(
-      new Chips<FitnessKey>({
-        label: 'fitness',
-        value: L.fitness,
-        options: FITNESS.map((f) => ({ value: f.key, label: f.name, hint: f.blurb })),
-        onChange: (v) => {
-          init.learn = { ...init.learn, fitness: v }
+      measurePicker({
+        spec: L.fitness,
+        heading: false,
+        onChange: (spec) => {
+          init.learn = { ...init.learn, fitness: spec }
           refresh()
         },
-      }).el,
-      (() => {
-        const d = document.createElement('div')
-        d.className = 'stab'
-        d.innerHTML = chosen.invented
-          ? `<b class="warn">a stated choice</b> — ${chosen.blurb}. Optimising this produces organisms
-             good at <i>this</i>, which is not the same as finding out what the world can support.
-             The run record says which measure was used.`
-          : `<b class="ok">the world's own measure</b> — offspring is the one number the world was
-             already counting for its own reasons, so nothing has been written down that was not
-             there already.`
-        return d
-      })(),
+      }),
       new Slider({
         label: 'learn nothing before',
         min: 0,
@@ -951,7 +939,7 @@ export function mountSetup(
     ]
     const diffs = watch.filter(([k]) => String(base[k]) !== String(now[k])).map(([k, label]) => `${label} ${now[k]}`)
     // learning is nested, and it is the one change nobody should be able to miss
-    if (init.learn.algo !== 'none') diffs.unshift(`learning: ${init.learn.algo} on ${init.learn.fitness}`)
+    if (init.learn.algo !== 'none') diffs.unshift(`learning: ${init.learn.algo} on ${describeSpec(init.learn.fitness)}`)
     if (diffs.length === 0) return ''
     return `— ${diffs.slice(0, 3).join(' · ')}${diffs.length > 3 ? ` and ${diffs.length - 3} more` : ''}`
   }
@@ -1043,7 +1031,7 @@ export function mountSetup(
     q('#s-learn-line').textContent =
       lrn.algo === 'none'
         ? 'nothing is being optimised: every new organism gets random weights, and whatever happens is the world doing it'
-        : `learning: ${lrnName}, scored on ${FITNESS.find((f) => f.key === lrn.fitness)?.name} — a chosen measure, and part of the result`
+        : `learning: ${lrnName}, scored on ${describeSpec(lrn.fitness)} — a chosen measure, and part of the result`
     q<HTMLElement>('#s-learn-line').style.color = lrn.algo === 'none' ? '' : 'var(--accent)'
     q('#s-changed').textContent = changeSummary()
     q<HTMLElement>('#s-builder').hidden = !building

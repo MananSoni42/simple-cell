@@ -109,6 +109,22 @@ export const CHEMISTRIES: Chemistry[] = [
     },
   },
   {
+    key: 'random',
+    name: 'Random',
+    blurb: 'no character at all — fifteen numbers drawn at random, which is what the world did before these dials existed',
+    describe: () => 'fifteen numbers drawn at random: no character was chosen for this matter, so whatever it does is luck rather than design',
+    matrix: (rng) => {
+      const A = blank()
+      for (let i = 0; i < N_MATRIX; i++) {
+        for (let j = i; j < N_MATRIX; j++) {
+          if (i === FOOD && j === FOOD) continue
+          set(A, i, j, rng.next() * 2 - 1)
+        }
+      }
+      return applyQuantization(A)
+    },
+  },
+  {
     key: 'skittish',
     name: 'Skittish',
     blurb: 'mostly repulsion, with one or two exceptions that have to carry everything',
@@ -218,6 +234,10 @@ export const DEFAULT_RECIPE: Recipe = { chemistry: 'sticky', world: 'patchy', se
 
 /**
  * A world worth watching, with nothing chosen.
+ *
+ * `random` chemistry is excluded for the same reason as Skittish and Plenty: it is the unfiltered
+ * draw, which is exactly what the dials exist to improve on. It stays available as a chip for
+ * anyone who wants the old behaviour back.
  *
  * The default path through the app has no settings at all, so this is where the quality of a first
  * impression is decided. The draw is deliberately not uniform: Skittish worlds are interesting to
