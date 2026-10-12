@@ -195,22 +195,29 @@ export class OrderTracker {
   private trackStructures(w: World): void {
     const S = w.init.size
     const minImage = (d: number): number => ((d % S) + S * 1.5) % S - S / 2
-    /** Centroid on the torus, anchored to one member so a group straddling the seam stays whole. */
+    /**
+     * Centroid on the torus, anchored to one member so a group straddling the seam stays whole.
+     *
+     * The anchor is read once. The first version spread `[...members][0]` inside the loop, which
+     * allocated a fresh array of every member on every iteration — quadratic in group size, and
+     * groups here reach forty.
+     */
     const centroid = (members: Set<number>): [number, number] => {
-      let ax = -1
+      let anchor = -1
+      for (const b of members) {
+        anchor = b
+        break
+      }
+      if (anchor < 0) return [0, 0]
       let sx = 0
       let sy = 0
       let n = 0
       for (const b of members) {
-        if (ax < 0) {
-          ax = b
-        }
-        sx += minImage(w.x[b] - w.x[[...members][0]])
-        sy += minImage(w.y[b] - w.y[[...members][0]])
+        sx += minImage(w.x[b] - w.x[anchor])
+        sy += minImage(w.y[b] - w.y[anchor])
         n++
       }
-      const b0 = [...members][0]
-      return [((w.x[b0] + sx / n) % S + S) % S, ((w.y[b0] + sy / n) % S + S) % S]
+      return [(((w.x[anchor] + sx / n) % S) + S) % S, (((w.y[anchor] + sy / n) % S) + S) % S]
     }
     const current = this.currentGroups(w).filter((g) => g.length >= 2).map((g) => new Set(g))
     const taken = new Set<number>()
