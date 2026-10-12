@@ -121,4 +121,30 @@ seen here, and `Holds` should separate worlds that this phase cannot distinguish
 not flip, the prior was simply wrong and universal attraction is genuinely the better chemistry —
 which would be a more interesting finding than the one I expected.
 
+### Phase 0 — complete
+
+**200,000 worlds · 100M ticks · 11.2 core-hours in 56 minutes of wall clock.** 149,672 (75%) were
+*possible* — something alive, something bonded, numerically sound — and nothing reached level 1,
+which is what a 0.4-generation horizon can and cannot do, as designed.
+
+Score mean 4.70, best 11.10.
+
+**Two bugs it exposed.** The run finished every world and then crashed in its own summary line:
+`Math.max(...)` spreads each element as a function argument, and two hundred thousand of them
+overflows the call stack. Every aggregate that can see the whole catalog now reduces instead. And
+the new stratifier used `Array.includes`, which at a 60,000 promotion budget is three billion
+comparisons — a hang rather than a slow step.
+
+**A screening bias worth more than either.** Every one of the top twenty worlds ran at
+**metabolism 2**, the most expensive setting, while the marginal means put 0.25 ahead by a wide
+margin (5.12 against 4.23). Both are right. Several rungs cannot report anything until lives have
+*completed*, and a cheap-living world has barely any at five hundred ticks — so a fast-dying world
+is not better, it is merely **measurable sooner**. Metabolism joined the promotion strata so that
+the artifact does not decide what survives the screen.
+
+### Phase 1 — running
+
+60,000 worlds promoted stratified across **160 cells** (self-repulsion × food pattern × metabolism)
+plus a 1,200-world random rescue, at 2,000 ticks each. Estimated **5.2 hours**.
+
 _Updates appended below as they land._
