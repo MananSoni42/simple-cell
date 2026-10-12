@@ -1062,3 +1062,50 @@ prints raw units first, per selected scalar, and keeps random search in every co
 calibration of how little the percentile column can detect. A run where the world died out before
 the measured window reports **no score** rather than zero, which would otherwise make a collapse
 look like a bad result instead of an absent one.
+
+
+---
+
+## 24. Archipelagos: several worlds, then one
+
+Four worlds run to completion on their own, and their survivors are then placed in a single world
+twice as wide, one population per quadrant, with food colonies that migrate inward. `npm run
+archipelago` does it; the output is an ordinary world file you can open, watch and rewind.
+
+**The islands must share a chemistry, and that is not a simplification.** The matrix is a law of a
+world and a merged world can only have one. An organism evolved under a different matrix arrives
+under different physics: its limb types no longer mean what they meant, and everything it learned
+about holding together is wrong. So islands share chemistry, terrain and temperature, and differ in
+**food, in what their learner optimises, and in seed** — exactly the set of differences that shape
+behaviour rather than invalidate it. A mixed-chemistry merge is a legitimate but *different*
+experiment, and should never be the default.
+
+**Each organism carries the island its line came from**, inherited by every descendant. Without it
+a merged world is unreadable: four populations look identical on the canvas, and which of them is
+taking the place over is the only question a merge asks. The world rail shows the shares, their
+Shannon entropy in bits (2 bits is four equal populations, 0 is one left), and the number of bonds
+between organisms from *different* islands.
+
+**Populations are drawn together, not placed in contact.** Organisms only move because of food, so
+the merged world uses `converging` colonies that **start on top of the transplanted populations**
+and migrate to the centre. That origin is explicit (`patchOrigins`) and had to be: colonies placed
+by the usual rule start elsewhere, and four transplanted populations starve within a few hundred
+ticks beside food they never reach. The run then passes through isolation, frontier contact, and
+one contested pool.
+
+**Bonds are not transplanted.** A compound that re-forms after the merge is evidence that the
+chemistry and the brains support it; one that arrives pre-assembled is an assumption dressed as a
+result. The merged world also runs with **no learner**, so what happens there is the world
+adjudicating between four stated preferences rather than an optimiser continuing to push one.
+
+**What can and cannot converge.** Population *share* can converge, and organisms from different
+islands can *bond*. Their **lines cannot**: reproduction here is asexual budding, so there is no
+gene flow however long they mix. Convergence in this world means displacement and association, not
+interbreeding — that would need sexual reproduction, which is a different and larger change.
+
+**Parallelism is per run, not per tick.** Splitting one world's forces across threads was measured
+at about 2× (half a tick is serial); one whole world per core is linear in cores and **identical to
+running them serially**, because each world is seeded and self-contained. Islands run as separate
+`vite-node` processes rather than worker threads, since nothing transforms TypeScript inside a
+thread spawned from a script, and half a second of process startup against runs of half a minute
+is not worth a dependency.

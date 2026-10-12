@@ -137,6 +137,22 @@ export interface Init {
   seededFood: [number, number][]
   /** Organisms placed into the world before it starts. */
   seededOrganisms: SeededOrganism[]
+  /**
+   * What the islands of a merged world were called, index 0 being organisms born here. Present
+   * only for a merged world, and only so that four populations on one canvas can be told apart.
+   */
+  islandNames?: string[]
+  /**
+   * Where food colonies begin, when it matters. A merged world has to put its colonies on top of
+   * the populations it transplanted — four islands placed in four quadrants starve within a few
+   * hundred ticks if the food they are meant to converge toward starts somewhere else.
+   */
+  patchOrigins?: [number, number][]
+  /**
+   * Hold food colonies where they started until something asks them to converge. A merged world
+   * uses it so that four populations meet when you press the button, not on a timer.
+   */
+  merge_hold?: boolean
   bonds: boolean // particles may bond to each other (R16)
   repro: boolean // budding reproduction
   repro_mut: number // std-dev of weight mutation in children
@@ -187,6 +203,8 @@ export interface SeededOrganism {
   organism?: unknown
   x: number
   y: number
+  /** Which island this line came from, for a merged world. 0 means native. */
+  island?: number
 }
 
 /** Lays a layout's terrain into an Init, replacing whatever was there. */

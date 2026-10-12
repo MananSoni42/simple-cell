@@ -38,6 +38,8 @@ export interface OrganismSpec {
   gen?: number
   /** The learner's tag, when these weights came from one. */
   learnId?: number
+  /** Which island this line came from; inherited by its descendants. */
+  island?: number
 }
 
 function buffer(bytes: number, shared: boolean): ArrayBufferLike {
@@ -206,6 +208,14 @@ export class World {
    */
   readonly learnId: Int32Array
   /**
+   * Which island an organism's line came from, or 0 for one born here.
+   *
+   * Set when a body is placed into a world, inherited by every descendant. Without it a merged
+   * world is unreadable: four populations that look identical on the canvas, and no way to say
+   * which of them is taking the place over — which is the entire question a merge asks.
+   */
+  readonly island: Int8Array
+  /**
    * How new organisms get their weights. `none` by default, in which case this object only ever
    * answers "let chance decide" and the world behaves exactly as it did before learning existed.
    */
@@ -216,6 +226,11 @@ export class World {
    * with X on Y" is a lie about most of the run.
    */
   readonly fitnessChanges: { tick: number; measure: string }[] = []
+  /**
+   * The tick convergence began, or null while the colonies are held apart. `merge_hold` starts a
+   * world in the held state; `beginMerge()` releases it.
+   */
+  mergeStart: number | null = 0
   lineageCounter = 1
   nClamped = 0 // how often the per-tick step guardrail has had to bite
   nSteps = 0
@@ -268,6 +283,7 @@ export class World {
     this.L = { ...LAWS, SIZE: init.size, fieldN: Math.min(256, Math.round((LAWS.fieldN * init.size) / LAWS.SIZE)), ...opts.laws }
     this.rng = new Rng((init.seed ^ 0x9e3779b9) | 0)
     this.learner = makeLearner(init.learn ?? LEARN_DEFAULTS, init.seed)
+    this.mergeStart = init.merge_hold ? null : 0
     const L = this.L
 
     this.A = new Float64Array(buffer(8 * N_MATRIX * N_MATRIX, opts.shared ?? false))
@@ -322,6 +338,7 @@ export class World {
     this.orderTicks = new Float64Array(n)
     this.peakReserve = new Float64Array(n)
     this.learnId = new Int32Array(n)
+    this.island = new Int8Array(n)
     this.since = new Int32Array(n)
     this.wasLive = new Uint8Array(n)
     this.limbs = new Int32Array(n * 4).fill(-1)
@@ -364,11 +381,14 @@ export class World {
     const colonies = colonyModes ? Math.max(2, Math.min(4, init.n_patch)) : init.n_patch
     const nPatch = init.foodMode === 'comet' || init.foodMode === 'spring' ? 1 : colonies
     for (let p = 0; p < nPatch; p++) {
-      // colony modes start spread evenly round the world, so they really are apart
+      // colony modes start spread evenly round the world, so they really are apart; a world that
+      // names its origins (a merge) overrides that, because its colonies have to begin where its
+      // populations already are
+      const given = init.patchOrigins?.[p]
       const even = colonyModes
       const a = (p / Math.max(1, nPatch)) * TAU
-      const x = even ? this.wrap(L.SIZE / 2 + L.SIZE * 0.33 * Math.cos(a)) : this.rng.next() * L.SIZE
-      const y = even ? this.wrap(L.SIZE / 2 + L.SIZE * 0.33 * Math.sin(a)) : this.rng.next() * L.SIZE
+      const x = given ? this.wrap(given[0]) : even ? this.wrap(L.SIZE / 2 + L.SIZE * 0.33 * Math.cos(a)) : this.rng.next() * L.SIZE
+      const y = given ? this.wrap(given[1]) : even ? this.wrap(L.SIZE / 2 + L.SIZE * 0.33 * Math.sin(a)) : this.rng.next() * L.SIZE
       this.patches.push({ x, y, h: this.rng.next() * TAU, ox: x, oy: y })
     }
     this.spring = [this.rng.next() * L.SIZE, this.rng.next() * L.SIZE]
@@ -499,6 +519,17 @@ export class World {
     let e = 0
     for (let i = 0; i < this.cap; i++) if (this.alive[i]) e += this.energy[i]
     return e
+  }
+
+  /** Start the colonies closing from here. Harmless, and idempotent, if they already are. */
+  beginMerge(): void {
+    if (this.mergeStart === null) this.mergeStart = this.tick
+  }
+
+  /** How far the colonies have closed: null when still held, else 0..1. */
+  mergeProgress(): number | null {
+    if (this.mergeStart === null) return null
+    return Math.min(1, (this.tick - this.mergeStart) / Math.max(1, this.init.converge_ticks))
   }
 
   /**
@@ -1248,12 +1279,24 @@ export class World {
       // How far along the walk to the middle each colony is. Converging goes one way and stays;
       // breathing goes in and back out again, for ever, so isolation and contact keep alternating.
       const period = Math.max(1, init.converge_ticks)
+      // A held world waits for the word: the colonies sit where they started until something
+      // asks them to close. For a merged world that is the whole point — four populations that
+      // have never met should stay apart until *you* decide they meet, not until a tick counter
+      // says so.
+      if (this.mergeStart === null) {
+        for (const p of this.patches) {
+          p.x = this.wrap(p.ox)
+          p.y = this.wrap(p.oy)
+        }
+        return
+      }
+      const since = this.tick - this.mergeStart
       let f: number
       if (init.foodMode === 'converging') {
-        const t = Math.min(1, this.tick / period)
+        const t = Math.min(1, since / period)
         f = t * t * (3 - 2 * t) // slow at both ends, so the meeting is gradual
       } else {
-        f = (1 - Math.cos((TAU * this.tick) / period)) / 2 // 0 apart, 1 merged, 0 again
+        f = (1 - Math.cos((TAU * since) / period)) / 2 // 0 apart, 1 merged, 0 again
       }
       for (const p of this.patches) {
         p.x = this.wrap(p.ox + (L.SIZE / 2 - p.ox) * f)
@@ -1290,7 +1333,7 @@ export class World {
       const spec = seed.organism as
         | { reserve: number; limbs: { quad: number; type: number; angle: number; reserve: number }[]; wLimb: number[]; wBrain: number[] }
         | undefined
-      if (spec && Array.isArray(spec.wBrain)) this.placeSaved(spec, [seed.x, seed.y])
+      if (spec && Array.isArray(spec.wBrain)) this.placeSaved(spec, [seed.x, seed.y], seed.island ?? 0)
       else this.spawnRandom([seed.x, seed.y])
     }
   }
@@ -1444,6 +1487,7 @@ export class World {
     this.wLimb[b] = spec.wLimb ?? Float64Array.from({ length: N_WLIMB }, () => rng.gauss())
     this.wBrain[b] = spec.wBrain ?? Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
     this.learnId[b] = spec.learnId ?? 0
+    this.island[b] = spec.island ?? (spec.parent !== undefined && spec.parent >= 0 ? this.island[spec.parent] : 0)
     this.gen[b] = spec.gen ?? 0
     this.parent[b] = spec.parent ?? -1
     this.children[b] = 0
@@ -1553,6 +1597,7 @@ export class World {
       wBrain: mutate(this.wBrain[b]!),
       parent: b,
       gen: this.gen[b] + 1,
+      island: this.island[b],
     })
     this.nBudded++
     this.repCool[b] = L.repro_cooldown
@@ -1595,6 +1640,7 @@ export class World {
       wBrain: number[]
     },
     at?: [number, number],
+    island = 0,
   ): number {
     const { L } = this
     const open = (i: number) => (this.continuous ? !this.alive[i] : this.owner[i] === -1)
@@ -1644,6 +1690,7 @@ export class World {
       limbs,
       wLimb: Float64Array.from(spec.wLimb),
       wBrain: Float64Array.from(spec.wBrain),
+      island,
     })
     return brain
   }

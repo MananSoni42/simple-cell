@@ -32,6 +32,8 @@ export class StatsPanel {
       <div class="sub" id="s-energy-sub"></div>
       <div class="blk"><div class="row-k"><b>Compound organisms</b><i id="s-order"></i></div>
         <div class="sub" id="s-order-sub"></div></div>
+      <div class="blk" id="s-islands-blk" hidden><div class="row-k"><b>Where they came from</b><i id="s-islands"></i></div>
+        <div class="sub" id="s-islands-sub"></div></div>
       <div class="blk"><div class="row-k"><b>Lineages</b><i id="s-lineage"></i></div>
         <div class="sub" id="s-lineage-sub"></div></div>
       <div class="blk"><div class="row-k"><b>Mean lifespan</b><i id="s-life-head" class="dim"></i></div>
@@ -40,6 +42,7 @@ export class StatsPanel {
     for (const id of [
       's-tick', 's-rate', 's-world', 's-perf', 's-orgs', 's-orgs-sub', 's-food', 's-energy',
       's-energy-sub', 's-order', 's-order-sub', 's-lineage', 's-lineage-sub', 's-life', 's-life-head',
+      's-islands', 's-islands-sub', 's-islands-blk',
     ]) {
       this.el[id] = root.querySelector<HTMLElement>('#' + id)!
     }
@@ -94,6 +97,30 @@ export class StatsPanel {
     this.el['s-order-sub'].innerHTML =
       (parts.length ? parts.join(' &nbsp; ') : 'none joined') +
       `<br>${fmt.n(st.bondCount)} bonds standing`
+
+    // only a merged world has islands, and only then is "which of them is winning" a question
+    const live = c.islands.filter((n) => n > 0).length
+    this.el['s-islands-blk'].hidden = live < 2
+    if (live >= 2) {
+      const names = st.islandNames ?? []
+      const total = Math.max(1, c.organisms)
+      let h = 0
+      for (const n of c.islands) {
+        if (n > 0) h -= (n / total) * Math.log2(n / total)
+      }
+      set('s-islands', `${h.toFixed(2)} bits`)
+      this.el['s-islands-sub'].innerHTML =
+        c.islands
+          .map((n, i) => (n === 0 ? '' : `<b>${names[i] ?? `island ${i}`}</b> ${n} (${Math.round((100 * n) / total)}%)`))
+          .filter(Boolean)
+          .join(' &nbsp; ') +
+        `<br>${fmt.n(c.crossBonds)} bonds between organisms from different islands` +
+        (st.mergeProgress === null
+          ? '<br><b>held apart</b> — press “Bring them together” to start the colonies closing'
+          : st.mergeProgress < 1
+            ? `<br>colonies ${Math.round(st.mergeProgress * 100)}% of the way together`
+            : '<br>colonies fully merged')
+    }
 
     set('s-lineage', `${fmt.n(c.lineages)} alive`)
     set('s-lineage-sub', `biggest ${fmt.n(c.biggestLineage)} · gen ${fmt.n(c.maxGen)} · children ${fmt.n(c.children)} (most ${fmt.n(c.maxChildren)}) · oldest ${fmt.n(c.oldest)}t`)

@@ -30,6 +30,8 @@ export type ToSim =
   | { kind: 'setFitness'; spec: FitnessSpec }
   /** Change the learner itself, mid-run. This one does start over, and says so. */
   | { kind: 'setLearner'; algo: LearnAlgo }
+  /** Release held food colonies: the populations start closing from this tick. */
+  | { kind: 'merge' }
 
 export interface StatsSnapshot {
   tick: number
@@ -60,6 +62,12 @@ export interface StatsSnapshot {
   learnAlgo: LearnAlgo
   /** The last few changes of measure, so a run can show that its objective moved. */
   fitnessChanges: { tick: number; measure: string }[]
+  /** Set only for a merged world: what its islands were called. */
+  islandNames?: string[]
+  /** How far the colonies have closed, or null while they are held apart waiting to be released. */
+  mergeProgress: number | null
+  /** True when this world has colonies that can be brought together at all. */
+  canMerge: boolean
 }
 
 export interface RunReport {

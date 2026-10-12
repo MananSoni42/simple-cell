@@ -77,10 +77,14 @@ export class InspectPanel {
       this.root.innerHTML = `
         <div class="hd"><span>Learning</span><span class="dim">${on ? st.name : 'off'}</span></div>
         <div class="${on ? 'learn-on' : 'learn-off'}" id="l-state"></div>
-        <canvas id="c-learn" width="248" height="52"></canvas>
-        <div class="sub" id="l-prog"></div>
-        <div class="blk"><div class="row-k"><b>What every life came to</b></div>
-          <div class="scalars" id="l-scalars"></div></div>
+        ${
+          on
+            ? `<canvas id="c-learn" width="248" height="52"></canvas>
+               <div class="sub" id="l-prog"></div>
+               <div class="blk"><div class="row-k"><b>What every life came to</b></div>
+                 <div class="scalars" id="l-scalars"></div></div>`
+            : ''
+        }
         <div class="blk" id="l-measure"></div>
         <div class="blk"><div class="row-k"><b>Algorithm</b></div>
           <div class="presets" id="l-algos"></div>
@@ -120,9 +124,11 @@ export class InspectPanel {
          holding ${fmt.n(st.held)} · cohort ${fmt.n(st.cohort)}`
       : `<b>Nothing is learning.</b><br>every new organism gets random weights, and whatever happens is
          the world doing it unaided`
-    this.root.querySelector('#l-prog')!.textContent = on
-      ? `score now ${st.recent.toFixed(3)} · best ${st.best.toFixed(3)} (a percentile among recent deaths, so 0.5 is average)`
-      : ''
+    // with nothing learning there are no scored lives, and nine zeros say less than nothing
+    if (on) {
+      this.root.querySelector('#l-prog')!.textContent =
+        `score now ${st.recent.toFixed(3)} · best ${st.best.toFixed(3)} (a percentile among recent deaths, so 0.5 is average)`
+    }
     this.paintScalars(st, on)
     this.paintProgress(st, on)
   }

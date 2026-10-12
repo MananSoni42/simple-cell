@@ -141,7 +141,12 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     seededOrganisms: Array.isArray(src.seededOrganisms)
       ? (src.seededOrganisms as SeededOrganism[])
           .slice(0, 500)
-          .map((o) => ({ organism: o?.organism, x: num(o?.x, 0, 0, base.size), y: num(o?.y, 0, 0, base.size) }))
+          .map((o) => ({
+            organism: o?.organism,
+            x: num(o?.x, 0, 0, base.size),
+            y: num(o?.y, 0, 0, base.size),
+            island: Math.round(num(o?.island, 0, 0, 100)),
+          }))
       : base.seededOrganisms,
     repro_mut: num(src.repro_mut, base.repro_mut, 0, 5),
     decay_free: num(src.decay_free, base.decay_free, 0, 1),
@@ -158,6 +163,11 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     r_patch: num(src.r_patch, base.r_patch, 1, 1e5),
     v_patch: num(src.v_patch, base.v_patch, 0, 100),
     learn: learnConfig(src.learn, base.learn),
+    merge_hold: bool(src.merge_hold, base.merge_hold ?? false),
+    patchOrigins: Array.isArray(src.patchOrigins) ? points(src.patchOrigins, base.size * 64) : base.patchOrigins,
+    islandNames: Array.isArray(src.islandNames)
+      ? (src.islandNames as unknown[]).slice(0, 32).map((n) => String(n).slice(0, 24))
+      : base.islandNames,
   }
   init.n_brain = Math.min(init.n_brain, init.n_intrinsic)
   init.n_start = Math.min(init.n_start, init.n_brain)

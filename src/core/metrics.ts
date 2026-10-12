@@ -123,10 +123,23 @@ export interface Census {
   biggestLineage: number
   children: number // children currently-alive organisms have produced
   maxChildren: number
+  /**
+   * Live organisms per island of origin, index 0 being those born in this world.
+   *
+   * A merged world is unreadable without this: four populations look identical on the canvas, and
+   * the question a merge asks is which of them takes the place over.
+   */
+  islands: number[]
+  /**
+   * Bonds between two *organisms* whose lines came from different islands — contact, as opposed to
+   * coexistence. Bonds to loose matter are excluded: counting those made every population look as
+   * though it had met the others before any of them had moved.
+   */
+  crossBonds: number
 }
 
 export function census(w: World): Census {
-  const c: Census = { organisms: 0, limbs: 0, freeMatter: 0, food: w.nFood, eOrganisms: 0, eFree: 0, eFood: 0, oldest: 0, maxGen: 0, lineages: 0, biggestLineage: 0, children: 0, maxChildren: 0 }
+  const c: Census = { organisms: 0, limbs: 0, freeMatter: 0, food: w.nFood, eOrganisms: 0, eFree: 0, eFood: 0, oldest: 0, maxGen: 0, lineages: 0, biggestLineage: 0, children: 0, maxChildren: 0, islands: [], crossBonds: 0 }
   const perLineage = new Map<number, number>()
   for (let i = 0; i < w.cap; i++) {
     if (!w.alive[i]) continue
@@ -140,6 +153,9 @@ export function census(w: World): Census {
         c.children += w.children[i]
         c.maxChildren = Math.max(c.maxChildren, w.children[i])
         perLineage.set(w.lineage[i], (perLineage.get(w.lineage[i]) ?? 0) + 1)
+        const isl = w.island[i]
+        while (c.islands.length <= isl) c.islands.push(0)
+        c.islands[isl]++
       } else c.limbs++
     } else {
       c.eFree += w.energy[i]
@@ -148,6 +164,16 @@ export function census(w: World): Census {
   }
   c.lineages = perLineage.size
   for (const n of perLineage.values()) c.biggestLineage = Math.max(c.biggestLineage, n)
+  // a bond is between two particles; an organism's island lives on its brain, so follow the owner
+  for (let i = 0; i < w.cap; i++) {
+    if (!w.alive[i] || w.owner[i] < 0) continue
+    for (let k = 0; k < w.bonds.max; k++) {
+      const j = w.bonds.partner[i * w.bonds.max + k]
+      if (j <= i || !w.alive[j] || w.owner[j] < 0) continue // each bond once, both ends in a body
+      if (w.owner[i] === w.owner[j]) continue // within one body is not contact
+      if (w.island[w.owner[i]] !== w.island[w.owner[j]]) c.crossBonds++
+    }
+  }
   return c
 }
 

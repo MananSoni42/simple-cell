@@ -131,6 +131,41 @@ than zero when a world died out before the measured window.
 - **Not yet done:** the ablation (§7) — turn CEM off mid-run and see whether the gain persists.
   And every number here is one world shape; `harsh`, `drifting` and `pulsing` are untested.
 
+### Archipelago: four islands, then one world
+
+`npm run archipelago` runs four worlds to completion one per core, then places their survivors in
+the four quadrants of a world twice as wide with food colonies that migrate inward (RULES.md §24).
+The first full run — four islands × 100,000 ticks, then 100,000 merged:
+
+| island | optimising | food | survivors | born | bred | deepest line | oldest |
+|---|---|---|---|---|---|---|---|
+| breeders | offspring | patchy | 48 | 8,684 | 7,499 | gen 45 | 19,725t |
+| foragers | foraging | spring/scarce | 48 | 14,587 | 9,637 | **gen 188** | 6,775t |
+| joiners | togetherness | breathing | 48 | 14,880 | 11,298 | gen 76 | 6,215t |
+| endurers | lifespan | patchy/cycle | 32 | 7,804 | 4,319 | gen 7 | 8,515t |
+
+Four questions produced four genuinely different populations — lineage depth alone runs from 7 to
+188 generations. Then the merge:
+
+| tick | breeders | foragers | joiners | endurers | cross-island bonds | diversity |
+|---|---|---|---|---|---|---|
+| 0 | 48 | 48 | 48 | 32 | 0 | 1.98 bits |
+| 10,000 | 45 | **0** | 55 | 36 | 0 | 1.56 |
+| 40,000 | 98 | 0 | 53 | 41 | 26 | 1.48 |
+| 50,000 | 6 | 0 | **175** | 16 | 22 | 0.60 |
+| 60,000+ | 0 | 0 | 187 | 0 | 0 | **0 bits** |
+
+**The island selected for togetherness won the merged world outright.** The foragers — bred on a
+single scarce spring — died within the first 10,000 ticks of a world with four spread colonies.
+Breeders held the largest population at 40,000 and then collapsed from 98 to 6 within one sampling
+interval of the colonies meeting. First cross-island contact came at tick 18,600, bonds between
+islands peaked at 62, and the largest compound ever assembled was 41 organisms.
+
+This is one run of one archipelago and proves nothing on its own; it is an existence proof that the
+machinery produces the arc it was built for — isolation, contact, displacement — and a prediction
+worth testing: that a population optimised for *staying joined* has an advantage precisely when all
+the food converges to one place.
+
 ---
 
 ## 1. Where we actually are

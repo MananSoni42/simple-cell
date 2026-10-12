@@ -231,6 +231,7 @@ function startWorld(init: Init, perf: Perf, build = true): void {
       latest = m.stats
       // the idle rail is the learning panel, so it follows the stats rather than a click
       if (!inspect.open && tool !== 'organism') inspect.learning(m.stats.learner, m.stats.learnAlgo, m.stats.fitnessChanges)
+      bMerge.hidden = !(m.stats.canMerge && m.stats.mergeProgress === null)
     }
     else if (m.kind === 'undoDepth') bUndo.disabled = m.depth === 0
     else if (m.kind === 'organism') inspect.show(m.organism)
@@ -313,6 +314,13 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-t
 $('t-save').addEventListener('click', () => send({ kind: 'snapshotConfig' }))
 const bUndo = $<HTMLButtonElement>('t-undo')
 bUndo.addEventListener('click', () => send({ kind: 'undo' }))
+// Shown only while colonies are held apart. A merged world should meet when you decide it meets,
+// not when a tick counter says so — the moment of contact is the thing worth watching.
+const bMerge = $<HTMLButtonElement>('t-merge')
+bMerge.addEventListener('click', () => {
+  send({ kind: 'merge' })
+  bMerge.hidden = true
+})
 
 bPlay.addEventListener('click', play)
 bPause.addEventListener('click', pause)

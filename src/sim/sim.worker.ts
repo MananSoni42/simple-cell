@@ -228,6 +228,9 @@ function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnap
     learner: w.learner.status(),
     learnAlgo: w.init.learn.algo,
     fitnessChanges: w.fitnessChanges.slice(-8),
+    islandNames: w.init.islandNames,
+    mergeProgress: w.mergeProgress(),
+    canMerge: w.init.foodMode === 'converging' || w.init.foodMode === 'breathing',
   }
 }
 
@@ -405,6 +408,13 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       const w = world
       if (w) {
         w.retargetFitness(m.spec)
+        post({ kind: 'stats', stats: snapshot(w, 0, null) })
+      }
+    } else if (m.kind === 'merge') {
+      const w = world
+      if (w) {
+        w.beginMerge()
+        publish(w)
         post({ kind: 'stats', stats: snapshot(w, 0, null) })
       }
     } else if (m.kind === 'setLearner') {

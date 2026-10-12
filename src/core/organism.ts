@@ -38,6 +38,10 @@ export interface Provenance {
   /** Set when the file is filed into a library. */
   runId?: string
   savedAt?: number
+  /** Which island of an archipelago produced it, and what that island was optimising. */
+  island?: number
+  islandName?: string
+  measure?: string
 }
 
 /** One organism, in a form that can be read, saved and put back. */
