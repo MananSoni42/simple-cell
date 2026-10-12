@@ -19,6 +19,12 @@ import { MATRIX_NAMES, N_MATRIX } from './types'
  *   when the gap exceeds two of them. A search that ranks a hundred thousand candidates will
  *   always produce an impressive-looking best cell; the question is whether the *cell* is better
  *   or the winner inside it got lucky.
+ *
+ * And one rule about what may be compared at all: **analyse one phase at a time.** Phases fix some
+ * dials themselves — world size escalates with run length — so pooling them makes those dials a
+ * proxy for how long a world was run. The first report produced this way confidently announced
+ * that sixty brain slots beat twenty-four at z = 8.1, which was entirely a restatement of phase 1
+ * running four times longer than phase 0.
  */
 
 const MIN_N = 30

@@ -12,7 +12,18 @@ import type { Init } from '../core/params'
  */
 
 const DB = 'simplecell'
-const VERSION = 1
+/**
+ * Version 2 starts the collection over.
+ *
+ * The organisms and runs kept under version 1 were produced by a world whose laws have since
+ * changed in ways that make them incomparable: four bonds per particle rather than two, energy
+ * moving along bonds, a different brain initialisation, a population set by the ecology, and a
+ * ladder whose thresholds are measured in the world's own units. A saved organism from before all
+ * that is not a worse organism, it is an organism from a different world — and keeping it in the
+ * same list would invite exactly the comparison that cannot be made. The upgrade therefore drops
+ * both stores and recreates them.
+ */
+const VERSION = 2
 const RUNS = 'runs'
 const ORGANISMS = 'organisms'
 
@@ -58,8 +69,13 @@ export type StoreMode = 'idb' | 'memory'
 function open(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB, VERSION)
-    req.onupgradeneeded = () => {
+    req.onupgradeneeded = (e) => {
       const db = req.result
+      // a fresh start: anything from before the laws changed is cleared rather than migrated
+      if ((e.oldVersion ?? 0) < 2) {
+        if (db.objectStoreNames.contains(RUNS)) db.deleteObjectStore(RUNS)
+        if (db.objectStoreNames.contains(ORGANISMS)) db.deleteObjectStore(ORGANISMS)
+      }
       if (!db.objectStoreNames.contains(RUNS)) db.createObjectStore(RUNS, { keyPath: 'id' })
       if (!db.objectStoreNames.contains(ORGANISMS)) db.createObjectStore(ORGANISMS, { keyPath: 'id' })
     }
