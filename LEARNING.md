@@ -153,8 +153,18 @@ bonds remodelable cost four fifths of the standing bonds (42 → 8) and dropped 
 buying only 10% longer individual lives. Weaker bonds trade structure for longevity. It was
 reverted.
 
-Still failing: **rung L3, foraging.** Harvest per tick alive did not improve — it fell slightly.
-Nothing in this world yet eats better than chance; it only spends less.
+Still failing: **rung L3, foraging** — and now with a diagnosis rather than a shrug. Harvest per
+tick did not improve under the new conditions, so the obvious next test was to make foraging the
+*objective* instead of a side effect: CEM on `per_tick` directly, 10 paired seeds × 20k ticks.
+It got **0.073 against a baseline of 0.078** — no better than nothing, 3 wins of 6. Conjunctively,
+`offspring × per_tick` raised offspring (0.350 → 0.395) and left `per_tick` untouched.
+
+So the bottleneck is not the measure and not the conditions. The likely reason is that `per_tick`
+is **mostly not heritable**: harvested ÷ age is maximised by *sitting in* food rather than by
+finding it, and the best way to sit in food is to be born in a patch, which no offspring inherits.
+Selection on it is largely selection on luck of birthplace. Two measures that would be under the
+organism's own control, and are the next thing to try: **harvested per unit distance moved**, and
+**time from birth to first meal** (§5.25), which is explicitly about finding rather than sitting.
 
 ### Archipelago: four islands, then one world
 
