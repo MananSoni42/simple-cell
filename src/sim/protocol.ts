@@ -22,6 +22,8 @@ export type ToSim =
   | { kind: 'rate'; rate: number }
   | { kind: 'pause'; paused: boolean }
   | { kind: 'step' }
+  | { kind: 'mark' } // remember the world, so the edit about to happen can be undone
+  | { kind: 'undo' }
 
 export interface StatsSnapshot {
   tick: number
@@ -62,3 +64,5 @@ export type FromSim =
   | { kind: 'ready'; layout: FrameLayout; frames: FrameBuffers[]; header: Int32Array; note: string }
   | { kind: 'stats'; stats: StatsSnapshot }
   | { kind: 'error'; message: string }
+  /** How many edits can still be taken back, so the Undo control can tell the truth. */
+  | { kind: 'undoDepth'; depth: number }

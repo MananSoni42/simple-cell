@@ -121,10 +121,6 @@ input[type='range']:active::-webkit-slider-thumb { transform: scale(1.18); backg
 
 .card-group { margin-bottom: 26px; }
 
-.pick { margin-bottom: 4px; }
-.pick .presets { margin-bottom: 4px; }
-.pick .presets button { font-size: 12px; padding: 5px 12px; }
-.pick .presets button.on { border-color: var(--accent); color: var(--accent); background: rgba(122, 162, 255, 0.08); }
 .advanced {
   border: 1px solid var(--line); border-radius: var(--r); background: var(--raised);
   padding: 0 16px; margin-bottom: 30px;
@@ -154,10 +150,41 @@ input[type='range']:active::-webkit-slider-thumb { transform: scale(1.18); backg
 
 /* ---------------------------------------------------------------- setup */
 
-.setup { width: min(760px, 94vw); margin: 0 auto; padding: 30px 0 50px; }
+.setup { width: min(980px, 94vw); margin: 0 auto; padding: 30px 0 50px; }
+
+/* the hero: the world you are about to get, actually running, with the one button that takes it */
+.pitch { display: grid; grid-template-columns: minmax(0, 430px) minmax(260px, 1fr); gap: 24px; margin-bottom: 26px; }
+.pitch-stage {
+  position: relative; aspect-ratio: 1; border: 1px solid var(--line);
+  border-radius: var(--r); overflow: hidden; background: #080b11;
+}
+.pitch-stage canvas { display: block; width: 100%; height: 100%; }
+.pitch-tick {
+  position: absolute; left: 10px; bottom: 9px; font-size: 10px; letter-spacing: 0.1em;
+  color: var(--ink-3); background: rgba(8, 11, 17, 0.72); padding: 2px 7px; border-radius: 20px;
+}
+.pitch-side { display: flex; flex-direction: column; }
+.pitch-name { font-size: 17px; letter-spacing: 0.04em; margin-bottom: 10px; }
+.pitch-line { color: var(--ink-2); font-size: 12px; line-height: 1.65; margin: 0 0 10px; }
+.pitch-side .chips-row { margin-bottom: 16px; }
+.pitch-go { display: flex; gap: 9px; margin-bottom: 10px; }
+.pitch-go .primary { padding: 8px 18px; }
+button.ghost { color: var(--ink-3); border-style: dashed; }
+button.ghost:hover { color: var(--ink-2); }
+button.wide { width: 100%; padding: 7px 0; }
+@media (max-width: 760px) { .pitch { grid-template-columns: 1fr; } }
+
+/* the builder: everything optional, behind one deliberate press */
+.builder { border-top: 1px solid var(--line); padding-top: 20px; animation: fade var(--t) var(--ease); }
+.builder-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+.row-wrap { display: flex; gap: 28px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) { .builder { animation: none; } }
 .setup-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; margin-bottom: 18px; }
 .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 18px; }
 .presets button { font-size: 11px; padding: 4px 10px; }
+.presets button.on { border-color: var(--accent); color: var(--accent); background: rgba(122, 162, 255, 0.08); }
+/* the two dials are the primary control on the page, so they are bigger than the long tail below */
+#s-chem-chips button, #s-world-chips button { font-size: 12px; padding: 6px 14px; }
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
 .tabs button { border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--ink-3); padding: 8px 14px; }
 .tabs button:hover { background: rgba(255, 255, 255, 0.03); color: var(--ink-2); }
@@ -346,3 +373,5 @@ textarea { width: 100%; height: 110px; margin-bottom: 12px; }
 .palette .org-card .chips-row { display: none; }
 .palette .org-card.armed { border-color: var(--accent); background: rgba(122, 162, 255, 0.07); }
 .palette .org-name { pointer-events: none; }
+.palette .org-card { cursor: pointer; }
+button.wide.on { border-color: var(--accent); color: var(--accent); background: rgba(122, 162, 255, 0.08); }

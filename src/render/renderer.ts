@@ -46,6 +46,8 @@ export class Renderer {
   /** Ripples left where food was dropped, and a ring around the last organism clicked. */
   private flashes: { x: number; y: number; at: number }[] = []
   private ring: { x: number; y: number; at: number } | null = null
+  /** Where the next stroke would land, and how wide. Null whenever no tool is armed. */
+  private cursor: { x: number; y: number; r: number; kind: 'add' | 'erase' } | null = null
   private worldSize = 300
   /** The last state drawn, so a resize can repaint rather than leaving the canvas cleared. */
   private last: RenderState | null = null
@@ -136,22 +138,41 @@ export class Renderer {
     if (this.flashes.length > 40) this.flashes.shift()
   }
 
+  /**
+   * The brush, shown where it will act. Painting food or wall without this was guesswork: the
+   * radius lived in a slider at the bottom of the screen and had no visible relationship to the
+   * world, so every stroke was a surprise.
+   */
+  hover(at: { x: number; y: number; r: number; kind: 'add' | 'erase' } | null): void {
+    this.cursor = at
+    if (!at && this.last) this.draw(this.last, 1)
+  }
+
   markOrganism(x: number, y: number): void {
     this.ring = { x, y, at: performance.now() }
   }
 
+  /**
+   * Room for a world of this size. Both the previous-state arrays and the screen positions live
+   * here: a paused world publishes one frame and then no more, so if these were only sized when a
+   * *second* frame arrived, the first one would be drawn into zero-length arrays and the world
+   * would look empty — which is precisely the state a world opened for building starts in.
+   */
+  private ensure(cap: number): void {
+    if (this.prevX.length === cap) return
+    this.prevX = new Float32Array(cap)
+    this.prevY = new Float32Array(cap)
+    this.prevTheta = new Float32Array(cap)
+    this.prevAlive = new Uint8Array(cap)
+    this.prevOwner = new Int32Array(cap)
+    this.prevType = new Uint8Array(cap)
+    this.X = new Float32Array(cap)
+    this.Y = new Float32Array(cap)
+  }
+
   /** Call right before each world step so the next frames can glide from these states. */
   snapshot(w: RenderState): void {
-    if (this.prevX.length !== w.cap) {
-      this.prevX = new Float32Array(w.cap)
-      this.prevY = new Float32Array(w.cap)
-      this.prevTheta = new Float32Array(w.cap)
-      this.prevAlive = new Uint8Array(w.cap)
-      this.prevOwner = new Int32Array(w.cap)
-      this.prevType = new Uint8Array(w.cap)
-      this.X = new Float32Array(w.cap)
-      this.Y = new Float32Array(w.cap)
-    }
+    this.ensure(w.cap)
     this.prevX.set(w.x)
     this.prevY.set(w.y)
     this.prevTheta.set(w.theta)
@@ -162,6 +183,7 @@ export class Renderer {
 
   /** Screen positions for this frame. Limbs are rebuilt from their brain so rod and tip never drift apart. */
   private place(w: RenderState, alpha: number): void {
+    this.ensure(w.cap)
     const { X, Y } = this
     const S = w.L.SIZE
     const k = this.px / S
@@ -374,6 +396,17 @@ export class Renderer {
       ctx.beginPath()
       ctx.arc(f.x * k, f.y * k, (6 + 26 * t) * k, 0, Math.PI * 2)
       ctx.stroke()
+    }
+    if (this.cursor) {
+      const c = this.cursor
+      ctx.globalAlpha = 0.75
+      ctx.strokeStyle = c.kind === 'erase' ? LOW : COLORS[FOOD]
+      ctx.lineWidth = Math.max(1, 1.1 * k)
+      ctx.setLineDash([4 * k, 3 * k])
+      ctx.beginPath()
+      ctx.arc(c.x * k, c.y * k, c.r * k, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.setLineDash([])
     }
     if (this.ring) {
       const t = (now - this.ring.at) / 900

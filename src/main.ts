@@ -14,7 +14,7 @@ import { mountSetup } from './ui/setup'
 import { collection } from './ui/store'
 import { StatsPanel } from './ui/stats'
 import { mountSummary } from './ui/summary'
-import type { OrganismFile } from './core/organism'
+import { type OrganismFile, checkCompatibility, parseOrganism } from './core/organism'
 import { download } from './ui/config'
 
 const MIN_RATE = 0.125
@@ -60,6 +60,11 @@ let frameAt = 0
 let frameGap = 1000
 /** Speed to resume at when a run is restarted, so 'run it again' does not look frozen. */
 let resumeRate: number | null = null
+/**
+ * Whether the next world opens as a builder. The quick path through setup has no settings and no
+ * placing, so it would be strange for it to arrive stopped; a world opened to be built must wait.
+ */
+let openPaused = true
 
 /**
  * The world screen is also the builder: a new world arrives paused, with these tools available.
@@ -70,19 +75,48 @@ type Tool = 'pan' | 'organism' | 'food' | 'wall' | 'erase'
 let tool: Tool = 'pan'
 /** The organism the palette has armed, if any; otherwise a random one is placed. */
 let armed: OrganismFile | null = null
+let armedId: string | null = null
 
-function arm(o: OrganismFile | null): void {
+function arm(o: OrganismFile | null, id: string | null = null): void {
   armed = o
+  armedId = id
   const chip = $('armed')
   chip.hidden = !o
   chip.textContent = o ? `armed: ${o.name ?? 'organism'}` : ''
 }
 
+/**
+ * The right rail doubles as the place to pick an organism from, so building never means leaving
+ * the world. Whatever is being inspected wins: looking inside a creature is the more specific act.
+ */
+async function showPalette(): Promise<void> {
+  if (tool !== 'organism' || inspect.open) return
+  const kept = await collection.organisms()
+  if (tool !== 'organism' || inspect.open) return
+  const items = kept
+    .filter((o) => checkCompatibility(o.organism).ok)
+    .slice(0, 24)
+    .map((o) => ({ id: o.id, name: o.name, organism: o.organism }))
+  inspect.palette(items, armedId, (id) => {
+    const found = id ? kept.find((o) => o.id === id) : null
+    if (!found) {
+      arm(null)
+    } else {
+      try {
+        arm(parseOrganism(JSON.stringify(found.organism)), found.id)
+      } catch {
+        arm(null)
+      }
+    }
+    void showPalette()
+  })
+}
+
 const HELP: Record<Tool, string> = {
   pan: 'drag to pan · wheel to zoom · click an organism to inspect · shift-drag to feed',
-  organism: 'click to place an organism · nothing armed means a random one',
+  organism: 'pick one from the rail, then click in the world · cmd-Z takes it back',
   food: 'click or drag to drop food',
-  wall: 'click or drag to paint terrain, which never moves',
+  wall: 'click or drag to paint terrain, which never moves · cmd-Z takes back a stroke',
   erase: 'click or drag to remove food, terrain and organisms',
 }
 
@@ -98,12 +132,15 @@ function syncControls(): void {
     b.classList.toggle('on', b.dataset.tool === tool)
   }
   stage.classList.toggle('editing', tool !== 'pan')
+  if (tool === 'pan') renderer.hover(null)
   helpEl.textContent = HELP[tool]
 }
 
 function setTool(t: Tool): void {
   tool = t
   syncControls()
+  if (t === 'organism') void showPalette()
+  else if (!inspect.open) inspect.hide()
 }
 function play(): void {
   paused = false
@@ -145,7 +182,8 @@ function teardown(): void {
   inspect.hide()
 }
 
-function startWorld(init: Init, perf: Perf): void {
+function startWorld(init: Init, perf: Perf, build = true): void {
+  openPaused = build
   teardown()
   lastInit = init
   lastPerf = perf
@@ -168,14 +206,18 @@ function startWorld(init: Init, perf: Perf): void {
       stats.reset()
       inspect.hide()
       // keep the speed the run was using; starting a fast world back at 1 tick/s reads as broken
-      rate = resumeRate ?? 1
+      // a built world waits so things can be placed in it; a world nobody configured just runs
+      rate = resumeRate ?? (openPaused ? 1 : 8)
       resumeRate = null
-      paused = true // it arrives waiting, so it can be built before it runs
+      paused = openPaused
       setTool('pan')
       send({ kind: 'rate', rate })
+      // the worker always starts a world paused, so the running case has to say so out loud
+      send({ kind: 'pause', paused })
       router.go('world')
       syncControls()
     } else if (m.kind === 'stats') latest = m.stats
+    else if (m.kind === 'undoDepth') bUndo.disabled = m.depth === 0
     else if (m.kind === 'organism') inspect.show(m.organism)
     else if (m.kind === 'builtConfig') {
       download(`simplecell-world-${m.init.seed}.json`, JSON.stringify({ version: 1, init: m.init }, null, 2))
@@ -186,7 +228,7 @@ function startWorld(init: Init, perf: Perf): void {
         $('page-summary'),
         { ...m.report, init: init2, observations: observe(m.report.record, init2) },
         {
-          again: () => startWorld(init2, lastPerf),
+          again: () => startWorld(init2, lastPerf, false),
           setup: () => router.go('setup'),
           library: () => router.go('library'),
         },
@@ -215,10 +257,10 @@ $('page-explain').addEventListener('click', (e) => {
   if (t.closest('#ex-back') || t.closest('#ex-back-2')) router.go(cameFrom)
 })
 
-mountSetup($('page-setup'), {
-  start: (init, perf) => {
+const setup = mountSetup($('page-setup'), {
+  start: (init, perf, opts) => {
     resumeRate = null // a world built by hand starts at a watchable speed
-    startWorld(init, perf)
+    startWorld(init, perf, opts.build)
   },
   back: () => router.go('landing'),
   library: () => router.go('library'),
@@ -231,7 +273,7 @@ mountSetup($('page-setup'), {
 const library = mountLibrary($('page-library'), {
   replay: (init) => {
     resumeRate = null
-    startWorld(init, lastPerf)
+    startWorld(init, lastPerf, false)
   },
   arm: (o) => {
     arm(o)
@@ -242,6 +284,9 @@ const library = mountLibrary($('page-library'), {
 })
 router.onEnter = (page) => {
   if (page === 'library') void library.refresh()
+  // the picker's preview is a real world being stepped; it must not keep running off-screen
+  if (page === 'setup') setup.refresh()
+  else setup.stop()
 }
 void collection.init()
 
@@ -251,6 +296,8 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-t
   b.addEventListener('click', () => setTool(b.dataset.tool as Tool))
 }
 $('t-save').addEventListener('click', () => send({ kind: 'snapshotConfig' }))
+const bUndo = $<HTMLButtonElement>('t-undo')
+bUndo.addEventListener('click', () => send({ kind: 'undo' }))
 
 bPlay.addEventListener('click', play)
 bPause.addEventListener('click', pause)
@@ -308,11 +355,21 @@ canvas.addEventListener('pointerdown', (e) => {
   e.preventDefault()
   painting = true
   capture(canvas, e)
+  // one restore point per stroke: dragging a wall into place is one thing done, so it is one undo
+  send({ kind: 'mark' })
   apply(e, true)
 })
 canvas.addEventListener('pointermove', (e) => {
   if (painting) apply(e, false)
+  if (!link) return
+  // painting blind is the main thing that made the builder feel like guesswork
+  if (tool === 'pan' && !e.shiftKey) renderer.hover(null)
+  else {
+    const [x, y] = toWorld(e)
+    renderer.hover({ x, y, r: tool === 'organism' ? 9 : brush(), kind: tool === 'erase' ? 'erase' : 'add' })
+  }
 })
+canvas.addEventListener('pointerleave', () => renderer.hover(null))
 canvas.addEventListener('pointerup', () => (painting = false))
 canvas.addEventListener('contextmenu', (e) => e.preventDefault())
 
@@ -325,8 +382,10 @@ addEventListener('keydown', (e) => {
   }
   if (page !== 'world' || !link) return
   if (e.key === 'Escape') {
-    if (inspect.open) inspect.hide()
-    else stop()
+    if (inspect.open) {
+      inspect.hide()
+      if (tool === 'organism') void showPalette()
+    } else stop()
   } else if (e.key === ' ') {
     e.preventDefault()
     paused ? play() : pause()
@@ -335,6 +394,9 @@ addEventListener('keydown', (e) => {
   else if (e.key === 'Backspace' || e.key === 'j' || e.key === 'J') {
     e.preventDefault()
     rewind()
+  } else if ((e.key === 'z' || e.key === 'Z') && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault()
+    send({ kind: 'undo' })
   } else if (e.key === '.') {
     paused = true
     syncControls()

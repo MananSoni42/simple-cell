@@ -1,6 +1,6 @@
 import { makeBackend, canShare } from '../compute/select'
 import { census, lifeStats } from '../core/metrics'
-import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, writeSnapshot } from '../core/snapshot'
+import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, takeSnapshot, writeSnapshot } from '../core/snapshot'
 import { type OrganismFile, defaultName, exportOrganism } from '../core/organism'
 import type { Init } from '../core/params'
 import { Recorder } from '../core/recorder'
@@ -25,6 +25,7 @@ let note = ''
 let world: World | null = null
 let historyEvery = 1
 let rewindTo = -1 // a pending request, applied between ticks
+let undoWanted = false // likewise: a world is replaced, so it cannot happen mid-tick
 let recorder = new Recorder()
 
 const HISTORY_BUDGET = 192 << 20 // bytes of snapshots we are willing to hold
@@ -92,6 +93,37 @@ function rewind(w: World, tick: number): World {
   // the future we are abandoning stops being history
   ringLen = pick + 1
   ringPos = (ringPos - (held.length - 1 - pick) + ring.length) % ring.length
+  fresh.backend = w.backend
+  return fresh
+}
+
+/**
+ * Undo for hand-placed things, kept separately from the rewind ring.
+ *
+ * Rewind is indexed by tick, and everything placed in a paused world happens at the *same* tick,
+ * so the ring cannot tell those edits apart. This stack remembers the world immediately before
+ * each stroke instead. It is bounded by bytes rather than by count, because a snapshot of a large
+ * world is megabytes and a dozen of them would be worse than having no undo at all.
+ */
+let edits: Snapshot[] = []
+let editBudget = 2
+
+function planEdits(w: World): void {
+  edits = []
+  editBudget = Math.max(2, Math.min(16, Math.floor((24 << 20) / snapshotBytes(w))))
+}
+
+function markEdit(w: World): void {
+  if (edits.length >= editBudget) edits.shift()
+  edits.push(takeSnapshot(w))
+  post({ kind: 'undoDepth', depth: edits.length })
+}
+
+function undoEdit(w: World): World {
+  const snap = edits.pop()
+  post({ kind: 'undoDepth', depth: edits.length })
+  if (!snap) return w
+  const fresh = restoreSnapshot(w.init, snap, { shared: canShare })
   fresh.backend = w.backend
   return fresh
 }
@@ -212,6 +244,15 @@ async function run(w0: World, mine: number): Promise<void> {
   recorder.observe(w)
 
   while (mine === session) {
+    if (undoWanted) {
+      undoWanted = false
+      w = undoEdit(w)
+      world = w
+      paused = true
+      acc = 0
+      publish(w)
+      post({ kind: 'stats', stats: snapshot(w, 0, null) })
+    }
     if (rewindTo >= 0) {
       w = rewind(w, rewindTo)
       rewindTo = -1
@@ -283,6 +324,7 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       note = made.note
       world = w
       planHistory(w)
+      planEdits(w)
       recorder = new Recorder()
       retune()
       const layout = layoutOf(w)
@@ -349,6 +391,12 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
     } else if (m.kind === 'pause') {
       paused = m.paused
       retune()
+    }
+    else if (m.kind === 'mark') {
+      const w = world
+      if (w) markEdit(w)
+    } else if (m.kind === 'undo') {
+      undoWanted = true
     }
     else if (m.kind === 'step') {
       paused = true

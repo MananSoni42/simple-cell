@@ -567,19 +567,46 @@ Four screens.
 
 **Title.** What the world is, and two ways in: *Init world*, or *How it works* (§15).
 
-**Setup.** Grouped by what each setting governs, not by which code reads it: **physics** (size,
-temperature, sub-steps, terrain, matter, bonds, inflow), **chemistry** (the matrix), **food**
-(pattern, rate, lifetime, cap), **life** (arrivals, reproduction, decay) and **compute** (threads,
-GPU, import/export). `1`–`5` switch tabs.
+**Pick.** **Choosing nothing is the default path.** The screen opens with one complete world
+already running in a preview and two buttons: *Begin*, and *roll another*. No setting has to be
+touched to see life, and the world that arrives is drawn from the combinations that reliably build
+something — never the two characters (Skittish chemistry, Plenty food) that make a dull first
+world, though both stay one click away.
 
-Numeric settings are **sliders**, each printing its value and a line of plain English about what
-that value *means* — "cold: structures hold together", "each tick split into 4, so no single move
-is long enough to pass through anything". Exclusive choices are chips. The seed is the one free-text
-field, and preset worlds sit above the tabs. The chemistry matrix shows only its lower triangle,
-because it is symmetric by law. The stability budget (§9) is displayed live.
+**The builder is prominent but optional**, behind a single press, and it is **two dials** rather
+than a list:
 
-**World.** Three columns: a stats rail, the canvas, and an organism inspector that holds a hint
-until something is clicked. Controls along the bottom: start, pause, stop, rewind and a history
+| Dial | Choices | What it decides |
+|---|---|---|
+| What the matter wants | Sticky, Clumpy, Chains, Hungry, Skittish | the chemistry matrix |
+| What the world is like | Plenty, Patches, Harsh, Pulsing, Drifting | food pattern, level, regime, lifetime, decay |
+
+A dial names a **character, not a world**: it generates its matrix from the seed, so re-rolling
+gives a different world that still has the same nature. Five by five by a seed covers far more
+ground than a list of named worlds could, and each choice states in a sentence what it will do
+before anything is pressed. The named worlds remain, below the dials, as known-good starting
+points. Size and terrain are chips; the seed is the one free-text field.
+
+**Everything else is behind "Every setting"**, grouped by what it governs rather than by which code
+reads it: **physics**, **chemistry** (the matrix), **food**, **life** and **compute**. `1`–`5`
+switch tabs while the builder is open. Numeric settings are **sliders**, each printing its value
+and a line of plain English about what that value *means* — "cold: structures hold together",
+"each tick split into 4, so no single move is long enough to pass through anything". The chemistry
+matrix shows only its lower triangle, because it is symmetric by law. Changing any of it is named
+back to you in a change summary, because hiding settings is only safe if you can see that you have
+changed them.
+
+**No setting appears twice.** Size and terrain live in the builder, not also in the physics tab;
+the stability budget (§9) is shown **only when it is violated**, since a permanent "stable" badge
+spends the most prominent space in the panel on a non-event.
+
+**The preview is the model, not a picture of it.** It constructs the same `World` from the same
+`Init` and steps it a few hundred ticks in slices on the frame clock, reporting organisms, matter,
+the share of particles holding a bond, and standing food. It therefore cannot misrepresent what
+pressing the button gives you, and it stops the moment the screen is left.
+
+**World.** Three columns: a stats rail, the canvas, and a right rail that inspects an organism
+when one is clicked and offers the collection to place from while the Organism tool is armed. Controls along the bottom: start, pause, stop, rewind and a history
 scrubber, and 0.5× / 2× between 1/8 and 8192 ticks/s. `Space` pauses, `←`/`→` change speed,
 `.` single-steps, `Backspace`/`J` rewinds, `Esc` closes the inspector or ends the run.
 **Shift-drag** scatters food; a **plain click** inspects an organism and rings it.
@@ -848,17 +875,35 @@ where it came from, because unnamed things never get used again.
 
 ## 21. Building a world by hand
 
-**The world screen is the builder.** A new world arrives **paused at tick 0** with a toolbar, and
-the same tools stay available while it runs. There is no separate editor, so nothing has to be
-compiled and no preview can disagree with the real thing.
+**The world screen is the builder.** The same tools stay available while it runs. There is no
+separate editor, so nothing has to be compiled and no preview can disagree with the real thing.
+
+**A world opens paused only if it was built.** Taking the quick path through the picker means
+nobody asked to place anything, so it arrives **running**, at a speed that is visibly alive rather
+than at 1 tick/s. A world opened from the builder arrives **paused at tick 0**, waiting.
 
 | Tool | Key | What it does |
 |---|---|---|
 | Look | `V` | Pan, zoom, and click an organism to inspect it |
-| Organism | `1` | Place one where you click — the armed organism from a collection, or a random one |
+| Organism | `1` | Place one where you click — whichever is armed in the rail, or a random brain |
 | Food | `2` | Drop food, by click or drag |
 | Wall | `3` | Paint terrain, which never moves |
 | Erase | `4` | Remove food, terrain and organisms within the brush |
+
+**The brush is drawn where it will act** — a dashed ring that follows the cursor, red for erase —
+because the radius otherwise lived in a slider with no visible relationship to the world and every
+stroke was a surprise.
+
+**Undo takes back one stroke** (`cmd`/`ctrl-Z`, or the toolbar button, which is disabled when
+there is nothing to take back). It cannot use the rewind ring: rewind is indexed by tick, and
+everything placed in a paused world happens at the *same* tick. So the world is snapshotted
+immediately before each stroke begins, onto a stack bounded **by bytes rather than by count** —
+a snapshot of a large world is megabytes, and a dozen of them would be worse than no undo at all.
+Restoring returns the energy ledger too, not just the positions, since placing injects and burns.
+
+**Arming an organism happens in the world**, in the right rail, from the same portrait cards the
+collection uses. It previously meant leaving for the collection screen and coming back, which is
+three screens to place one creature and impossible to do twice without losing your place.
 
 Shift-drag always feeds, whatever tool is selected. Erasing an organism **dissolves** it rather
 than deleting it — the same path starvation takes, so its limbs are released and half its energy

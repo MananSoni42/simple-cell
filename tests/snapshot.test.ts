@@ -30,6 +30,33 @@ describe('snapshots', () => {
     expect(b.totalEnergy() + b.burned).toBeCloseTo(b.initialEnergy + b.injected, 6)
   })
 
+  /**
+   * What undo in the builder relies on: a snapshot taken before a hand edit restores the world
+   * exactly, including the energy ledger. Placing things injects and burns energy, so a restore
+   * that only moved particles back would leave the books wrong and the run's totals would lie.
+   */
+  it('takes back anything placed by hand, ledger included', () => {
+    const init = { ...initFromSeed(63, 1), T_spawn: 1e9, T_food: 1e9, inflow: false }
+    const w = new World(init)
+    for (let t = 0; t < 120; t++) w.step()
+
+    const before = takeSnapshot(w)
+    const hash = stateHash(w)
+    const injected = w.injected
+    const burned = w.burned
+
+    for (let k = 0; k < 20; k++) w.feedAt(80, 80, 20)
+    w.spawnRandom([150, 150])
+    w.addWall(200, 200)
+    expect(stateHash(w)).not.toBe(hash)
+
+    const undone = restoreSnapshot(init, before)
+    expect(stateHash(undone)).toBe(hash)
+    expect(undone.injected).toBe(injected)
+    expect(undone.burned).toBe(burned)
+    expect(undone.totalEnergy() + undone.burned).toBeCloseTo(undone.initialEnergy + undone.injected, 6)
+  })
+
   it('rewinds: an older snapshot replays to the same place it first reached', () => {
     const init = { ...initFromSeed(9), T_spawn: 50, T_food: 2 }
     const w = new World(init)

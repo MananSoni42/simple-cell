@@ -21,6 +21,9 @@ import { configText, download, parseConfig, readHash, writeHash } from './config
 import { capture } from '../render/renderer'
 import { Chips, Slider, Toggle, card, fieldsOf } from './controls'
 import { PRESETS } from './presets'
+import { CHEMISTRIES, type Recipe, WORLD_KINDS, buildRecipe, chemistryOf, randomRecipe, worldKindOf } from './recipes'
+import { mountPreview } from './preview'
+import { fmt, reducedMotion } from './theme'
 
 const FOOD = N_MATRIX - 1
 const TABS = [
@@ -44,25 +47,38 @@ function cellColor(a: number): string {
  */
 export function mountSetup(
   root: HTMLElement,
-  hooks: { start(init: Init, perf: Perf): void; back(): void; explain(): void; library(): void },
-): { refresh(): void } {
-  let init = initFromSeed(Math.floor(Math.random() * 1e9), 1)
+  hooks: {
+    start(init: Init, perf: Perf, opts: { build: boolean }): void
+    back(): void
+    explain(): void
+    library(): void
+  },
+): { refresh(): void; stop(): void } {
+  /** The two-dial description of the world, when it came from the dials. */
+  let recipe: Recipe = randomRecipe()
+  let init = buildRecipe(recipe)
   const perf: Perf = { threads: 1, gpu: false }
   let tab: Tab = 'physics'
-  /** Which preset is selected, or -1 for a seeded world. */
+  /** Which named preset is selected, or -1 when the world came from the dials. */
   let chosen = -1
+  /** True once the world stopped being a recipe — a preset, an import, a hand-edited number. */
+  let custom = false
+  /** The default path has no settings at all; the builder is opened deliberately. */
+  let building = false
   const fromHash = readHash()
   if (fromHash) {
     init = fromHash.init
     if (fromHash.perf) Object.assign(perf, fromHash.perf)
+    custom = true
+    building = true
   }
 
   root.innerHTML = `
     <div class="setup">
       <div class="setup-head">
         <div>
-          <h1>PICK A WORLD</h1>
-          <div class="note">three choices is enough to start. the rest of it is down there if you want it.</div>
+          <h1>A WORLD</h1>
+          <div class="note">this is it, running. keep it, or roll another.</div>
         </div>
         <div class="row">
           <button id="s-back">← back</button>
@@ -71,30 +87,60 @@ export function mountSetup(
         </div>
       </div>
 
-      <div class="pick">
-        <div class="field"><div class="field-head"><label>a world</label></div>
+      <div class="pitch">
+        <div class="pitch-stage"><canvas id="s-prev"></canvas><div class="pitch-tick" id="s-prev-tick"></div></div>
+        <div class="pitch-side">
+          <div class="pitch-name" id="s-name"></div>
+          <p class="pitch-line" id="s-chem"></p>
+          <p class="pitch-line" id="s-world"></p>
+          <div class="chips-row" id="s-prev-stats"></div>
+          <div class="pitch-go">
+            <button class="primary" id="s-start">Begin →</button>
+            <button id="s-roll">roll another</button>
+          </div>
+          <button class="ghost wide" id="s-toggle-build">Build it yourself →</button>
+          <div class="note" id="s-io"></div>
+        </div>
+      </div>
+
+      <div class="builder" id="s-builder" hidden>
+        <div class="builder-head">
+          <div><b>Build it yourself</b>
+            <div class="note">two dials decide what the world is like. the seed decides the rest.</div>
+          </div>
+          <button id="s-close-build">done</button>
+        </div>
+        <div class="field"><div class="field-head"><label>what the matter wants</label></div>
+          <div class="presets" id="s-chem-chips"></div>
+          <div class="field-hint" id="s-chem-hint"></div>
+        </div>
+        <div class="field"><div class="field-head"><label>what the world is like</label></div>
+          <div class="presets" id="s-world-chips"></div>
+          <div class="field-hint" id="s-world-hint"></div>
+        </div>
+        <div class="row-wrap">
+          <div id="s-size"></div>
+          <div id="s-terrain"></div>
+        </div>
+        <div class="row" style="margin-bottom:14px">
+          <label class="mono-k">seed</label>
+          <input id="s-seed" inputmode="numeric" style="width:120px" />
+          <button id="s-roll2">re-roll</button>
+        </div>
+        <div class="field"><div class="field-head"><label>or start from a known world</label></div>
           <div class="presets" id="s-presets"></div>
           <div class="field-hint" id="s-preset-hint"></div>
         </div>
-        <div id="s-size"></div>
-        <div class="row" style="margin-bottom:18px">
-          <label class="mono-k">seed</label>
-          <input id="s-seed" inputmode="numeric" style="width:120px" />
-          <button id="s-roll">re-roll</button>
-          <span class="note" id="s-io"></span>
+        <div class="row" style="margin-bottom:16px">
+          <button class="primary" id="s-start-paused">Open it paused →</button>
+          <span class="note">paused, so you can place food, walls and saved organisms before it runs</span>
         </div>
+        <details class="advanced" id="s-adv">
+          <summary>Every setting <span class="note" id="s-changed"></span></summary>
+          <div class="tabs">${TABS.map(([k, label]) => `<button type="button" data-tab="${k}">${label}</button>`).join('')}</div>
+          ${TABS.map(([k]) => `<div class="panel" data-panel="${k}"></div>`).join('')}
+        </details>
       </div>
-
-      <div class="row" style="margin-bottom:20px">
-        <button class="primary" id="s-start">Build it →</button>
-        <span class="note">it opens paused, so you can place things before it runs</span>
-      </div>
-
-      <details class="advanced" id="s-adv">
-        <summary>Advanced <span class="note" id="s-changed"></span></summary>
-        <div class="tabs">${TABS.map(([k, label]) => `<button type="button" data-tab="${k}">${label}</button>`).join('')}</div>
-        ${TABS.map(([k]) => `<div class="panel" data-panel="${k}"></div>`).join('')}
-      </details>
     </div>`
 
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!
@@ -112,11 +158,16 @@ export function mountSetup(
     cols.append(left, right)
 
     fieldsOf(left).append(
-      new Chips<string>({
-        label: 'size',
-        value: String(init.scale),
-        options: [1, 2, 4, 8, 16, 32].map((s) => ({ value: String(s), label: `${s}×`, hint: `${300 * s} units across` })),
-        onChange: (v) => reseed(init.seed, Number(v)),
+      new Slider({
+        label: 'size beyond the chips',
+        min: 1,
+        max: 32,
+        step: 1,
+        value: init.scale,
+        curve: 'log',
+        format: (v) => `${Math.round(v)}×`,
+        hint: (v) => `${300 * Math.round(v)} units across${v > 8 ? ' — too big to place things by hand' : ''}`,
+        onChange: (v) => reseed(init.seed, Math.round(v)),
       }).el,
       new Slider({
         label: 'temperature',
@@ -147,20 +198,6 @@ export function mountSetup(
         hint: (v) => (v === 1 ? 'one move per tick' : `each tick split into ${v}, so no single move is long enough to pass through anything`),
         onChange: (v) => {
           init.substeps = v
-          refresh()
-        },
-      }).el,
-      new Chips<WallLayout>({
-        label: 'terrain',
-        value: init.walls,
-        options: [
-          { value: 'none', label: 'open', hint: 'nothing in the way' },
-          { value: 'pillars', label: 'pillars', hint: 'a regular grid of immovable blocks' },
-          { value: 'maze', label: 'maze', hint: 'straight runs at right angles' },
-          { value: 'ring', label: 'ring', hint: 'one closed circle of wall' },
-        ],
-        onChange: (v) => {
-          init.walls = v
           refresh()
         },
       }).el,
@@ -215,16 +252,22 @@ export function mountSetup(
     paintStability()
   }
 
+  /**
+   * Shown only when something is wrong. A permanent "stable" badge spends the most prominent space
+   * in the panel on a non-event, and teaches you to skip the one line that would have told you the
+   * world was about to misbehave.
+   */
   const paintStability = (): void => {
-    const el = root.querySelector('#s-stab')
+    const el = root.querySelector<HTMLElement>('#s-stab')
     if (!el) return
     const s = stability(init)
-    const need = s.ok ? 0 : substepsFor(init)
+    el.hidden = s.ok
+    if (s.ok) return
+    const need = substepsFor(init)
     el.innerHTML =
-      `<b class="${s.ok ? 'ok' : 'warn'}">${s.ok ? 'stable' : 'steps too long'}</b> — ` +
-      `a particle moves ${s.sigma.toFixed(2)} per sub-step, ${Math.round(s.sigmaRatio * 100)}% of its own radius; ` +
-      `${s.structured ? 'cold enough for bonds to survive' : 'hotter than one bond, so structures melt'}.` +
-      (s.ok ? '' : need > 1 ? ` Needs ${need} sub-steps, or less heat.` : ' Lower the temperature.')
+      `<b class="warn">steps too long</b> — a particle moves ${s.sigma.toFixed(2)} per sub-step, ` +
+      `${Math.round(s.sigmaRatio * 100)}% of its own radius, so it can pass straight through things.` +
+      (need > 1 ? ` Needs ${need} sub-steps, or less heat.` : ' Lower the temperature.')
   }
 
   // ------------------------------------------------------------------ chemistry
@@ -689,23 +732,31 @@ export function mountSetup(
     })
   }
 
-  // ------------------------------------------------------------------ chrome
-  q('#s-presets').innerHTML =
-    PRESETS.map((p, i) => `<button type="button" data-preset="${i}" title="${p.blurb}">${p.name}</button>`).join('') +
-    '<button type="button" data-preset="-1" title="whatever the seed happens to produce">Surprise me</button>'
-  for (const b of Array.from(root.querySelectorAll<HTMLButtonElement>('[data-preset]'))) {
-    b.addEventListener('click', () => {
-      const i = Number(b.dataset.preset)
-      if (i < 0) {
-        chosen = -1
-        reseed(Math.floor(Math.random() * 1e9))
-        return
-      }
-      chosen = i
-      init = PRESETS[i].build()
-      refresh()
-    })
+  // ------------------------------------------------------------------ the two dials
+  q('#s-chem-chips').innerHTML = CHEMISTRIES.map(
+    (c) => `<button type="button" data-chem="${c.key}" title="${c.blurb}">${c.name}</button>`,
+  ).join('')
+  q('#s-world-chips').innerHTML = WORLD_KINDS.map(
+    (w) => `<button type="button" data-wk="${w.key}" title="${w.blurb}">${w.name}</button>`,
+  ).join('')
+  q('#s-presets').innerHTML = PRESETS.map(
+    (p, i) => `<button type="button" data-preset="${i}" title="${p.blurb}">${p.name}</button>`,
+  ).join('')
+
+  const onEach = (attr: string, fn: (value: string, el: HTMLElement) => void): void => {
+    for (const b of Array.from(root.querySelectorAll<HTMLElement>(`[data-${attr}]`))) {
+      b.addEventListener('click', () => fn(b.dataset[attr]!, b))
+    }
   }
+  onEach('chem', (key) => setRecipe({ ...recipe, chemistry: key }))
+  onEach('wk', (key) => setRecipe({ ...recipe, world: key }))
+  onEach('preset', (i) => {
+    chosen = Number(i)
+    custom = true
+    init = PRESETS[chosen].build()
+    refresh()
+  })
+
   for (const b of Array.from(root.querySelectorAll<HTMLButtonElement>('[data-tab]'))) {
     b.addEventListener('click', () => {
       tab = b.dataset.tab as Tab
@@ -722,9 +773,10 @@ export function mountSetup(
     writeHash(init, perf)
   }
 
-  /** What the chosen preset would have produced, so changes can be pointed out. */
+  /** What the current choice would have produced untouched, so changes can be pointed out. */
   function baseline(): Init {
-    return chosen >= 0 ? PRESETS[chosen].build() : initFromSeed(init.seed, init.scale)
+    if (chosen >= 0) return PRESETS[chosen].build()
+    return custom ? initFromSeed(init.seed, init.scale) : buildRecipe(recipe)
   }
 
   /**
@@ -746,6 +798,31 @@ export function mountSetup(
     return `— ${diffs.slice(0, 3).join(' · ')}${diffs.length > 3 ? ` and ${diffs.length - 3} more` : ''}`
   }
 
+  // ------------------------------------------------------------------ the preview
+  const preview = mountPreview(q<HTMLCanvasElement>('#s-prev'), (s) => {
+    q('#s-prev-tick').textContent = `tick ${fmt.n(s.tick)}`
+    const chip = (k: string, v: string): string => `<span class="chip"><i>${k}</i>${v}</span>`
+    q('#s-prev-stats').innerHTML =
+      chip('organisms', fmt.n(s.organisms)) +
+      chip('matter', fmt.n(s.matter)) +
+      chip('bonded', `${Math.round((100 * s.bonded) / Math.max(1, s.matter))}%`) +
+      chip('food', fmt.n(s.food))
+  })
+
+  /** Debounced, because dragging a slider should not start a new world on every frame. */
+  let previewTimer = 0
+  function repreview(): void {
+    clearTimeout(previewTimer)
+    previewTimer = setTimeout(() => preview.show(init), 120) as unknown as number
+  }
+
+  /** The name of what is on screen, in the vocabulary the picker uses. */
+  function title(): string {
+    if (chosen >= 0) return PRESETS[chosen].name
+    if (custom) return 'Your world'
+    return `${chemistryOf(recipe.chemistry).name} · ${worldKindOf(recipe.world).name}`
+  }
+
   function refresh(): void {
     if (document.activeElement !== seedEl) seedEl.value = String(init.seed)
     const sizeHost = q('#s-size')
@@ -762,12 +839,51 @@ export function mountSetup(
         onChange: (v) => reseed(init.seed, Number(v)),
       }).el,
     )
-    for (const b of Array.from(root.querySelectorAll<HTMLElement>('[data-preset]'))) {
-      b.classList.toggle('on', Number(b.dataset.preset) === chosen)
+    const terrainHost = q('#s-terrain')
+    terrainHost.innerHTML = ''
+    terrainHost.append(
+      new Chips<WallLayout>({
+        label: 'terrain',
+        value: init.walls,
+        options: [
+          { value: 'none', label: 'open', hint: 'nothing in the way' },
+          { value: 'pillars', label: 'pillars', hint: 'a regular grid of immovable blocks' },
+          { value: 'maze', label: 'maze', hint: 'straight runs at right angles' },
+          { value: 'ring', label: 'ring', hint: 'one closed circle of wall' },
+        ],
+        onChange: (v) => {
+          if (chosen < 0 && !custom) {
+            setRecipe({ ...recipe, terrain: v })
+            return
+          }
+          init.walls = v
+          refresh()
+        },
+      }).el,
+    )
+
+    const on = (attr: string, value: string): void => {
+      for (const b of Array.from(root.querySelectorAll<HTMLElement>(`[data-${attr}]`))) {
+        b.classList.toggle('on', b.dataset[attr] === value)
+      }
     }
-    q('#s-preset-hint').textContent =
-      chosen >= 0 ? PRESETS[chosen].blurb : 'a world rolled from the seed — press re-roll until something looks interesting'
+    const dialled = chosen < 0 && !custom
+    on('chem', dialled ? recipe.chemistry : '')
+    on('wk', dialled ? recipe.world : '')
+    on('preset', String(chosen))
+    q('#s-chem-hint').textContent = dialled ? chemistryOf(recipe.chemistry).blurb : 'the chemistry came from elsewhere — the table is under Every setting'
+    q('#s-world-hint').textContent = dialled ? worldKindOf(recipe.world).blurb : 'the food settings came from elsewhere — they are under Every setting'
+    q('#s-preset-hint').textContent = chosen >= 0 ? PRESETS[chosen].blurb : 'nine worlds that are known to do something'
+
+    q('#s-name').textContent = title()
+    q('#s-chem').textContent = dialled ? chemistryOf(recipe.chemistry).describe() : `${init.foodMode} food, ${init.foodLevel}, ${init.foodRegime}`
+    q('#s-world').textContent = dialled
+      ? worldKindOf(recipe.world).describe()
+      : `${init.n_start} organisms to start, ${init.n_intrinsic} loose particles, ${init.size} units across`
     q('#s-changed').textContent = changeSummary()
+    q<HTMLElement>('#s-builder').hidden = !building
+    q('#s-toggle-build').textContent = building ? 'hide the builder' : 'Build it yourself →'
+
     physics()
     chemistry()
     food()
@@ -775,40 +891,77 @@ export function mountSetup(
     compute()
     paintTabs()
     sync()
+    repreview()
+  }
+
+  /** Move a dial: the recipe changes, and everything downstream of it is rebuilt. */
+  function setRecipe(next: Recipe): void {
+    recipe = next
+    chosen = -1
+    custom = false
+    init = buildRecipe(recipe)
+    ioEl.textContent = ''
+    refresh()
   }
 
   function reseed(seed: number, scale = init.scale): void {
-    // a preset re-rolled keeps its character and changes only its world; a seeded world rerolls whole
-    init = chosen >= 0 ? { ...PRESETS[chosen].build(), seed: Math.floor(seed) } : initFromSeed(Math.floor(seed), scale)
+    const s = Math.floor(seed)
+    if (chosen < 0 && !custom) {
+      setRecipe({ ...recipe, seed: s, scale })
+      return
+    }
+    // a preset re-rolled keeps its character and changes only its world; a custom world rerolls whole
+    init = chosen >= 0 ? { ...PRESETS[chosen].build(), seed: s } : initFromSeed(s, scale)
     init.scale = scale
     init.size = 300 * scale
     ioEl.textContent = ''
     refresh()
   }
 
-  q('#s-roll').addEventListener('click', () => reseed(Math.floor(Math.random() * 1e9)))
+  /** The default path: a different world entirely, with nothing to choose. */
+  function rollAnother(): void {
+    chosen = -1
+    custom = false
+    setRecipe({ ...randomRecipe(), scale: init.scale })
+  }
+
+  q('#s-roll').addEventListener('click', rollAnother)
+  q('#s-roll2').addEventListener('click', () => reseed(Math.floor(Math.random() * 1e9)))
   seedEl.addEventListener('input', () => {
     const v = Number(seedEl.value)
     if (Number.isFinite(v) && seedEl.value.trim() !== '') reseed(Math.floor(v))
   })
+  const setBuilding = (v: boolean): void => {
+    building = v
+    refresh()
+    if (v) q('#s-builder').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' })
+  }
+  q('#s-toggle-build').addEventListener('click', () => setBuilding(!building))
+  q('#s-close-build').addEventListener('click', () => setBuilding(false))
   q('#s-back').addEventListener('click', () => hooks.back())
   q('#s-how').addEventListener('click', () => hooks.explain())
   q('#s-lib').addEventListener('click', () => hooks.library())
-  q('#s-start').addEventListener('click', () => hooks.start(init, { ...perf }))
+
+  const go = (build: boolean): void => {
+    preview.stop()
+    hooks.start(init, { ...perf }, { build })
+  }
+  q('#s-start').addEventListener('click', () => go(false))
+  q('#s-start-paused').addEventListener('click', () => go(true))
 
   addEventListener('keydown', (e) => {
     if (root.hidden) return
     const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
     if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
       ;(document.activeElement as HTMLElement | null)?.blur()
-      hooks.start(init, { ...perf })
+      go(false)
     } else if (typing) return
-    else if (e.key >= '1' && e.key <= '5') {
+    else if (e.key >= '1' && e.key <= '5' && building) {
       tab = TABS[Number(e.key) - 1][0]
       paintTabs()
-    } else if (e.key === 'r' || e.key === 'R') reseed(Math.floor(Math.random() * 1e9))
+    } else if (e.key === 'r' || e.key === 'R') rollAnother()
   })
 
   refresh()
-  return { refresh }
+  return { refresh, stop: () => preview.stop() }
 }

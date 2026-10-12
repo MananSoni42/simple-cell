@@ -1,6 +1,13 @@
 import type { OrganismFile } from '../core/organism'
-import { portrait, weightMap } from './portrait'
+import { bodyDiagram, portrait, weightMap } from './portrait'
 import { fmt } from './theme'
+
+/** One saved organism, as the palette needs it. */
+export interface PaletteItem {
+  id: string
+  name: string
+  organism: OrganismFile
+}
 
 /** The right rail: one organism, drawn, with the buttons to save or re-seed it. */
 export class InspectPanel {
@@ -24,6 +31,31 @@ export class InspectPanel {
       <div class="hd"><span>Organism</span></div>
       <div class="empty-hint">click an organism in the world to look inside it<br><br>
         you will see its body as it stands, what each part is holding, and the weights it inherited</div>`
+  }
+
+  /**
+   * The same rail, as somewhere to pick from while the Organism tool is armed.
+   *
+   * Arming used to mean leaving the world for the Collection screen, choosing, and coming back —
+   * which is three screens to place one creature, and impossible to do twice without losing your
+   * place. The faces are already drawn for the Collection, so showing them here costs nothing.
+   */
+  palette(items: PaletteItem[], armedId: string | null, onPick: (id: string | null) => void): void {
+    this.current = null
+    const card = (it: PaletteItem): string => `
+      <article class="org-card${it.id === armedId ? ' armed' : ''}" data-pick="${it.id}">
+        ${bodyDiagram(it.organism)}
+        <div class="org-name">${it.name}</div>
+      </article>`
+    this.root.innerHTML = `
+      <div class="hd"><span>Place</span><span class="dim">${items.length} kept</span></div>
+      <button class="wide${armedId === null ? ' on' : ''}" data-pick="">a random brain</button>
+      <div class="palette" style="margin-top:8px">${items.map(card).join('')}</div>
+      ${items.length === 0 ? '<div class="empty-hint">nothing kept yet — organisms you save land here, ready to place</div>' : ''}
+      <div class="note" style="margin-top:10px">click one, then click in the world</div>`
+    for (const el of Array.from(this.root.querySelectorAll<HTMLElement>('[data-pick]'))) {
+      el.addEventListener('click', () => onPick(el.dataset.pick || null))
+    }
   }
 
   show(o: OrganismFile | null): void {
