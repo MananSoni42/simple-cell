@@ -224,6 +224,7 @@ function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnap
     budded: w.nBudded,
     deaths: w.nDeaths,
     recordAge: w.recordAge,
+    learner: w.init.learn.algo === 'none' ? undefined : w.learner.status(),
   }
 }
 

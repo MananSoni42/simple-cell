@@ -1,3 +1,4 @@
+import type { LearnerStatus } from './learning'
 import { census } from './metrics'
 import { MAX_ORDER } from './orders'
 import type { World } from './world'
@@ -70,6 +71,8 @@ export interface RunRecord {
     lifeOrganisms: number
     recordAge: number
     clampedPct: number
+    /** How the run learned, if it did. A run has to record this or its numbers mean nothing. */
+    learner?: LearnerStatus
   }
 }
 
@@ -196,6 +199,7 @@ export class Recorder {
         lifeOrganisms: w.lifeOrganisms.summary().mean,
         recordAge: Math.max(w.recordAge, c.oldest),
         clampedPct: w.nSteps > 0 ? (100 * w.nClamped) / w.nSteps : 0,
+        learner: w.init.learn.algo === 'none' ? undefined : w.learner.status(),
       },
     }
   }

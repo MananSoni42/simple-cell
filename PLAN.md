@@ -129,15 +129,15 @@ and the restored world on for 400 more ticks and comparing hashes.
 
 ## 5. Long-term — mostly done now
 
-Of the original four, three were superseded by the bond work and the metric round; the food
-odour field and learning remain.
+Of the original four, three were superseded by the bond work and the metric round; learning is now
+built and measured, and the food odour field remains.
 
 | # | Item | The question to settle first |
 |---|---|---|
 | 16 | **Food odour field** (matrix Q3 part 3) | Changes the ecology, not just the plumbing: with smell, foraging becomes solvable and sitting still stops being viable. Decide whether we want that before adding it |
 | 17 | **Full state export/import** | Format and forward compatibility; worth doing once rather than twice |
 | 18 | ~~**Brain chemistry row**~~ | **Superseded.** Particle bonds with hysteresis (R16) turned out to be the better route to multicellularity: bodies now join through their limbs, which is both more physical and more controllable than letting brains attract each other |
-| 19 | **Learning and selection** | Paused by request. §4's lineage and aggregate metrics are the instruments we will need when it resumes |
+| 19 | ~~**Learning and selection**~~ | **Done, through step 4 of the plan.** `core/learning.ts` is the seam; `none` is the control and keeps the world bit-identical; four algorithms share one interface; `npm run experiment` runs the paired protocol. Measured over 12 paired seeds: CEM lifts offspring 0.28 → 0.45 and net energy 9.7 → 33.7, winning 11/12 seeds on both, with lifespan and compound order rising alongside. GA shows nothing, ES is marginal. See LEARNING.md §0 |
 
 ---
 

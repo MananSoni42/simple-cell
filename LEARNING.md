@@ -1,8 +1,80 @@
-# Learning — research and plan
+# Learning — research, plan, and what is built
 
-How organisms might come to be good at living here. Nothing in this document is built yet.
+How organisms might come to be good at living here. §1–§7 are the research; **§0 is what now
+exists and what it measured.**
 
 Companion docs: [RULES.md](RULES.md) (the world), [PLAN.md](PLAN.md) (backlog), [BENCH.md](BENCH.md).
+
+---
+
+## 0. Built, and the first result
+
+Steps 1–4 of the suggested order (§9) are done: counters, the learner seam, four algorithms with
+two controls, the spawn source, a Learning tab, and the paired experiment runner.
+
+| Piece | Where | Note |
+|---|---|---|
+| Per-organism counters (§8.1) | `core/world.ts` | harvested, spent, moved, meals, order-ticks, peak reserve |
+| `Learner` seam (§8.3) | `core/learning.ts` | two events, one question: `genomeForSpawn`, `observe` |
+| `none`, random search (E1), steady-state GA (A1), ES (A2), CEM (A4) | `core/learning.ts` | one interface, so they are directly comparable |
+| Nine fitness scalars (§5) | `core/learning.ts` | offspring is the default and the only non-invented one |
+| `share` — the spawn source (§8.4) | `Init.learn.share` | 0 = watching only, 1 = every spawn from the learner |
+| Learning tab (§8.5) | `ui/setup.ts` | carried in the config, the URL and the run record |
+| Paired experiment runner (§8.6) | `core/experiment.ts`, `npm run experiment` | §7's protocol, implemented |
+
+**What is deliberately not built:** anything that changes a brain *during* a life (C1–C3), any
+change to structure (B1–B2), and every LLM path (D). Budding is also untouched — it is already
+selection plus mutation, it belongs to the world rather than to an algorithm, and a learner that
+also governed reproduction could not be switched off cleanly.
+
+### Three properties the seam guarantees
+
+1. **A learner cannot touch the world.** It may only choose the weights a *new* organism is born
+   with, and read the counters of ones that died. Physics, chemistry, energy and death are closed
+   to it. With `algo: 'none'` the world is bit-identical to one built before any of this existed —
+   the golden-state pins still hold unchanged.
+2. **It draws from its own random stream**, and the weights a spawn *would* have had are drawn
+   either way. So switching a learner on does not move a single food particle: at `share: 0` a
+   full run is bit-identical to one with no learner, and before `warmup` every run is. That is
+   what makes a paired comparison on one seed a comparison rather than two unrelated worlds.
+3. **It is state like any other**, so rewinding unlearns. A snapshot carries the pool or the
+   distribution; the few samples in flight are dropped, which costs one partial update.
+
+### First result — 12 paired seeds × 8,000 ticks
+
+One world per seed handed to every variant; `patchy` food at `average` level, 10 brain slots, a
+spawn every 25 ticks, warmup 800. Fitness pre-registered before the runs. Median over seeds, with
+the paired per-seed difference against the learner being off.
+
+**On offspring — the implicit measure, which invents nothing:**
+
+| variant | median | IQR | vs off | wins |
+|---|---|---|---|---|
+| off | 0.283 | 0.235–0.347 | — | — |
+| random search (E1) | 0.283 | 0.235–0.347 | +0.000 | 0/12 |
+| steady-state GA | 0.346 | 0.313–0.414 | +0.004 | 6/12 |
+| ES | 0.352 | 0.251–0.507 | +0.066 | 8/12 |
+| **CEM** | **0.453** | 0.374–0.593 | **+0.173** | **11/12** |
+
+**On net energy (harvested − spent):** off 9.68 → CEM 33.71, paired +19.90, **11/12** seeds. GA
+−1.65 (4/12), ES +0.74 (7/12).
+
+**Reading it honestly.**
+
+- **CEM works, and it is the only one that clearly does.** 11/12 seeds on both measures is a sign
+  test at p ≈ 0.003. GA is indistinguishable from noise at this pool size and run length; ES is
+  marginal.
+- **The gain is not a reward hack.** Measures nobody optimised moved the same way: mean lifespan
+  202 → 229 ticks, buddings 91 → 112, best compound order 6.3 → 7.3. An organism optimised for
+  offspring got better at living, which is the outcome we wanted and not the one to assume.
+- **It lifts the typical organism, not a freak.** The best single life found barely moves (random
+  search reaches 10 children by luck; CEM reaches 12), while the population mean rises 60%. The
+  learner is moving the distribution, which is what a distribution method should do.
+- **`off` and `random search` are identical by construction**, and that is the control working:
+  E1 keeps the best genome it sees and never spawns it, so its *fitness* column must match `off`
+  exactly. Its `best` column is the luck yardstick.
+- **Not yet done:** the ablation (§7) — turn CEM off mid-run and see whether the gain persists.
+  And every number here is one world shape; `harsh`, `drifting` and `pulsing` are untested.
 
 ---
 
@@ -333,12 +405,12 @@ Roughly in the order it would be built, and all of it useful even for the baseli
 
 ## 9. Suggested order
 
-1. **Instrument first** (§8.1–8.2). Without counters there is no fitness and no progress metric.
-2. **Turn off random spawning** (§8.4) and measure. Does the selection already present do
-   anything? This is a measurement, not an algorithm, and it decides how much the rest is needed.
-3. **Steady-state GA (A1)** — smallest real learner, reuses budding.
-4. **ES (A2)** alongside it, with CEM (A4) and random search (E1) as controls. Four algorithms, one
-   interface, directly comparable.
+1. ~~**Instrument first** (§8.1–8.2).~~ **Done.**
+2. ~~**Turn off random spawning** (§8.4) and measure.~~ **Done** — it became `share`, a fraction
+   rather than a switch, since random spawns are also what keeps a dying world from emptying.
+3. ~~**Steady-state GA (A1)**~~ **Done.** Measured: no detectable effect (§0).
+4. ~~**ES (A2)** alongside it, with CEM (A4) and random search (E1) as controls.~~ **Done.** CEM
+   is the one that works; see §0.
 5. **Reward-modulated Hebbian (C2)** — the first lifetime learning, and the only option that
    invents no objective. Run the Baldwin test.
 6. **MAP-Elites (A5)** — the best fit to what this project is for.

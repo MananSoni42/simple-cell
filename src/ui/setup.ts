@@ -16,6 +16,7 @@ import {
   substepsFor,
   sustenanceRate,
 } from '../core/params'
+import { FITNESS, type FitnessKey, LEARNERS, type LearnAlgo } from '../core/learning'
 import { MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
 import { capture } from '../render/renderer'
@@ -31,6 +32,7 @@ const TABS = [
   ['chemistry', 'Chemistry'],
   ['food', 'Food'],
   ['life', 'Life'],
+  ['learning', 'Learning'],
   ['compute', 'Compute'],
 ] as const
 type Tab = (typeof TABS)[number][0]
@@ -654,6 +656,153 @@ export function mountSetup(
     )
   }
 
+  // ------------------------------------------------------------------ learning
+  /**
+   * The one tab that has to argue with itself. Everything else here sets up a world; this decides
+   * whether anything in it is being optimised, which is a different kind of choice — so it says
+   * plainly that `none` is the control, that a fitness function is an invention rather than a
+   * measurement, and what each algorithm will actually do with the weights.
+   */
+  const learning = (): void => {
+    const p = panel('learning')
+    const L = init.learn
+    const on = L.algo !== 'none'
+    p.innerHTML = `
+      <div class="note" style="margin-bottom:14px">A learner may only choose the weights a
+        <i>new</i> organism is born with, and watch what became of the ones that died. It cannot
+        touch the physics, the chemistry or the energy, and it draws from its own random stream —
+        so switching one on leaves the same world, with the same food in the same places. Budding
+        is left alone: it is already selection plus mutation, and it belongs to the world rather
+        than to an algorithm.</div>
+      <div class="field"><div class="field-head"><label>how new organisms get their weights</label></div>
+        <div class="presets" id="s-algos"></div>
+        <div class="field-hint" id="s-algo-hint"></div>
+      </div>
+      <div class="cols"><div id="s-learn-l"></div><div id="s-learn-r"></div></div>`
+
+    q('#s-algos').innerHTML = LEARNERS.map(
+      (l) => `<button type="button" data-algo="${l.key}" class="${l.key === L.algo ? 'on' : ''}">${l.name}</button>`,
+    ).join('')
+    q('#s-algo-hint').textContent = LEARNERS.find((l) => l.key === L.algo)?.blurb ?? ''
+    for (const b of Array.from(p.querySelectorAll<HTMLElement>('[data-algo]'))) {
+      b.addEventListener('click', () => {
+        init.learn = { ...init.learn, algo: b.dataset.algo as LearnAlgo }
+        refresh()
+      })
+    }
+    if (!on) return
+
+    const chosen = FITNESS.find((f) => f.key === L.fitness)!
+    fieldsOf(q('#s-learn-l').appendChild(card('What counts as doing well'))).append(
+      new Chips<FitnessKey>({
+        label: 'fitness',
+        value: L.fitness,
+        options: FITNESS.map((f) => ({ value: f.key, label: f.name, hint: f.blurb })),
+        onChange: (v) => {
+          init.learn = { ...init.learn, fitness: v }
+          refresh()
+        },
+      }).el,
+      (() => {
+        const d = document.createElement('div')
+        d.className = 'stab'
+        d.innerHTML = chosen.invented
+          ? `<b class="warn">a stated choice</b> — ${chosen.blurb}. Optimising this produces organisms
+             good at <i>this</i>, which is not the same as finding out what the world can support.
+             The run record says which measure was used.`
+          : `<b class="ok">the world's own measure</b> — offspring is the one number the world was
+             already counting for its own reasons, so nothing has been written down that was not
+             there already.`
+        return d
+      })(),
+      new Slider({
+        label: 'learn nothing before',
+        min: 0,
+        max: 20000,
+        step: 100,
+        value: L.warmup,
+        curve: 'log',
+        format: (v) => `${Math.round(v)}t`,
+        hint: () => 'startup transients would otherwise poison the first updates',
+        onChange: (v) => {
+          init.learn = { ...init.learn, warmup: Math.round(v) }
+          sync()
+        },
+      }).el,
+      new Slider({
+        label: 'share of new organisms',
+        min: 0,
+        max: 1,
+        step: 0.05,
+        value: L.share,
+        format: (v) => `${Math.round(v * 100)}%`,
+        hint: (v) =>
+          v === 0
+            ? 'none: the learner only watches, and the world is identical to one with no learner at all'
+            : v < 1
+              ? `${Math.round(v * 100)}% come from the learner and the rest from chance — random spawns dilute selection, which is the single biggest knob here`
+              : 'every spawn comes from the learner; budding still passes on whatever its parent had',
+        onChange: (v) => {
+          init.learn = { ...init.learn, share: v }
+          refresh()
+        },
+      }).el,
+    )
+
+    const right = card(L.algo === 'ga' ? 'Pool and breeding' : 'Distribution')
+    q('#s-learn-r').appendChild(right)
+    const slider = (
+      label: string,
+      key: keyof typeof L,
+      min: number,
+      max: number,
+      step: number,
+      hint: (v: number) => string,
+      round = false,
+    ): HTMLElement =>
+      new Slider({
+        label,
+        min,
+        max,
+        step,
+        value: L[key] as number,
+        format: (v) => (round ? String(Math.round(v)) : v.toFixed(2)),
+        hint,
+        onChange: (v) => {
+          init.learn = { ...init.learn, [key]: round ? Math.round(v) : v }
+          sync()
+        },
+      }).el
+
+    if (L.algo === 'ga') {
+      fieldsOf(right).append(
+        slider('pool size', 'pool', 2, 200, 1, (v) => `the best ${Math.round(v)} dead organisms are kept to breed from`, true),
+        slider('tournament', 'tournament', 1, 16, 1, (v) => (v === 1 ? 'a random pool member, so no selection pressure at all' : `best of ${Math.round(v)} drawn at random — higher is greedier`), true),
+        slider('crossover', 'crossover', 0, 1, 0.05, (v) => (v === 0 ? 'children come from one parent' : `${Math.round(v * 100)}% of children mix two winners, weight by weight`)),
+        slider('mutation σ', 'sigma', 0, 1, 0.01, (v) => (v === 0 ? 'exact copies: the pool can never improve on itself' : 'Gaussian noise added to every weight')),
+        slider('forget after', 'maxAge', 1000, 200000, 1000, (v) => `pool entries older than ${Math.round(v)} ticks are dropped: fitness earned under a food regime that has since changed misleads`, true),
+      )
+    } else if (L.algo === 'random') {
+      fieldsOf(right).append(
+        (() => {
+          const d = document.createElement('div')
+          d.className = 'note'
+          d.textContent =
+            'nothing to tune: spawns stay random and the best genome ever seen is merely recorded. It is the yardstick — a learner that cannot beat luck has not learned.'
+          return d
+        })(),
+      )
+    } else {
+      fieldsOf(right).append(
+        slider('exploration σ', 'sigma', 0.01, 1, 0.01, (v) => `samples sit ${v.toFixed(2)} away from the mean, per weight`),
+        slider('batch', 'batch', 2, 128, 1, (v) => `the mean is updated once every ${Math.round(v)} deaths of its own samples`, true),
+        ...(L.algo === 'es'
+          ? [slider('step size', 'lr', 0.01, 2, 0.01, (v) => `the mean moves ${v.toFixed(2)} of the rank-weighted direction each update`)]
+          : []),
+      )
+    }
+  }
+
   // ------------------------------------------------------------------ compute
   const compute = (): void => {
     const p = panel('compute')
@@ -794,6 +943,8 @@ export function mountSetup(
       ['walls', 'terrain'], ['decay_free', 'decay'], ['substeps', 'sub-steps'], ['quantized', 'quantized'],
     ]
     const diffs = watch.filter(([k]) => String(base[k]) !== String(now[k])).map(([k, label]) => `${label} ${now[k]}`)
+    // learning is nested, and it is the one change nobody should be able to miss
+    if (init.learn.algo !== 'none') diffs.unshift(`learning: ${init.learn.algo} on ${init.learn.fitness}`)
     if (diffs.length === 0) return ''
     return `— ${diffs.slice(0, 3).join(' · ')}${diffs.length > 3 ? ` and ${diffs.length - 3} more` : ''}`
   }
@@ -888,6 +1039,7 @@ export function mountSetup(
     chemistry()
     food()
     life()
+    learning()
     compute()
     paintTabs()
     sync()

@@ -23,6 +23,8 @@ export interface Snapshot {
   freeFood: Int32Array
   freeFoodCount: number
   lineageCounter: number
+  /** The learner's own state — its pool or its distribution — flattened. */
+  learner: Float64Array
   /** False until the slot has been written at least once. */
   valid: boolean
 }
@@ -35,14 +37,14 @@ function views(w: World): (Float64Array | Float32Array | Int32Array | Int16Array
     w.type, w.alive,
     w.owner, w.socket, w.cool, w.repCool, w.bornAt, w.gen, w.parent, w.lineage, w.children,
     w.since, w.limbs, w.brainSig, w.bondCool, w.bonds.partner,
-    w.harvested, w.spent, w.moved, w.meals, w.orderTicks, w.peakReserve,
+    w.harvested, w.spent, w.moved, w.meals, w.orderTicks, w.peakReserve, w.learnId,
   ]
 }
 
 export function snapshotBytes(w: World): number {
   let n = 0
   for (const v of views(w)) n += v.byteLength
-  return n + w.field.byteLength + 512
+  return n + w.field.byteLength + 8 * w.learner.saveSize() + 512
 }
 
 /**
@@ -69,6 +71,7 @@ export function allocSnapshot(w: World): Snapshot {
     freeFood: new Int32Array(w.cap),
     freeFoodCount: 0,
     lineageCounter: 1,
+    learner: new Float64Array(w.learner.saveSize()),
     valid: false,
   }
 }
@@ -116,6 +119,8 @@ export function writeSnapshot(w: World, snap: Snapshot): Snapshot {
   snap.freeFoodCount = slots.length
   for (let i = 0; i < slots.length; i++) snap.freeFood[i] = slots[i]
   snap.lineageCounter = w.lineageCounter
+  // a learner is state like any other: rewinding to before it learned something has to unlearn it
+  if (snap.learner.length === w.learner.saveSize()) w.learner.saveInto(snap.learner, 0)
   snap.valid = true
   return snap
 }
@@ -161,6 +166,7 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   w.field.set(snap.field)
   w.setFreeFoodSlots(snap.freeFood.subarray(0, snap.freeFoodCount))
   w.lineageCounter = snap.lineageCounter
+  if (snap.learner.length === w.learner.saveSize()) w.learner.loadFrom(snap.learner, 0)
   w.aggregates.reset()
   w.orders.reset()
   w.grid.build()

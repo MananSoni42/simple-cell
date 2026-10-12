@@ -2,6 +2,7 @@ import type { Perf } from '../compute/select'
 import type { Init } from '../core/params'
 import type { AggregateStats } from '../core/aggregates'
 import type { Census, LifeStats } from '../core/metrics'
+import type { LearnerStatus } from '../core/learning'
 import type { OrganismFile } from '../core/organism'
 import type { RunRecord } from '../core/recorder'
 import type { OrderStats } from '../core/orders'
@@ -49,6 +50,8 @@ export interface StatsSnapshot {
   budded: number
   deaths: number
   recordAge: number
+  /** Present only when a learner is running, so the rail can stay quiet otherwise. */
+  learner?: LearnerStatus
 }
 
 export interface RunReport {

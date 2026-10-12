@@ -948,3 +948,57 @@ offers no way to be used.
 **Use in world** arms an organism; switch to the Organism tool and every click places a copy. That
 is the composition step: organisms from different worlds, placed where you want them, meeting for
 the first time.
+
+---
+
+## 23. Learning
+
+**A learner is an initial condition, not a law.** It belongs in the same tier as temperature and
+the food pattern: something you choose for a world. `none` is the default, and with it the world
+is bit-identical to one built before learning existed — the golden pins are the proof.
+
+**What a learner may touch, exhaustively:** the weights a *new* organism is born with. Nothing
+else. It cannot change physics, chemistry, energy, death, bonding or reproduction, and it has no
+way to reach them. It sees two events and answers one question:
+
+| | |
+|---|---|
+| `genomeForSpawn(tick)` | weights for an organism about to be born, or null to let chance decide |
+| `observe(record, tick)` | a life that just ended, with every counter it accumulated |
+
+Every algorithm in LEARNING.md fits that seam, and so does the control, so the experiment and the
+baseline run the same code path.
+
+**Budding is left alone.** It is already heritable variation plus differential reproduction — it
+belongs to the world rather than to an algorithm, and a learner that also governed reproduction
+could not be switched off cleanly.
+
+### The two invariants
+
+1. **A learner draws from its own random stream**, and a spawn's random weights are drawn whether
+   or not they are used. So switching a learner on moves no food particle and changes no body
+   assembly: at `share: 0` a whole run is bit-identical to one with no learner, and every run is
+   until `warmup` passes. This is what makes a paired run on one seed a comparison rather than two
+   unrelated worlds, and in a world whose organism counts swing from 1 to 12 on the same seed, it
+   is the only honest way to measure anything.
+2. **A learner is state**, so a rewind unlearns. Its pool or distribution rides in the snapshot;
+   the handful of samples in flight are dropped, costing one partial update rather than
+   correctness. A distribution learner therefore tags each sample it hands out and the tag travels
+   on the organism, because recovering a sample from the weights would be wrong the moment the
+   mean moved.
+
+### Fitness is a stated choice
+
+Nine scalars are offered, all exactly known at death. **Offspring is the default, and the only one
+that is not an invention** — it is the number the world was already keeping for its own reasons.
+Every other scalar is written down by us, so the UI says so, and the run record and the summary
+screen both name the measure that was used. Optimising "energy harvested" produces organisms good
+at harvesting energy, which is not the same as discovering what this world can support.
+
+### How a learner gets believed
+
+`npm run experiment` implements the protocol rather than leaving it to discipline: one world per
+seed handed to every variant, the controls always included, a measure fixed before the runs,
+medians with an inter-quartile range, and the paired per-seed difference. A single run proves
+nothing here. The first results are in LEARNING.md §0 — of the four algorithms, one (CEM) clearly
+works, and the measures nobody optimised moved with it.

@@ -14,6 +14,7 @@ import {
   clamp11,
   initFromSeed,
 } from '../core/params'
+import { FITNESS, LEARNERS, type LearnConfig } from '../core/learning'
 import { N_MATRIX } from '../core/types'
 
 export const CONFIG_VERSION = 1
@@ -50,6 +51,31 @@ const points = (v: unknown, size: number): [number, number][] =>
  * Rebuilds an Init from untrusted JSON. Anything missing or out of range falls back to what the
  * seed would have produced, so an old or hand-edited file still loads.
  */
+/**
+ * How a world learned is part of the world, so it travels in the config and comes back validated.
+ * An unknown algorithm falls back to `none` rather than throwing: a config from a later build
+ * should still open, minus the part this build cannot do.
+ */
+function learnConfig(src: unknown, base: LearnConfig): LearnConfig {
+  if (!src || typeof src !== 'object') return { ...base }
+  const r = src as Record<string, unknown>
+  const algo = LEARNERS.some((l) => l.key === r.algo) ? (r.algo as LearnConfig['algo']) : base.algo
+  const fitness = FITNESS.some((f) => f.key === r.fitness) ? (r.fitness as LearnConfig['fitness']) : base.fitness
+  return {
+    algo,
+    fitness,
+    warmup: Math.round(num(r.warmup, base.warmup, 0, 1e8)),
+    share: num(r.share, base.share, 0, 1),
+    sigma: num(r.sigma, base.sigma, 0, 5),
+    batch: Math.round(num(r.batch, base.batch, 2, 4096)),
+    pool: Math.round(num(r.pool, base.pool, 2, 4096)),
+    tournament: Math.round(num(r.tournament, base.tournament, 1, 64)),
+    crossover: num(r.crossover, base.crossover, 0, 1),
+    lr: num(r.lr, base.lr, 0, 10),
+    maxAge: Math.round(num(r.maxAge, base.maxAge, 1, 1e9)),
+  }
+}
+
 export function parseConfig(text: string): { init: Init; perf?: Perf } {
   const raw = JSON.parse(text) as Partial<ConfigFile> & Record<string, unknown>
   const src = (raw.init ?? raw) as Partial<Init> & Record<string, unknown>
@@ -109,6 +135,7 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     n_patch: Math.round(num(src.n_patch, base.n_patch, 0, 1e4)),
     r_patch: num(src.r_patch, base.r_patch, 1, 1e5),
     v_patch: num(src.v_patch, base.v_patch, 0, 100),
+    learn: learnConfig(src.learn, base.learn),
   }
   init.n_brain = Math.min(init.n_brain, init.n_intrinsic)
   init.n_start = Math.min(init.n_start, init.n_brain)

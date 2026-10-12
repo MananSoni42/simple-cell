@@ -1,3 +1,4 @@
+import { LEARN_DEFAULTS, type LearnConfig } from './learning'
 import { Rng } from './rng'
 import { N_MATRIX } from './types'
 
@@ -154,6 +155,11 @@ export interface Init {
   n_patch: number
   r_patch: number
   v_patch: number
+  /**
+   * How new organisms get their weights. `algo: 'none'` is the default and the control, and a
+   * world with it is identical in every respect to one built before learning existed.
+   */
+  learn: LearnConfig
 }
 
 /** Snaps the non-food block of a matrix to QUANTA, in place, keeping it symmetric. */
@@ -284,6 +290,7 @@ function seedWorld(seed: number, scale = 1): Init {
     n_patch: (1 + rng.int(3)) * area,
     r_patch: 35 + rng.int(31),
     v_patch: Math.round(rng.range(0.05, 0.2) * 100) / 100,
+    learn: { ...LEARN_DEFAULTS },
   }
 }
 

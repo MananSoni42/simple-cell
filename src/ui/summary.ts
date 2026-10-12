@@ -88,6 +88,15 @@ export function mountSummary(root: HTMLElement, result: RunResult, hooks: { agai
           <h1>RUN ENDED</h1>
           <div class="note">seed ${f ? result.init.seed : ''} · ${result.init.size}² · ${fmt.ticks(r.ticks)} ·
             sampled every ${fmt.n(r.bucketTicks)} into ${r.n} buckets</div>
+          ${
+            f.learner
+              ? `<div class="note" style="margin-top:5px;color:var(--accent)">learned with
+                 <b>${f.learner.name}</b> on <b>${f.learner.fitness}</b> —
+                 ${fmt.n(f.learner.seen)} lives scored, ${fmt.n(f.learner.updates)} updates,
+                 best ${fmt.sig(f.learner.best)}, last ${fmt.sig(f.learner.recent)} on average.
+                 A chosen measure is part of the result, not a property of the world.</div>`
+              : ''
+          }
         </div>
         <div class="row">
           <button class="primary" id="x-again">Run it again</button>

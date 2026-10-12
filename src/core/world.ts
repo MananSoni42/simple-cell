@@ -2,6 +2,7 @@ import { type ForceBackend, serialBackend } from './backend'
 import { type KernelArrays, type KernelParams } from './forcekernel'
 import { AggregateTracker } from './aggregates'
 import { Bonds, bondForce } from './bonds'
+import { LEARN_DEFAULTS, type Learner, type LifeStats, makeLearner } from './learning'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
 import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from './neurons'
@@ -34,6 +35,8 @@ export interface OrganismSpec {
   wBrain?: Float64Array
   parent?: number
   gen?: number
+  /** The learner's tag, when these weights came from one. */
+  learnId?: number
 }
 
 function buffer(bytes: number, shared: boolean): ArrayBufferLike {
@@ -195,6 +198,17 @@ export class World {
   readonly meals: Int32Array // food particles consumed
   readonly orderTicks: Float64Array // time spent in a compound, weighted by its order
   readonly peakReserve: Float64Array // the most the brain ever held
+  /**
+   * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
+   * learner has to match a death back to the sample that caused it, and recovering the sample from
+   * the weights would be wrong the moment its mean moved — so the tag travels with the body.
+   */
+  readonly learnId: Int32Array
+  /**
+   * How new organisms get their weights. `none` by default, in which case this object only ever
+   * answers "let chance decide" and the world behaves exactly as it did before learning existed.
+   */
+  readonly learner: Learner
   lineageCounter = 1
   nClamped = 0 // how often the per-tick step guardrail has had to bite
   nSteps = 0
@@ -246,6 +260,7 @@ export class World {
     this.init = init
     this.L = { ...LAWS, SIZE: init.size, fieldN: Math.min(256, Math.round((LAWS.fieldN * init.size) / LAWS.SIZE)), ...opts.laws }
     this.rng = new Rng((init.seed ^ 0x9e3779b9) | 0)
+    this.learner = makeLearner(init.learn ?? LEARN_DEFAULTS, init.seed)
     const L = this.L
 
     this.A = new Float64Array(buffer(8 * N_MATRIX * N_MATRIX, opts.shared ?? false))
@@ -299,6 +314,7 @@ export class World {
     this.meals = new Int32Array(n)
     this.orderTicks = new Float64Array(n)
     this.peakReserve = new Float64Array(n)
+    this.learnId = new Int32Array(n)
     this.since = new Int32Array(n)
     this.wasLive = new Uint8Array(n)
     this.limbs = new Int32Array(n * 4).fill(-1)
@@ -478,6 +494,21 @@ export class World {
     return e
   }
 
+  /** Everything one finished life amounts to, as the learner and the collection both want it. */
+  lifeStatsOf(b: number, age = this.tick - this.bornAt[b]): LifeStats {
+    return {
+      age,
+      children: this.children[b],
+      generation: this.gen[b],
+      harvested: this.harvested[b],
+      spent: this.spent[b],
+      moved: this.moved[b],
+      meals: this.meals[b],
+      orderTicks: this.orderTicks[b],
+      peakReserve: this.peakReserve[b],
+    }
+  }
+
   isBrain(b: number): boolean {
     return this.owner[b] === b
   }
@@ -555,6 +586,7 @@ export class World {
     this.tick++
     this.shine()
     if (this.tick % this.init.T_spawn === 0) for (let k = 0; k < this.init.spawn_batch; k++) this.spawnRandom()
+    this.learner.review(this.tick)
     for (let i = 0; i < this.nMatter; i++) {
       if (this.cool[i] > 0) this.cool[i]--
       if (this.repCool[i] > 0) this.repCool[i]--
@@ -1092,8 +1124,17 @@ export class World {
     this.lifeOrganisms.record(age)
     this.lifeOrganismsWindow.record(this.tick, age)
     this.recordAge = Math.max(this.recordAge, age)
+    const wBrain = this.wBrain[b]
+    const wLimb = this.wLimb[b]
+    if (wBrain && wLimb) {
+      this.learner.observe(
+        { id: this.learnId[b], wBrain, wLimb, diedAt: this.tick, stats: this.lifeStatsOf(b, age) },
+        this.tick,
+      )
+    }
     this.wLimb[b] = undefined
     this.wBrain[b] = undefined
+    this.learnId[b] = 0
   }
 
   private deaths(): void {
@@ -1375,6 +1416,7 @@ export class World {
     this.mvy[b] = 0
     this.wLimb[b] = spec.wLimb ?? Float64Array.from({ length: N_WLIMB }, () => rng.gauss())
     this.wBrain[b] = spec.wBrain ?? Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
+    this.learnId[b] = spec.learnId ?? 0
     this.gen[b] = spec.gen ?? 0
     this.parent[b] = spec.parent ?? -1
     this.children[b] = 0
@@ -1610,7 +1652,23 @@ export class World {
       this.endow(idx)
     }
     const [sx, sy] = at ?? this.freeSpot()
-    this.placeOrganism({ brain, x: sx, y: sy, limbs })
+    // The weights a spawn would have had are drawn here whether or not they are used, in the same
+    // order placeOrganism would have drawn them. Switching a learner on therefore does not move a
+    // single food particle, which is what makes a paired run on one seed an honest comparison —
+    // the only kind this world's variance allows.
+    const randLimb = Float64Array.from({ length: N_WLIMB }, () => rng.gauss())
+    const randBrain = Float64Array.from({ length: N_OUT * N_IN }, () => 0.5 * rng.gauss())
+    // the one place a learner may act: the weights a new organism is born with
+    const g = this.learner.genomeForSpawn(this.tick)
+    this.placeOrganism({
+      brain,
+      x: sx,
+      y: sy,
+      limbs,
+      wLimb: g?.wLimb ?? randLimb,
+      wBrain: g?.wBrain ?? randBrain,
+      learnId: g?.id,
+    })
     return true
   }
 }

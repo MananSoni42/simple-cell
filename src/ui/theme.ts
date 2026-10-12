@@ -64,6 +64,15 @@ export const fmt = {
   pct(v: number): string {
     return `${Math.round(v * 100)}%`
   },
+  /** For quantities whose scale is not known in advance — a fitness can be 0.3 or 30,000. */
+  sig(v: number): string {
+    if (!Number.isFinite(v)) return '–'
+    const a = Math.abs(v)
+    if (a === 0) return '0'
+    if (a < 0.01) return v.toExponential(1)
+    if (a < 10) return v.toFixed(2)
+    return fmt.n(v)
+  },
 }
 
 export const reducedMotion = (): boolean =>
