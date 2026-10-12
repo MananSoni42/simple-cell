@@ -2,6 +2,7 @@ import type { Summary } from '../core/lifestats'
 import { MAX_ORDER } from '../core/orders'
 import type { StatsSnapshot } from '../sim/protocol'
 import { sparkline } from './charts'
+import { LEVELS } from '../core/ladder'
 import { CHART, INK, fmt } from './theme'
 
 const HISTORY = 200
@@ -90,15 +91,20 @@ export class StatsPanel {
     // spread across six blocks.
     const L = st.ladder
     const done = L.reached + 1
-    set('s-rung-n', `Rung ${done} of ${L.top + 1}`)
-    set('s-rung', done > 0 ? L.rungs[L.reached].name : 'nothing alive')
+    // the level is the headline: it says what *kind* of thing exists, where the rung count says
+    // only how far along a list the world has got
+    set('s-rung-n', `${L.levelName}${L.level >= 0 ? ` · level ${L.level}` : ''}`)
+    set('s-rung', `rung ${done}/${L.top + 1} · score ${L.score.toFixed(1)}`)
     // The ladder is drawn climbed: every rung shows where this world stands against it, so a
     // rung that is not met still says by how much it is missed rather than going blank.
     this.el['s-ladder'].innerHTML = L.rungs
       .map((r) => {
         const state = r.met ? 'met' : r.n === (L.next?.n ?? -1) ? 'next' : 'locked'
         const mark = r.met ? '✓' : state === 'next' ? '▸' : '·'
-        return `<li class="${state}" title="${r.needs}"><i>${mark}</i><span>${r.name}</span><em>${r.at}</em></li>`
+        // the progress figure on an unmet rung is what makes the ladder a gradient rather than a
+        // cliff: "nearly" and "nowhere near" look different
+        const pct = r.met ? '' : ` <b>${Math.round(100 * Math.min(1, r.ratio))}%</b>`
+        return `<li class="${state} lvl${r.level}" title="${LEVELS[r.level]} — ${r.needs}"><i>${mark}</i><span>${r.name}${pct}</span><em>${r.at}</em></li>`
       })
       .reverse() // a ladder is climbed upward, so the furthest rung belongs at the top
       .join('')

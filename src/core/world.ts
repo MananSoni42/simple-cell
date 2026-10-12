@@ -3,6 +3,7 @@ import { type KernelArrays, type KernelParams } from './forcekernel'
 import { AggregateTracker } from './aggregates'
 import { Bonds, bondForce } from './bonds'
 import { type FitnessSpec, describeSpec } from './fitness'
+import { LadderTracker } from './ladder'
 import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, makeLearner } from './learning'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
@@ -225,6 +226,17 @@ export class World {
   readonly eRepro: Float64Array
   readonly repWait: Float64Array
   /**
+   * What a body was given at birth and how long that gift alone would last. Together they are the
+   * yardstick the ladder measures lives against: an organism that outlives its coasting time has
+   * fed itself, whatever the metabolism dial says — which is what makes the measure impossible to
+   * game by making living cheaper.
+   */
+  readonly endowment: Float64Array
+  readonly coastT: Float64Array
+  /** Has this organism ever been part of an order-2+ group, and was its parent one when it was born. */
+  readonly hasJoined: Uint8Array
+  readonly parentJoined: Uint8Array
+  /**
    * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
    * learner has to match a death back to the sample that caused it, and recovering the sample from
    * the weights would be wrong the moment its mean moved — so the tag travels with the body.
@@ -249,6 +261,8 @@ export class World {
    * with X on Y" is a lie about most of the run.
    */
   readonly fitnessChanges: { tick: number; measure: string }[] = []
+  /** The ladder of milestones, tracked with windows and hysteresis so the readout cannot flicker. */
+  readonly ladderT = new LadderTracker()
   /**
    * The tick convergence began, or null while the colonies are held apart. `merge_hold` starts a
    * world in the held state; `beginMerge()` releases it.
@@ -383,6 +397,10 @@ export class World {
     this.seekTicks = new Float64Array(n)
     this.eRepro = new Float64Array(n)
     this.repWait = new Float64Array(n)
+    this.endowment = new Float64Array(n)
+    this.coastT = new Float64Array(n)
+    this.hasJoined = new Uint8Array(n)
+    this.parentJoined = new Uint8Array(n)
     this.learnId = new Int32Array(n)
     this.island = new Int8Array(n)
     this.since = new Int32Array(n)
@@ -693,6 +711,7 @@ export class World {
     this.shine()
     if (this.tick % this.init.T_spawn === 0) for (let k = 0; k < this.init.spawn_batch; k++) this.spawnRandom()
     this.learner.review(this.tick)
+    if (this.tick % this.orders.sampleEvery === 0) this.ladderT.observe(this)
     for (let i = 0; i < this.nMatter; i++) {
       if (this.cool[i] > 0) this.cool[i]--
       if (this.repCool[i] > 0) this.repCool[i]--
@@ -712,7 +731,10 @@ export class World {
     for (const members of this.orders.groupsNow(this)) {
       if (members.length < 2) continue
       const credit = Math.pow(members.length - 1, alpha) * this.orders.sampleEvery
-      for (const b of members) this.orderTicks[b] += credit
+      for (const b of members) {
+        this.orderTicks[b] += credit
+        this.hasJoined[b] = 1 // sticky for this life: the ladder asks "did it ever", not "is it now"
+      }
     }
   }
 
@@ -1346,6 +1368,7 @@ export class World {
     this.lifeOrganisms.record(age)
     this.lifeOrganismsWindow.record(this.tick, age)
     this.recordAge = Math.max(this.recordAge, age)
+    this.ladderT.observeDeath(this, b, age)
     const wBrain = this.wBrain[b]
     const wLimb = this.wLimb[b]
     if (wBrain && wLimb) {
@@ -1687,6 +1710,17 @@ export class World {
       this.limbs[b * 4 + quad] = idx
     }
     this.placeLimbs(b)
+    // the yardsticks of this life: what it was given, and how long the gift alone sustains it
+    let given = this.energy[b]
+    let body = 1
+    for (const { idx } of spec.limbs) {
+      given += this.energy[idx]
+      body++
+    }
+    this.endowment[b] = given
+    this.coastT[b] = given / Math.max(1e-9, body * this.L.c_up)
+    this.hasJoined[b] = 0
+    this.parentJoined[b] = spec.parent !== undefined && spec.parent >= 0 ? this.hasJoined[spec.parent] : 0
   }
 
   /**

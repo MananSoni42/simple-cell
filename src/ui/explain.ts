@@ -96,45 +96,42 @@ export function explainHTML(): string {
         <p>The point of all this is organisms that live longer and slowly become more complex, and
         the hard part is knowing whether that is happening. A single number cannot say: a world
         full of long-lived adults and a flood of newborns reads as <i>short</i>-lived if you
-        average the dead. So progress is tracked as a <b>ladder of ten milestones</b>, shown live
-        in the world's left rail, each one a prerequisite for the next rather than merely harder.</p>
+        average the dead. So progress is tracked as thirteen milestones in <b>six levels of
+        organisation</b>, shown live in the world's left rail.</p>
+        <p>The levels follow the shape of the major transitions in life's own history, and each
+        level's units become the next level's <i>parts</i> — which is what makes this a hierarchy
+        of complexity rather than a list sorted by difficulty.</p>
         <ol class="ladder-doc">
-          <li><b>Persists</b> — anything alive at all.</li>
-          <li><b>Lifespan</b> — a life of 1,000 ticks.</li>
-          <li><b>Self-funding</b> — the living have taken in more than they have spent, so they are
-            not simply coasting on what they were born with.</li>
-          <li><b>Foraging</b> — taking in energy faster than chance would give. This one is
-            deliberately a <i>rate</i>, because any measure of a total can be passed by living a
-            long time and doing nothing.</li>
-          <li><b>Seeks food</b> — moving <i>toward</i> food rather than stumbling on it, measured
-            as the cosine between where a body went and where it could tell food was. Every other
-            foraging measure can be passed by luck or by stillness: totals reward a long life,
-            rates reward being born in a patch. A random walk scores zero here, never moving scores
-            nothing at all, and only going somewhere on purpose scores.</li>
-          <li><b>Whole bodies</b> — limbs kept rather than lost, which is the first sign of
-            anything like repair.</li>
-          <li><b>Joining</b> — two or more organisms bonded into one object.</li>
-          <li><b>Structure</b> — one of those holding together for 2,000 ticks.</li>
-          <li><b>Outlives its parts</b> — a structure that has replaced as many members as it has
-            and is still there. A clump of the originals is a clump; this is the first rung worth
-            calling alive.</li>
-          <li><b>Heritable joining</b> — offspring of joiners join more often than others do, so
-            organisation is being transmitted rather than rediscovered.</li>
-          <li><b>Group birth</b> — a structure that grows by birth inside itself.</li>
+          <li><b>Matter</b> — <i>Persists</i>: anything alive, and staying that way.</li>
+          <li><b>Metabolism</b> — <i>Feeds</i>: the typical life ate more than it was given.
+            <i>Lasts</i>: long lives, measured against what coasting on the birth endowment alone
+            would allow.</li>
+          <li><b>Agency</b> — <i>Seeks</i>: movement aligned with food beyond what chance explains.
+            <i>Keeps its body</i>: limbs held rather than lost, the first sign of repair.</li>
+          <li><b>Heredity</b> — <i>Breeds true</i>: grandchildren, so the chain works rather than
+            one lucky bud. <i>Lineage outlives</i>: a living line many lifetimes old, so the
+            lineage is now the thing that persists.</li>
+          <li><b>Association</b> — <i>Joins</i>: organisms bonded into one object.
+            <i>Holds</i>: one of those lasting half a lifetime. <i>Renews</i>: it has replaced as
+            many members as it has and is still there — a clump of the originals is a clump, this
+            is the first rung worth calling alive.</li>
+          <li><b>Collective</b> — <i>Moves together</i>: a held structure travelling further than
+            drift explains. <i>Transmits joining</i>: children of joiners join more often than
+            others, so organisation is inherited rather than rediscovered. <i>Grows from
+            within</i>: a birth inside a structure that then persists — the structure reproducing.</li>
         </ol>
-        <p>The rail shows every rung, met or not, with where this world currently stands against
-        it — so a rung that is missed says by how much. The furthest rung reached is the highest one
-        with <i>nothing unmet below it</i>: a ladder is only as high as its lowest gap.</p>
-        <p><b>One honest caveat.</b> The thresholds are absolute, and the fair comparison would be
-        paired — the same world with and without its learner, over many seeds — which a live
-        readout cannot do. They are calibrated instead against what this world managed before any
-        of it was tuned: a 90th-percentile lifespan of 489 ticks, 0.078 energy a tick, and
-        compounds that lasted about ten ticks. Read a rung as "further than the world used to get",
-        not as a verdict on what a particular world could do.</p>
-        <p>The last two rungs are not measured yet, and say so rather than pretending. Nothing in
-        the laws transmits organisation between generations, so there is currently no mechanism for
-        them to be reached — that is the next thing the world needs, not the next thing a learner
-        needs.</p>
+        <p><b>Every threshold is a comparison against a null, in the world's own units</b>, and that
+        is the part that took longest to get right. An earlier version asked for "a life of 1,000
+        ticks", which the metabolism dial could simply buy — make living cheaper and the rung falls
+        without anything having improved. Lifespan is now counted in <b>coasting times</b>: how
+        long a newborn survives doing nothing at all. Seeking is a z-score against a random walk. A
+        structure's age is a fraction of its members' lifespan, and its travel is compared against
+        the diffusion of a clump its size. No dial changes what a rung means.</p>
+        <p>Each statistic is <b>windowed</b> over the recent dead or the recent samples, so a rung
+        describes a sustained condition rather than one lucky tick, and each has <b>hysteresis</b> —
+        on at the threshold, off only well below it — so the readout does not flicker while a number
+        sits on the line. Unmet rungs show how close they are, because "nearly" and "nowhere near"
+        are different facts.</p>
       </section>
     </div>
     <div class="go" id="ex-back-2">← back (Esc)</div>

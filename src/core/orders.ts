@@ -36,6 +36,10 @@ export interface OrderStats {
     order: number
     age: number
     replacements: number
+    /** Net distance the structure's centroid has travelled since it formed, torus-unwrapped. */
+    travel: number
+    /** Births that happened inside it. */
+    births: number
     /**
      * Its age as a fraction of an organism's life in this world — the number that says whether a
      * structure is a lasting thing or a passing clump. A pair that holds for a whole lifetime
@@ -79,6 +83,21 @@ interface Structure {
   replacements: number
   /** The largest order it has ever held. */
   peak: number
+  /**
+   * Where it has been. The centroid is unwrapped sample to sample on the torus, so `ux, uy` is a
+   * true position in the plane and net displacement means what it says — a path length would
+   * accumulate pure diffusion and claim every clump "moves".
+   */
+  ux: number
+  uy: number
+  /** Unwrapped centroid at founding, for net displacement. */
+  ox: number
+  oy: number
+  /** Raw (wrapped) centroid at the last sample, needed to unwrap the next one. */
+  cx: number
+  cy: number
+  /** Births that happened inside: a child whose parent was a member, seen among the members. */
+  births: number
 }
 
 export class OrderTracker {
@@ -174,6 +193,25 @@ export class OrderTracker {
    * that has been replaced wholesale correctly counts as new.
    */
   private trackStructures(w: World): void {
+    const S = w.init.size
+    const minImage = (d: number): number => ((d % S) + S * 1.5) % S - S / 2
+    /** Centroid on the torus, anchored to one member so a group straddling the seam stays whole. */
+    const centroid = (members: Set<number>): [number, number] => {
+      let ax = -1
+      let sx = 0
+      let sy = 0
+      let n = 0
+      for (const b of members) {
+        if (ax < 0) {
+          ax = b
+        }
+        sx += minImage(w.x[b] - w.x[[...members][0]])
+        sy += minImage(w.y[b] - w.y[[...members][0]])
+        n++
+      }
+      const b0 = [...members][0]
+      return [((w.x[b0] + sx / n) % S + S) % S, ((w.y[b0] + sy / n) % S + S) % S]
+    }
     const current = this.currentGroups(w).filter((g) => g.length >= 2).map((g) => new Set(g))
     const taken = new Set<number>()
     const next: Structure[] = []
@@ -192,20 +230,38 @@ export class OrderTracker {
           best = k
         }
       }
+      const [cx, cy] = centroid(members)
       if (best < 0) {
-        next.push({ members, since: w.tick, replacements: 0, peak: members.size })
+        next.push({ members, since: w.tick, replacements: 0, peak: members.size, ux: cx, uy: cy, ox: cx, oy: cy, cx, cy, births: 0 })
         continue
       }
       const st = this.structures[best]
       taken.add(best)
       let changed = 0
-      for (const m of members) if (!st.members.has(m)) changed++
+      let births = st.births
+      for (const m of members) {
+        if (!st.members.has(m)) {
+          changed++
+          // a newcomer that is this structure's own newborn: its parent is a member and it was
+          // born since the last sample. That is a birth *inside*, the thing rung 12 asks for.
+          const p = w.parent[m]
+          if (p >= 0 && (st.members.has(p) || members.has(p)) && w.tick - w.bornAt[m] <= 2 * this.sampleEvery) births++
+        }
+      }
       for (const m of st.members) if (!members.has(m)) changed++
       next.push({
         members,
         since: st.since,
         replacements: st.replacements + changed,
         peak: Math.max(st.peak, members.size),
+        // unwrap: move the plane position by the torus-shortest step the wrapped centroid took
+        ux: st.ux + minImage(cx - st.cx),
+        uy: st.uy + minImage(cy - st.cy),
+        ox: st.ox,
+        oy: st.oy,
+        cx,
+        cy,
+        births,
       })
     }
     this.structures = next
@@ -229,7 +285,15 @@ export class OrderTracker {
       // duration outweighs size: the exponent above 1 is what makes a brief giant score poorly
       const score = Math.max(0, st.peak - 1) * Math.pow(heldFrac, 1.5)
       if (!out.oldest || score > out.oldest.score) {
-        out.oldest = { order: st.peak, age, replacements: st.replacements, heldFrac, score }
+        out.oldest = {
+          order: st.peak,
+          age,
+          replacements: st.replacements,
+          heldFrac,
+          score,
+          travel: Math.hypot(st.ux - st.ox, st.uy - st.oy),
+          births: st.births,
+        }
       }
     }
     return out
