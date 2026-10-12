@@ -141,7 +141,17 @@ export function chemistryShape(spec: WorldSpec): { nonzero: number; meanAbs: num
   }
 }
 
-/** The pre-registered test of the prior: is the constrained region better than uniform draws? */
+/**
+ * The pre-registered test of the prior, asked directly: do candidates drawn from the constrained
+ * region beat the uniform control? Reported only where the catalog records where a draw came from.
+ */
+export function sourceFactor(rows: CatalogEntry[]): Factor | null {
+  const known = rows.filter((e) => e.source)
+  if (known.length < MIN_N * 2) return null
+  return factor('where the candidate came from', group(known, (e) => e.source!))
+}
+
+/** Derived shapes, which is how the same question is asked when the source was not recorded. */
 export function shapeFactors(rows: CatalogEntry[]): Factor[] {
   const s = (e: CatalogEntry) => chemistryShape(e.spec)
   return [
@@ -164,7 +174,7 @@ export interface Summary {
   /** Total simulated ticks and wall-clock hours, so the cost of a finding is on the record. */
   ticks: number
   hours: number
-  factors: { dials: Factor[]; couplings: Factor[]; shapes: Factor[] }
+  factors: { dials: Factor[]; couplings: Factor[]; shapes: Factor[]; source: Factor | null }
 }
 
 export function summarise(rows: CatalogEntry[]): Summary {
@@ -187,7 +197,7 @@ export function summarise(rows: CatalogEntry[]): Summary {
     bestScore: rows.length ? Math.max(...rows.map((r) => r.score)) : 0,
     ticks,
     hours: ms / 3.6e6,
-    factors: { dials: dialFactors(rows), couplings: couplingFactors(rows), shapes: shapeFactors(rows) },
+    factors: { dials: dialFactors(rows), couplings: couplingFactors(rows), shapes: shapeFactors(rows), source: sourceFactor(rows) },
   }
 }
 
@@ -208,6 +218,7 @@ export function report(s: Summary): string {
       }
     }
   }
+  if (s.factors.source) show('where the candidates came from', [s.factors.source])
   show('what the dials did', s.factors.dials)
   show('what shape of chemistry did', s.factors.shapes)
   show('which couplings mattered most', s.factors.couplings.slice(0, 6))

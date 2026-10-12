@@ -4,3 +4,6 @@ dist/
 *.log
 .vite/
 coverage/
+
+# search output: hundreds of megabytes of catalog, regenerable from the specs it contains
+search/

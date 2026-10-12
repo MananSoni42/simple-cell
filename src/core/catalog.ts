@@ -175,6 +175,15 @@ export interface CatalogEntry {
   /** Medians across seeds, when a phase ran more than one. */
   seeds: number
   at: number
+  /**
+   * Where the candidate came from: the constrained region, the uniform control, a mutation of an
+   * elite, or promotion from an earlier phase.
+   *
+   * This is the pre-registered test of the search's own prior, and leaving it out was an oversight
+   * — without it the constrained half can only be compared through derived shapes, which is an
+   * inference rather than the measurement that was promised.
+   */
+  source?: 'constrained' | 'uniform' | 'mutant' | 'promoted'
 }
 
 /** The header line of a catalog shard, so a file explains itself years later. */

@@ -14,17 +14,32 @@ import type { WorldSpec } from '../src/core/catalog'
  * which is what makes concurrent writing safe without a lock: the parent concatenates afterwards.
  */
 const [jobsPath, outPath] = process.argv.slice(2)
-const { specs, opts, seeds, phase } = JSON.parse(readFileSync(jobsPath, 'utf8')) as {
+const { specs, opts, seeds, phase, sources } = JSON.parse(readFileSync(jobsPath, 'utf8')) as {
   specs: WorldSpec[]
   opts: EvalOptions
   seeds: number
   phase: number
+  sources?: CatalogEntry['source'][]
 }
 
-for (const spec of specs) {
+/**
+ * Four significant figures on every number.
+ *
+ * A raw float costs seventeen bytes and carries about four digits of meaning: `score` arrives as
+ * 7.329226211664039 when 7.329 is the whole of the claim. Over two hundred thousand worlds the
+ * difference is some sixty megabytes of noise, and it makes the catalog unreadable besides.
+ */
+const trim = (v: unknown): unknown => {
+  if (typeof v === 'number') return Number.isInteger(v) ? v : Number(v.toPrecision(4))
+  if (Array.isArray(v)) return v.map(trim)
+  if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, trim(x)]))
+  return v
+}
+
+specs.forEach((spec, i) => {
   const t0 = Date.now()
   const got = evaluateSeeds(spec, opts, seeds)
-  const entry: CatalogEntry = { id: specId(spec), phase, ms: Date.now() - t0, at: Date.now(), ...got }
+  const entry: CatalogEntry = { id: specId(spec), phase, ms: Date.now() - t0, at: Date.now(), source: sources?.[i], ...got }
   // one line per world, flushed as it finishes: a killed search keeps everything it had done
-  appendFileSync(outPath, JSON.stringify(entry) + '\n')
-}
+  appendFileSync(outPath, JSON.stringify(trim(entry)) + '\n')
+})

@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { CATALOG_VERSION, type CatalogEntry, type WorldSpec, best, parseCatalog, rank, specId } from '../src/core/catalog'
 import type { EvalOptions } from '../src/core/evaluate'
-import { type Source, mix } from '../src/core/sample'
+import { mix } from '../src/core/sample'
 import { report, summarise } from '../src/core/analyse'
 import { Rng } from '../src/core/rng'
 
@@ -143,7 +143,7 @@ function runPhase(phase: Phase): void {
   const cat = readCatalog()
   const done = new Set(cat.filter((e) => e.phase === phase.n).map((e) => e.id))
   let specs: WorldSpec[] = []
-  const sources = new Map<string, Source>()
+  const sources = new Map<string, CatalogEntry['source']>()
 
   if (phase.n === 0) {
     // fresh draws, skipping anything already catalogued at this phase
@@ -174,6 +174,7 @@ function runPhase(phase: Phase): void {
       .slice(0, phase.budget)
       .map((e) => ({ ...e.spec, ...phase.shape }))
       .filter((s) => !done.has(specId(s)))
+    for (const s of specs) sources.set(specId(s), 'promoted')
     console.log(
       `phase ${phase.n}: ${pool.length} from phase ${prev.n}, ${survivors.length} possible, ` +
         `taking ${cut.length} ranked + ${rescueN} rescued, ${specs.length} still to run`,
@@ -198,7 +199,16 @@ function runPhase(phase: Phase): void {
     const mine = specs.slice(k * perWorker, (k + 1) * perWorker)
     if (mine.length === 0) continue
     const jp = join(DIR, `jobs-p${phase.n}-${k}.json`)
-    writeFileSync(jp, JSON.stringify({ specs: mine, opts: phase.opts, seeds: phase.seeds, phase: phase.n }))
+    writeFileSync(
+      jp,
+      JSON.stringify({
+        specs: mine,
+        sources: mine.map((s) => sources.get(specId(s))),
+        opts: phase.opts,
+        seeds: phase.seeds,
+        phase: phase.n,
+      }),
+    )
     jobs.push(
       new Promise<void>((res, rej) => {
         const p = spawn('npx', ['vite-node', 'scripts/search-worker.ts', jp, shardPath(phase.n, k)], {
@@ -236,6 +246,12 @@ function runPhase(phase: Phase): void {
         join(DIR, 'phases.log'),
         JSON.stringify({ phase: phase.n, at: Date.now(), secs, worlds: after.length, possible: alive }) + '\n',
       )
+      // the job files are the specs again, one per worker, and at two hundred thousand candidates
+      // they outweigh the results they produced. The catalog holds every spec, so they are spent.
+      for (let k = 0; k < WORKERS; k++) {
+        const jp = join(DIR, `jobs-p${phase.n}-${k}.json`)
+        if (existsSync(jp)) rmSync(jp)
+      }
     })
     .catch((err) => {
       clearInterval(beat)
