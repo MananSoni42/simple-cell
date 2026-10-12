@@ -3,6 +3,7 @@ import type { Init } from '../core/params'
 import type { AggregateStats } from '../core/aggregates'
 import type { Census, LifeStats } from '../core/metrics'
 import type { FitnessSpec } from '../core/fitness'
+import type { Ladder } from '../core/ladder'
 import type { LearnAlgo, LearnerStatus } from '../core/learning'
 import type { OrganismFile } from '../core/organism'
 import type { RunRecord } from '../core/recorder'
@@ -62,6 +63,8 @@ export interface StatsSnapshot {
   learnAlgo: LearnAlgo
   /** The last few changes of measure, so a run can show that its objective moved. */
   fitnessChanges: { tick: number; measure: string }[]
+  /** How far up the ladder of milestones this world has got. */
+  ladder: Ladder
   /** Set only for a merged world: what its islands were called. */
   islandNames?: string[]
   /** How far the colonies have closed, or null while they are held apart waiting to be released. */

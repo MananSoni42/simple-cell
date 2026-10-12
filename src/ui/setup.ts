@@ -24,7 +24,17 @@ import { configText, download, parseConfig, readHash, writeHash } from './config
 import { capture } from '../render/renderer'
 import { Chips, Slider, Toggle, card, fieldsOf } from './controls'
 import { PRESETS } from './presets'
-import { CHEMISTRIES, type Recipe, WORLD_KINDS, buildRecipe, chemistryOf, randomRecipe, worldKindOf } from './recipes'
+import {
+  CHEMISTRIES,
+  type Recipe,
+  WORLD_KINDS,
+  bestRecipe,
+  bestWorld,
+  buildRecipe,
+  chemistryOf,
+  randomRecipe,
+  worldKindOf,
+} from './recipes'
 import { mountPreview } from './preview'
 import { fmt, reducedMotion } from './theme'
 
@@ -101,6 +111,7 @@ export function mountSetup(
           <div class="pitch-go">
             <button class="primary" id="s-start">Begin →</button>
             <button id="s-roll">roll another</button>
+            <button id="s-best" title="the measured-best world and learner: see RULES.md §24">★ best known</button>
           </div>
           <button class="ghost wide" id="s-toggle-build">Build it yourself →</button>
           <div class="note" id="s-io"></div>
@@ -1123,7 +1134,22 @@ export function mountSetup(
     setRecipe({ ...randomRecipe(), scale: init.scale })
   }
 
+  /**
+   * The furthest anything has got, in one press: every setting measured rather than chosen, plus
+   * the only learner that beat its controls. It lands as a *custom* world rather than a recipe,
+   * because it is more than two dials — and the builder then shows exactly what it did.
+   */
+  function useBest(): void {
+    chosen = -1
+    custom = true
+    recipe = bestRecipe(init.seed)
+    init = bestWorld(init.seed, init.scale)
+    ioEl.textContent = 'the measured-best world: 40 brain slots, metabolism 0.5, food in patches, energy along bonds, cross-entropy on offspring + togetherness'
+    refresh()
+  }
+
   q('#s-roll').addEventListener('click', rollAnother)
+  q('#s-best').addEventListener('click', useBest)
   q('#s-roll2').addEventListener('click', () => reseed(Math.floor(Math.random() * 1e9)))
   seedEl.addEventListener('input', () => {
     const v = Number(seedEl.value)
@@ -1158,6 +1184,7 @@ export function mountSetup(
       tab = TABS[Number(e.key) - 1][0]
       paintTabs()
     } else if (e.key === 'r' || e.key === 'R') rollAnother()
+    else if (e.key === 'b' || e.key === 'B') useBest()
   })
 
   refresh()

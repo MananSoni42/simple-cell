@@ -25,6 +25,9 @@ export class StatsPanel {
       <div class="hd"><span id="s-tick">tick 0</span><span id="s-rate" class="dim"></span></div>
       <div class="dim" id="s-world"></div>
       <div class="dim" id="s-perf"></div>
+      <div class="blk rung" id="s-rung-blk"><div class="row-k"><b id="s-rung-n"></b><i id="s-rung"></i></div>
+        <ol class="ladder" id="s-ladder"></ol>
+        <div class="sub" id="s-rung-sub"></div></div>
       ${this.block('Organisms', 'orgs')}
       <div class="sub" id="s-orgs-sub"></div>
       ${this.block('Food', 'food')}
@@ -43,6 +46,7 @@ export class StatsPanel {
       's-tick', 's-rate', 's-world', 's-perf', 's-orgs', 's-orgs-sub', 's-food', 's-energy',
       's-energy-sub', 's-order', 's-order-sub', 's-lineage', 's-lineage-sub', 's-life', 's-life-head',
       's-islands', 's-islands-sub', 's-islands-blk',
+      's-rung', 's-rung-n', 's-rung-sub', 's-ladder', 's-rung-blk',
     ]) {
       this.el[id] = root.querySelector<HTMLElement>('#' + id)!
     }
@@ -80,6 +84,27 @@ export class StatsPanel {
     set('s-rate', rateLabel)
     set('s-world', `seed ${st.seed} · ${st.size}² · food ${st.foodMode}${st.foodMoves ? ', drifting' : ', static'} · T ${st.T}`)
     set('s-perf', `${perf}${st.clampedPct > 0.05 ? ` · clamp ${st.clampedPct.toFixed(1)}%` : ''}`)
+
+    // How far this world has got, against absolute thresholds calibrated to what the world used
+    // to manage. It is the one number that answers "is this going anywhere", which is otherwise
+    // spread across six blocks.
+    const L = st.ladder
+    const done = L.reached + 1
+    set('s-rung-n', `Rung ${done} of ${L.top + 1}`)
+    set('s-rung', done > 0 ? L.rungs[L.reached].name : 'nothing alive')
+    // The ladder is drawn climbed: every rung shows where this world stands against it, so a
+    // rung that is not met still says by how much it is missed rather than going blank.
+    this.el['s-ladder'].innerHTML = L.rungs
+      .map((r) => {
+        const state = r.met ? 'met' : r.n === (L.next?.n ?? -1) ? 'next' : 'locked'
+        const mark = r.met ? '✓' : state === 'next' ? '▸' : '·'
+        return `<li class="${state}" title="${r.needs}"><i>${mark}</i><span>${r.name}</span><em>${r.at}</em></li>`
+      })
+      .reverse() // a ladder is climbed upward, so the furthest rung belongs at the top
+      .join('')
+    this.el['s-rung-sub'].innerHTML = L.next
+      ? `to climb: <b>${L.next.name}</b> — ${L.next.needs}`
+      : 'every measured rung reached'
 
     set('s-orgs', `${fmt.n(c.organisms)} alive`)
     set('s-orgs-sub', `born ${fmt.n(st.births)} (${fmt.n(st.budded)} bred) · died ${fmt.n(st.deaths)} · ${c.organisms ? (c.limbs / c.organisms).toFixed(1) : '–'} limbs each · ${fmt.n(c.freeMatter)} loose`)

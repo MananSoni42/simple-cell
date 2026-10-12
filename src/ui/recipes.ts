@@ -1,3 +1,5 @@
+import { LEARN_DEFAULTS } from '../core/learning'
+import { specFromKeys } from '../core/fitness'
 import { type FoodLevel, type FoodMode, type FoodRegime, type Init, LAWS, applyFoodLevel, applyQuantization, applyWallStamp, initFromSeed, quantize, substepsFor } from '../core/params'
 import { Rng } from '../core/rng'
 import { N_MATRIX } from '../core/types'
@@ -251,6 +253,62 @@ export function randomRecipe(seed = Math.floor(Math.random() * 1e9)): Recipe {
   const world = pick(rng, ['patchy', 'patchy', 'patchy', 'pulsing', 'drifting', 'drifting', 'harsh'])
   const terrain = pick(rng, ['none', 'none', 'none', 'pillars', 'maze'] as Init['walls'][])
   return { chemistry, world, seed, scale: 1, terrain }
+}
+
+/**
+ * The best world we know how to build, as one press.
+ *
+ * Every number here was measured rather than chosen, and the measurements are in RULES.md §24 and
+ * LEARNING.md §0. Paired against the old defaults over 5 seeds × 20k ticks this configuration took
+ * the 90th-percentile lifespan from 489 to 1,259, best compound order from 8 to 18, and time spent
+ * joined from 0.71 to 0.98.
+ *
+ * - **Sticky** chemistry, because self-repulsion with cross-attraction is what makes sheets rather
+ *   than droplets — and sheets only became possible at all once a particle could hold four bonds.
+ * - **Patches, abundant**: food concentrated in space was already the strongest lever on
+ *   aggregation, and scarcity was measured to be actively lethal.
+ * - **Metabolism 0.5**, the strongest single lever on how long anything lives.
+ * - **Forty brain slots**, which was the largest effect of anything tried: the population pins
+ *   against its cap, so fewer slots put living longer and breeding in direct conflict.
+ * - **Energy along bonds**, so a bonded group shares one metabolism.
+ * - **Cross-entropy** learning, the only algorithm measured to beat its controls (p = 0.003).
+ * - Scored on **offspring together with togetherness**, combined so that being poor at either
+ *   drags the score down. That last choice is the one *not* justified by a measurement: offspring
+ *   alone is the better-evidenced objective, but it is thrift that wins it, and the rung this
+ *   world is trying to climb is about structures. It is a bet, and labelled as one.
+ */
+export function bestRecipe(seed = Math.floor(Math.random() * 1e9)): Recipe {
+  return { chemistry: 'sticky', world: 'plenty', seed, scale: 1, terrain: 'none' }
+}
+
+export function bestWorld(seed = Math.floor(Math.random() * 1e9), scale = 1): Init {
+  const init = buildRecipe({ ...bestRecipe(seed), scale })
+  init.foodMode = 'patchy'
+  init.foodLevel = 'abundant'
+  init.foodRegime = 'steady'
+  init.n_patch = 2 * scale
+  init.r_patch = 50
+  init.food_life = 250
+  init.metabolism = 0.5
+  init.bond_flow = 0.05
+  init.n_brain = 40 * scale * scale
+  init.n_start = 10 * scale * scale
+  init.n_intrinsic = 280 * scale * scale
+  init.T_spawn = 25
+  init.bonds = true
+  init.repro = true
+  init.learn = {
+    ...LEARN_DEFAULTS,
+    algo: 'cem',
+    fitness: specFromKeys(['offspring', 'together'], 'geometric'),
+    warmup: 1000,
+    batch: 12,
+    pool: 24,
+    share: 1,
+  }
+  applyFoodLevel(init)
+  init.substeps = Math.max(1, substepsFor(init) || LAWS.substeps_max)
+  return init
 }
 
 export function chemistryOf(key: string): Chemistry {

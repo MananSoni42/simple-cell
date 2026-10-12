@@ -1724,6 +1724,21 @@ export class World {
       parent: b,
       gen: this.gen[b] + 1,
       island: this.island[b],
+      /*
+       * A budded child inherits its parent's learner tag, and that is how a learner hears anything
+       * at all in a healthy world.
+       *
+       * A learner may only act at a *spawn*, and a spawn needs a free brain slot — so a population
+       * sitting at its cap produces none, and the learner was measured handing out samples it
+       * could never score: 400 lives observed, **zero** updates. The better the world, the more
+       * inert the learner, which is precisely backwards.
+       *
+       * A child carries its parent's weights plus a little noise, so it *is* a perturbed copy of
+       * the same sample, and attributing its death back to that sample is approximately honest —
+       * the mutation noise is real and is simply absorbed into the estimate. The learner still has
+       * no say in reproduction; it only gets to find out what became of its own lineages.
+       */
+      learnId: this.learnId[b],
     })
     this.nBudded++
     this.repCool[b] = L.repro_cooldown

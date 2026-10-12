@@ -394,3 +394,22 @@ button.wide.on { border-color: var(--accent); color: var(--accent); background: 
 .measure .presets button i.w { font-style: normal; color: var(--ink-3); margin-left: 5px; font-size: 10px; }
 .measure.compact .presets button { font-size: 10px; padding: 3px 7px; }
 .measure.compact .field-hint { font-size: 10px; }
+
+/* the rung: how far this world has got up the ladder of milestones, drawn as a ladder */
+.blk.rung { border: 1px solid var(--line); border-radius: var(--r-s); padding: 8px 10px; background: var(--raised); }
+.blk.rung .row-k b { color: var(--accent); }
+.ladder { list-style: none; margin: 8px 0 6px; padding: 0 0 0 2px; border-left: 1px solid var(--line); }
+.ladder li { display: grid; grid-template-columns: 14px 1fr auto; align-items: baseline; gap: 4px;
+  font-size: 10px; line-height: 1.5; padding: 1px 0 1px 6px; color: var(--ink-3); }
+.ladder li i { font-style: normal; text-align: center; }
+.ladder li em { font-style: normal; color: var(--ink-3); opacity: 0.75; }
+/* met rungs are the world's history; the next one is what it is working on */
+.ladder li.met { color: var(--good); }
+.ladder li.met em { color: var(--ink-2); opacity: 1; }
+.ladder li.next { color: var(--accent); background: rgba(122, 162, 255, 0.07); border-radius: 3px; }
+.ladder li.next em { color: var(--accent); opacity: 1; }
+.ladder li.locked { opacity: 0.45; }
+/* the ladder, as documentation rather than a live readout */
+.ladder-doc { color: var(--ink-2); line-height: 1.75; margin: 0 0 14px; padding-left: 22px; }
+.ladder-doc li { margin-bottom: 3px; }
+.ladder-doc b { color: var(--ink); }

@@ -1,4 +1,5 @@
 import { makeBackend, canShare } from '../compute/select'
+import { ladder } from '../core/ladder'
 import { census, lifeStats } from '../core/metrics'
 import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, takeSnapshot, writeSnapshot } from '../core/snapshot'
 import { type OrganismFile, defaultName, exportOrganism } from '../core/organism'
@@ -226,6 +227,7 @@ function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnap
     recordAge: w.recordAge,
     // sent whether or not anything is learning: "nothing is" is the thing the rail has to say
     learner: w.learner.status(),
+    ladder: ladder(w),
     learnAlgo: w.init.learn.algo,
     fitnessChanges: w.fitnessChanges.slice(-8),
     islandNames: w.init.islandNames,

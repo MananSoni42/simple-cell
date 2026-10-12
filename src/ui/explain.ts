@@ -90,6 +90,47 @@ export function explainHTML(): string {
         temperatures moved particles further than their own diameter on about half of all ticks,
         brains sat 0.3 units apart, and nothing stayed assembled.</p>
       </section>
+
+      <section>
+        <h2>The ladder</h2>
+        <p>The point of all this is organisms that live longer and slowly become more complex, and
+        the hard part is knowing whether that is happening. A single number cannot say: a world
+        full of long-lived adults and a flood of newborns reads as <i>short</i>-lived if you
+        average the dead. So progress is tracked as a <b>ladder of ten milestones</b>, shown live
+        in the world's left rail, each one a prerequisite for the next rather than merely harder.</p>
+        <ol class="ladder-doc">
+          <li><b>Persists</b> — anything alive at all.</li>
+          <li><b>Lifespan</b> — a life of 1,000 ticks.</li>
+          <li><b>Self-funding</b> — the living have taken in more than they have spent, so they are
+            not simply coasting on what they were born with.</li>
+          <li><b>Foraging</b> — taking in energy faster than chance would give. This one is
+            deliberately a <i>rate</i>, because any measure of a total can be passed by living a
+            long time and doing nothing.</li>
+          <li><b>Whole bodies</b> — limbs kept rather than lost, which is the first sign of
+            anything like repair.</li>
+          <li><b>Joining</b> — two or more organisms bonded into one object.</li>
+          <li><b>Structure</b> — one of those holding together for 2,000 ticks.</li>
+          <li><b>Outlives its parts</b> — a structure that has replaced as many members as it has
+            and is still there. A clump of the originals is a clump; this is the first rung worth
+            calling alive.</li>
+          <li><b>Heritable joining</b> — offspring of joiners join more often than others do, so
+            organisation is being transmitted rather than rediscovered.</li>
+          <li><b>Group birth</b> — a structure that grows by birth inside itself.</li>
+        </ol>
+        <p>The rail shows every rung, met or not, with where this world currently stands against
+        it — so a rung that is missed says by how much. The furthest rung reached is the highest one
+        with <i>nothing unmet below it</i>: a ladder is only as high as its lowest gap.</p>
+        <p><b>One honest caveat.</b> The thresholds are absolute, and the fair comparison would be
+        paired — the same world with and without its learner, over many seeds — which a live
+        readout cannot do. They are calibrated instead against what this world managed before any
+        of it was tuned: a 90th-percentile lifespan of 489 ticks, 0.078 energy a tick, and
+        compounds that lasted about ten ticks. Read a rung as "further than the world used to get",
+        not as a verdict on what a particular world could do.</p>
+        <p>The last two rungs are not measured yet, and say so rather than pretending. Nothing in
+        the laws transmits organisation between generations, so there is currently no mechanism for
+        them to be reached — that is the next thing the world needs, not the next thing a learner
+        needs.</p>
+      </section>
     </div>
     <div class="go" id="ex-back-2">← back (Esc)</div>
   </div>`

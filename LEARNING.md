@@ -173,6 +173,52 @@ Worth recording separately: the *baseline itself* moved enormously under stages 
 over completed lives is now 1,600 ticks against 243 before, offspring 0.865 against 0.335, and time
 spent joined 2,639 against 321. The conditions did far more than any learner has.
 
+### The learner is inert unless things are dying
+
+Found while watching the rail on the best-known world: **431 lives scored, zero updates.** The
+cause is structural, not a tuning problem. A learner may only act at a *spawn*; `spawnRandom`
+needs a free brain slot; and a healthy population fills every slot it is given. Measured in the
+best world: **788 of 800 spawn attempts failed.** The better the world, the less the learner can
+do, which is exactly backwards.
+
+Raising the population cap does not help — the population simply grows into it (0 updates at 40,
+80 and 120 slots) and per-capita food collapses with it, taking the 90th-percentile lifespan from
+1,259 down to 139. The one world that produced updates was `spring` (59 of them), because it is
+harsh enough that organisms keep dying and slots keep freeing.
+
+So: **mortality is what gives this learner a voice.** Two ways forward, and the first is cheap —
+a budded child now inherits its parent's learner tag, so a sample finds out what became of its
+lineage even when no new spawn is possible (it is a perturbed copy of the same genome, and the
+mutation noise is absorbed into the estimate). The second is to let the learner's share apply to
+budding as well, which would work immediately and costs the principle that reproduction belongs to
+the world rather than to an algorithm. Worth doing only with that trade stated.
+
+### Static food rewards parking — validated, with a twist
+
+Measured across food dynamics at 80 slots, 20k ticks. Movement per tick is essentially identical
+everywhere (3.7–4.2), so the differences are all in what that movement earns:
+
+| food | harvest/tick | per unit moved | p90 life | best order | learner updates |
+|---|---|---|---|---|---|
+| static patches | 0.020 | 0.0054 | 139 | 11 | 0 |
+| patches drift | 0.062 | 0.0166 | 118 | 14 | 0 |
+| fast patches | 0.107 | 0.0284 | 160 | 20 | 0 |
+| comet | 0.108 | 0.0277 | 229 | **25** | 0 |
+| breathing | 0.061 | 0.0159 | 149 | 17 | 0 |
+| **spring** | **0.292** | **0.0702** | **764** | 10 | **59** |
+
+**The concern was right.** A fixed point source is the most productive world there is — an
+organism that finds a spring gets a continuous stream and need do nothing else — and it is also
+the *only* world where the learner was active, because everything that fails to find it dies. That
+is the parking strategy and the selection pressure it creates, in one row.
+
+**The twist:** moving food produces the *largest structures* (order 25 under a comet, 20 under fast
+patches, against 11 under static patches), presumably because a travelling source sweeps organisms
+along together. So "best" depends on the rung being climbed: static and concentrated for lifespan
+and for giving a learner anything to chew on, moving for aggregation. Measuring against dynamic
+food should be the default, as asked — a result that only holds for a stationary source is a result
+about parking.
+
 ### Archipelago: four islands, then one world
 
 `npm run archipelago` runs four worlds to completion one per core, then places their survivors in
