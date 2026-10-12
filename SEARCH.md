@@ -147,4 +147,36 @@ the artifact does not decide what survives the screen.
 60,000 worlds promoted stratified across **160 cells** (self-repulsion × food pattern × metabolism)
 plus a 1,200-world random rescue, at 2,000 ticks each. Estimated **5.2 hours**.
 
+### Where the walls are — across all 200,000 worlds
+
+The most useful thing the catalog produced, and the one a top-ten list cannot: the share of worlds
+meeting each rung.
+
+| rung | met | mean progress |
+|---|---|---|
+| 0 Persists | 100% | 100% |
+| **1 Feeds** | **0.2%** | 9% |
+| **2 Lasts** | **0.1%** | 13% |
+| **3 Seeks** | **0.3%** | 9% |
+| 4 Keeps its body | 57.8% | 96% |
+| 5 Breeds true | 65.4% | 74% |
+| 6 Lineage outlives | 79.0% | 88% |
+| 7 Joins | 81.5% | 88% |
+| 8 Holds | 37.8% | 60% |
+| 9 Renews | 36.3% | 55% |
+| 10 Moves together | 57.1% | 69% |
+| 11 Transmits joining | 26.6% | 67% |
+| 12 Grows from within | 8.4% | 14% |
+
+**Association is easy; self-sufficiency is hard.** Four worlds in five get organisms bonding, more
+than a third hold a structure together — and one in five hundred has organisms that out-earn what
+they were born with. Since a level stops at the lowest gap, *no* world can exceed level 0 while
+rung 1 fails, which is why the continuous score rather than the level is doing all of the ranking.
+
+Two caveats, both pointing the same way. Rungs 1–3 are computed from the ring of *completed* lives,
+and a five-hundred-tick run has very few, so they are under-measured here rather than genuinely
+impossible — phase 1 at 2,000 ticks and phase 2 at 20,000 will say how much of this is the horizon.
+And the ladder now reports **rungs met in total** beside the gapped level, because "level 0" about
+a world that clears nine of thirteen is true and useless.
+
 _Updates appended below as they land._

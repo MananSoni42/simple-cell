@@ -94,7 +94,9 @@ export class StatsPanel {
     // the level is the headline: it says what *kind* of thing exists, where the rung count says
     // only how far along a list the world has got
     set('s-rung-n', `${L.levelName}${L.level >= 0 ? ` · level ${L.level}` : ''}`)
-    set('s-rung', `rung ${done}/${L.top + 1} · score ${L.score.toFixed(1)}`)
+    // both figures, because they answer different questions: how far up without a gap, and how
+    // many rungs this world clears in total
+    set('s-rung', `rung ${done}/${L.top + 1} · ${L.passed} met · score ${L.score.toFixed(1)}`)
     // The ladder is drawn climbed: every rung shows where this world stands against it, so a
     // rung that is not met still says by how much it is missed rather than going blank.
     this.el['s-ladder'].innerHTML = L.rungs

@@ -54,6 +54,16 @@ export interface Ladder {
   levelName: string
   /** Sum over rungs of min(1, ratio): the search gradient. */
   score: number
+  /**
+   * How many rungs are met in total, gaps and all.
+   *
+   * `level` and `reached` both stop at the first gap, which is right — self-sufficiency really
+   * does come before structure. But measured across two hundred thousand worlds the lower rungs
+   * are the walls: 0.2% have organisms that out-earn their birth endowment, while 81% get them
+   * bonding and 37% hold a structure together. Reporting only the gapped figure would say "level 0"
+   * about a world that passes nine rungs of thirteen, which is true and useless.
+   */
+  passed: number
   rungs: Rung[]
   /** The first unmet rung, which is the thing to work on. */
   next: Rung | null
@@ -289,6 +299,7 @@ export class LadderTracker {
       level,
       levelName: level >= 0 ? LEVELS[level] : 'nothing yet',
       score: rungs.reduce((a, r) => a + Math.min(1, r.ratio), 0),
+      passed: rungs.filter((r) => r.met).length,
       rungs,
       next: rungs.find((r) => !r.met) ?? null,
     }

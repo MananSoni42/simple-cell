@@ -176,6 +176,18 @@ export function shapeFactors(rows: CatalogEntry[]): Factor[] {
 export interface Summary {
   worlds: number
   byLevel: number[]
+  /**
+   * Per rung: the share of worlds that met it, and the mean progress toward it.
+   *
+   * This is the most useful aggregate the catalog can produce, and the one a top-ten list cannot.
+   * A pass rate near zero on a rung that everything below it clears identifies **the wall** — the
+   * single thing standing between this world and the next level of organisation — and it is a
+   * statement about the world's laws rather than about any candidate in it.
+   */
+  rungPass: number[]
+  rungMean: number[]
+  /** Distribution of the ladder score, in twenty buckets from zero to the rung count. */
+  scoreHist: number[]
   /** Share that died out, plateaued, ran their horizon, or earned an extension. */
   byStop: Record<string, number>
   /** Of all worlds, the share that got past "anything alive" at all. */
@@ -191,6 +203,11 @@ export interface Summary {
 export function summarise(rows: CatalogEntry[]): Summary {
   const byLevel = new Array(7).fill(0)
   const byStop: Record<string, number> = {}
+  const nRungs = rows.reduce((a, r) => Math.max(a, r.ratios?.length ?? 0), 0)
+  const pass = new Array(nRungs).fill(0)
+  const sum = new Array(nRungs).fill(0)
+  const BUCKETS = 20
+  const hist = new Array(BUCKETS).fill(0)
   let ticks = 0
   let ms = 0
   for (const r of rows) {
@@ -198,10 +215,20 @@ export function summarise(rows: CatalogEntry[]): Summary {
     byStop[r.stop] = (byStop[r.stop] ?? 0) + 1
     ticks += r.ticks * r.seeds
     ms += r.ms
+    for (let i = 0; i < (r.ratios?.length ?? 0); i++) {
+      if (r.ratios[i] >= 1) pass[i]++
+      sum[i] += Math.min(1, r.ratios[i])
+    }
+    const b = Math.min(BUCKETS - 1, Math.max(0, Math.floor((r.score / Math.max(1, nRungs)) * BUCKETS)))
+    hist[b]++
   }
+  const n = Math.max(1, rows.length)
   return {
     worlds: rows.length,
     byLevel,
+    rungPass: pass.map((p) => p / n),
+    rungMean: sum.map((p) => p / n),
+    scoreHist: hist,
     byStop,
     aliveFrac: rows.length ? rows.filter((r) => r.level >= 0).length / rows.length : 0,
     meanScore: rows.length ? rows.reduce((a, r) => a + r.score, 0) / rows.length : 0,
@@ -219,6 +246,13 @@ export function report(s: Summary): string {
   out.push(`levels reached: ${s.byLevel.map((n, i) => `${i - 1}:${n}`).join('  ')}`)
   out.push(`stopped: ${Object.entries(s.byStop).map(([k, v]) => `${k} ${v}`).join(' · ')}`)
   out.push(`score mean ${s.meanScore.toFixed(2)}, best ${s.bestScore.toFixed(2)}`)
+  if (s.rungPass.length) {
+    out.push('', 'WHERE THE WALLS ARE')
+    s.rungPass.forEach((p, i) => {
+      const bar = '█'.repeat(Math.round(20 * s.rungMean[i])).padEnd(20, '·')
+      out.push(`  rung ${String(i).padStart(2)}  ${bar}  ${(100 * p).toFixed(1)}% met · mean progress ${(100 * s.rungMean[i]).toFixed(0)}%`)
+    })
+  }
   const show = (title: string, fs: Factor[]): void => {
     out.push('', title.toUpperCase())
     for (const f of fs.sort((a, b) => b.z - a.z)) {
