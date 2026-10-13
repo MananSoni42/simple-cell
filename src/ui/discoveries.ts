@@ -30,7 +30,14 @@ interface Discoveries {
   at: number
   worlds: number
   phases: { phase: number; worlds: number }[]
-  summary: Summary
+  /**
+   * Null for a hand-built export.
+   *
+   * A factor analysis over five written worlds would be five anecdotes with standard errors
+   * attached, which is worse than no table at all. The page shows nothing rather than something
+   * misleading.
+   */
+  summary: Summary | null
   analysedPhase: number
   top: CatalogEntry[]
 }
@@ -55,11 +62,11 @@ export function mountDiscoveries(root: HTMLElement, hooks: DiscoveryHooks): { re
         <div class="row"><button id="d-back">← back</button></div>
       </div>
       <div id="d-aggregate"></div>
-      <h2>Worlds worth looking at</h2>
-      <div class="note" style="margin-bottom:12px">Picked along several axes rather than by score
-        alone — the best overall, then the best at each thing the ladder measures separately, then
-        the best for each food pattern. Ranking a quarter of a million worlds by one number returns
-        ten copies of the same trick.</div>
+      <h2 id="d-h2">Worlds worth looking at</h2>
+      <div class="note" style="margin-bottom:12px" id="d-sub">Picked along several axes rather than by
+        score alone — the best overall, then the best at each thing the ladder measures separately,
+        then the best for each food pattern. Ranking a quarter of a million worlds by one number
+        returns ten copies of the same trick.</div>
       <div class="disco-grid" id="d-grid"></div>
     </div>`
 
@@ -73,6 +80,12 @@ export function mountDiscoveries(root: HTMLElement, hooks: DiscoveryHooks): { re
 
   /** The factor tables: what the dials and the chemistry did, with the noise marked as noise. */
   function aggregate(d: Discoveries): string {
+    if (!d.summary) {
+      return `<div class="note" style="margin-bottom:14px">These worlds were <b>written, not found</b> —
+        each one is a brain built by hand to pass a single rung, which is the only way to tell a rung
+        that is hard from a rung that is impossible or broken. No factor tables: an analysis over a
+        handful of hand-written worlds would be anecdotes with standard errors attached.</div>`
+    }
     const s = d.summary
     const levels = s.byLevel
       .map((n, i) => ({ level: i - 1, n }))
@@ -130,7 +143,7 @@ export function mountDiscoveries(root: HTMLElement, hooks: DiscoveryHooks): { re
         <div class="disco-stage"><canvas></canvas></div>
         <div class="disco-body">
           <div class="row-k"><b>${e.why ?? 'high score'}</b><i>score ${e.score.toFixed(2)}</i></div>
-          <div class="note" style="color:var(--good)">${e.level >= 0 ? LEVELS[e.level] : 'nothing yet'} · ${e.ratios?.filter((r) => r >= 1).length ?? 0}/13 rungs</div>
+          <div class="note" style="color:var(--good)">${e.level >= 0 ? LEVELS[e.level] : 'nothing yet'} · ${e.ratios?.filter((r) => r >= 1).length ?? 0}/${e.ratios?.length ?? 0} rungs</div>
           <div class="note">${e.spec.foodMode} · ${e.spec.foodLevel} · ${e.spec.foodRegime} ·
             metabolism ${e.spec.metabolism} · flow ${e.spec.bondFlow} · T ${e.spec.T}${e.spec.fission ? ' · fission' : ''}</div>
           <div class="chips-row">
@@ -140,7 +153,9 @@ export function mountDiscoveries(root: HTMLElement, hooks: DiscoveryHooks): { re
             ${chip('held', `${Math.round(100 * (s.heldFrac ?? 0))}% of a life`)}
             ${chip('gen', fmt.n(s.maxGen ?? 0))}
           </div>
-          <div class="note">${fmt.n(e.ticks)} ticks × ${e.seeds} seed${e.seeds === 1 ? '' : 's'} · ${e.stop}${e.source ? ` · ${e.source}` : ''}</div>
+          <div class="note">${fmt.n(e.ticks)} ticks × ${e.seeds} seed${e.seeds === 1 ? '' : 's'} · ${e.stop}${
+            e.phase < 0 ? ' · written by hand' : e.source ? ` · ${e.source}` : ''
+          }</div>
           <button data-open="${i}">Open this world →</button>
         </div>
       </article>`
@@ -159,10 +174,19 @@ export function mountDiscoveries(root: HTMLElement, hooks: DiscoveryHooks): { re
       return
     }
     const d = data
-    q('#d-note').textContent =
-      `${fmt.n(d.worlds)} worlds catalogued across ${d.phases.length} phase${d.phases.length === 1 ? '' : 's'} ` +
-      `(${d.phases.map((p) => `${p.phase}: ${fmt.n(p.worlds)}`).join(', ')}) · exported ${new Date(d.at).toLocaleString()}`
+    const manual = d.phases.every((p) => p.phase < 0)
+    q('#d-note').textContent = manual
+      ? `${fmt.n(d.worlds)} hand-built worlds · exported ${new Date(d.at).toLocaleString()}`
+      : `${fmt.n(d.worlds)} worlds catalogued across ${d.phases.length} phase${d.phases.length === 1 ? '' : 's'} ` +
+        `(${d.phases.map((p) => `${p.phase}: ${fmt.n(p.worlds)}`).join(', ')}) · exported ${new Date(d.at).toLocaleString()}`
     q('#d-aggregate').innerHTML = aggregate(d)
+    if (manual) {
+      q('#d-h2').textContent = 'Brains written by hand'
+      q('#d-sub').innerHTML = `One policy per rung, each built to pass exactly that rung and nothing
+        else, with a do-nothing control to beat. The point is diagnostic: a rung nothing has ever
+        climbed is indistinguishable from a wall, and three situations look identical from a score of
+        zero — the rung is hard, the threshold is wrong, or the instrument cannot see the behaviour.`
+    }
     q('#d-grid').innerHTML = d.top.map(card).join('')
 
     // each card runs its own world: a result about a world is best stated by running it

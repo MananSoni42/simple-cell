@@ -114,6 +114,14 @@ export interface WorldSpec {
   rowMut?: number
   /** Per-type decay, as a single multiplier on the drawn table: what makes slots free to copy into. */
   decayScale?: number
+  /**
+   * A named hand-built brain (see `handbuilt.ts`), instead of random weights.
+   *
+   * Never drawn by the sampler — these are written, not found. It travels in the spec so a
+   * hand-built world is reproducible, catalogable and openable from the Discoveries page like any
+   * other, which is the point: the policy the feasibility suite asserts on is the policy on screen.
+   */
+  handBuilt?: string
 }
 
 /** The reproduction modes a world may allow. Budding is always available; these add to it. */
@@ -189,6 +197,7 @@ export function specInit(spec: WorldSpec): Init {
   if (spec.reproMut !== undefined) init.repro_mut = spec.reproMut
   if (spec.elements) init.elements = spec.elements
   if (spec.templating !== undefined) init.templating = spec.templating
+  if (spec.handBuilt) init.handBuilt = spec.handBuilt
   if (spec.rowMut !== undefined) init.row_mut = spec.rowMut
   if (spec.decayScale !== undefined && spec.decayScale > 0) {
     // templating needs somewhere to copy *into*, and only decay frees a slot — so a world that
@@ -261,6 +270,7 @@ export function specId(spec: WorldSpec): string {
     spec.muFood, spec.fMax, spec.kBond, spec.fBreak, spec.maxBonds, spec.rEat, spec.eBirth, spec.eRepro, spec.reproMut,
     spec.reproMode, spec.eSpore, spec.sporeFood,
     spec.templating === undefined ? undefined : spec.templating ? 1 : 0, spec.rowMut, spec.decayScale,
+    spec.handBuilt,
     // the element table, canonicalised: field order fixed by `ELEMENT_FIELDS` so two equal tables
     // written in different key orders cannot hash differently
     spec.elements

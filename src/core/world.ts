@@ -5,6 +5,7 @@ import { Bonds, bondForce } from './bonds'
 import { type FitnessSpec, describeSpec } from './fitness'
 import { LadderTracker } from './ladder'
 import { Cognition } from './cognition'
+import { HAND_BUILT } from './handbuilt'
 import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, ONLINE_ALGOS, makeLearner } from './learning'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
@@ -939,7 +940,14 @@ export class World {
   soloSpeed(): number {
     const speeds: number[] = []
     for (let b = this.nIntr; b < this.nMatter; b++) {
-      if (!this.isBrain(b) || !this.alive[b] || this.hasJoined[b]) continue
+      // **not currently bonded**, rather than never having been.
+      //
+      // `hasJoined` is sticky for life, so in a world that bonds well every organism is excluded
+      // from the baseline forever and `soloSpeed` returns zero — at which point "moves together"
+      // silently reports nothing. Measured: a structure of order 41 travelling at 0.77 scored zero,
+      // because all sixty organisms had joined something at some point. The better the world is at
+      // the thing the rung is about, the less measurable the rung became.
+      if (!this.isBrain(b) || !this.alive[b] || this.bonds.held(b) > 0) continue
       const age = this.tick - this.bornAt[b]
       if (age < 100) continue // too young for a displacement to mean anything
       speeds.push(Math.hypot(this.minImage(this.x[b] - this.spawnX[b]), this.minImage(this.y[b] - this.spawnY[b])) / age)
@@ -2212,8 +2220,16 @@ export class World {
     this.y[b] = this.wrap(spec.y)
     this.mvx[b] = 0
     this.mvy[b] = 0
-    this.wLimb[b] = spec.wLimb ?? randomLimb(() => rng.gauss())
-    this.wBrain[b] = spec.wBrain ?? randomBrain(() => rng.gauss())
+    /*
+     * Weights: inherited if given, else hand-built if the world names a policy, else random.
+     *
+     * One place, so a hand-built world cannot leak a random brain through some other spawn path —
+     * and so the policy the feasibility tests assert on is exactly the one the Discoveries page
+     * runs.
+     */
+    const hand = this.init.handBuilt ? HAND_BUILT[this.init.handBuilt] : undefined
+    this.wLimb[b] = spec.wLimb ?? (hand ? hand.limb() : randomLimb(() => rng.gauss()))
+    this.wBrain[b] = spec.wBrain ?? (hand ? hand.brain() : randomBrain(() => rng.gauss()))
     this.learnId[b] = spec.learnId ?? 0
     this.island[b] = spec.island ?? (spec.parent !== undefined && spec.parent >= 0 ? this.island[spec.parent] : 0)
     this.gen[b] = spec.gen ?? 0
@@ -2869,13 +2885,21 @@ export class World {
     const randBrain = randomBrain(() => rng.gauss())
     // the one place a learner may act: the weights a new organism is born with
     const g = this.learner.genomeForSpawn(this.tick)
+    /*
+     * A hand-built policy replaces the *random* draw, and a learner still outranks it.
+     *
+     * The random weights above are drawn either way, in the same order, so switching a hand-built
+     * brain on does not move a single food particle — the same property the learner relies on, and
+     * the reason a paired run on one seed is an honest comparison here.
+     */
+    const hand = this.init.handBuilt ? HAND_BUILT[this.init.handBuilt] : undefined
     this.placeOrganism({
       brain,
       x: sx,
       y: sy,
       limbs,
-      wLimb: g?.wLimb ?? randLimb,
-      wBrain: g?.wBrain ?? randBrain,
+      wLimb: g?.wLimb ?? hand?.limb() ?? randLimb,
+      wBrain: g?.wBrain ?? hand?.brain() ?? randBrain,
       learnId: g?.id,
     })
     return true

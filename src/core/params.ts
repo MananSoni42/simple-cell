@@ -258,6 +258,14 @@ export interface Init {
    * Off by default: with it on, `massByType` stops being constant, because the point is that a
    * chemistry which works becomes more numerous.
    */
+  /**
+   * A named hand-built brain every organism is born with, instead of random weights.
+   *
+   * The seam that makes the feasibility tests and the Discoveries page show the *same* thing: a
+   * policy written to pass one rung is installed here, so what is asserted in the suite is what
+   * runs on screen. Absent means random weights, which is every ordinary world.
+   */
+  handBuilt?: string
   templating: boolean
   /**
    * Std-dev of the mutation applied to a copied affinity row, in quanta.
