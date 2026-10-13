@@ -315,7 +315,7 @@ function runPhase(phase: Phase): void {
     })
 }
 
-/** Rough cost per tick at a phase's world size, from the measurements in RULES.md §24. */
+/** Rough cost per tick at a phase's world size, from the measurements in docs/RULES.md §24. */
 function estMsPerTick(phase: Phase): number {
   const live = phase.shape.matter + phase.shape.slots * 5
   if (live <= 300) return 0.3
@@ -341,7 +341,7 @@ if (has('export')) {
    */
   const all = readCatalog()
   const cat = best(all)
-  const top = Number(flag('top', '24'))
+  const top = Number(flag('top', '40'))
   const phases = [...new Set(all.map((e) => e.phase))].sort((a, b) => b - a)
   const deepest = phases.find((p) => all.filter((e) => e.phase === p).length >= 200) ?? phases[0] ?? 0
   /*
@@ -378,9 +378,29 @@ if (has('export')) {
   for (const mode of [...new Set(ranked.map((e) => e.spec.foodMode))]) {
     take(`best with ${mode} food`, ranked.find((e) => e.spec.foodMode === mode))
   }
+  /*
+   * Fill the rest **stratified**, not by rank.
+   *
+   * Taking the next best twenty from a quarter of a million worlds returns twenty variations on
+   * whatever trick the leader found — nine of this search's top ten shared a metabolism setting.
+   * Filling by stratum instead (how many types repel themselves × food pattern × metabolism) gives
+   * a browsable set: worlds that differ from each other in the ways the search varied, each still
+   * the best of its own kind.
+   */
+  const strata = new Map<string, CatalogEntry[]>()
   for (const e of ranked) {
-    if (picks.length >= top) break
-    take('high score', e)
+    const k = `${chemistryShape(e.spec).selfRepel}|${e.spec.foodMode}|${e.spec.metabolism}`
+    const a = strata.get(k)
+    if (a) a.push(e)
+    else strata.set(k, [e])
+  }
+  const lists = [...strata.values()]
+  for (let round = 0; picks.length < top && round < 8; round++) {
+    for (const a of lists) {
+      if (picks.length >= top) break
+      const e = a[round]
+      if (e) take(`best of its kind (${chemistryShape(e.spec).selfRepel} self-repelling, ${e.spec.foodMode}, metabolism ${e.spec.metabolism})`, e)
+    }
   }
 
   const out = {
@@ -392,8 +412,11 @@ if (has('export')) {
     analysedPhase: deepest,
     top: picks.slice(0, top).map((p) => ({ ...p.entry, why: p.why })),
   }
-  writeFileSync(flag('out', 'discoveries.json'), JSON.stringify(out))
-  console.log(`wrote ${flag('out', 'discoveries.json')}: ${out.top.length} worlds of ${cat.length} catalogued`)
+  // public/ is what Vite serves at the site root, so the UI can fetch it with no build step
+  const outPath = flag('out', 'public/discoveries.json')
+  if (!existsSync('public')) mkdirSync('public', { recursive: true })
+  writeFileSync(outPath, JSON.stringify(out))
+  console.log(`wrote ${outPath}: ${out.top.length} worlds of ${cat.length} catalogued`)
 } else if (has('report')) {
   const all = readCatalog()
   const cat = best(all)

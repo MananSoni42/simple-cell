@@ -258,8 +258,8 @@ export function randomRecipe(seed = Math.floor(Math.random() * 1e9)): Recipe {
 /**
  * The best world we know how to build, as one press.
  *
- * Every number here was measured rather than chosen, and the measurements are in RULES.md §24 and
- * LEARNING.md §0. Paired against the old defaults over 5 seeds × 20k ticks this configuration took
+ * Every number here was measured rather than chosen, and the measurements are in docs/RULES.md §24 and
+ * docs/LEARNING.md §0. Paired against the old defaults over 5 seeds × 20k ticks this configuration took
  * the 90th-percentile lifespan from 489 to 1,259, best compound order from 8 to 18, and time spent
  * joined from 0.71 to 0.98.
  *

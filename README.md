@@ -13,8 +13,9 @@ preferred spacing, structures that hold a chemical gradient, bodies that heal, b
 
 | | |
 |---|---|
-| **[RULES.md](RULES.md)** | The authoritative v0 world rules. If the code disagrees with this, the code is wrong |
-| **[DESIGN.md](DESIGN.md)** | Rationale, build order, test strategy, stack, open questions |
+| **[docs/](docs/README.md)** | Every document, indexed |
+| **[docs/RULES.md](docs/RULES.md)** | The authoritative v0 world rules. If the code disagrees with this, the code is wrong |
+| **[docs/DESIGN.md](docs/DESIGN.md)** | Rationale, build order, test strategy, stack, open questions |
 
 ## Status
 
@@ -38,7 +39,7 @@ Advanced drawer that tells you what you have changed. A new world opens **paused
 place organisms, food and terrain wherever you want them before it runs.
 
 Start with **"how it works"** — one page explaining the whole model, generated from the live
-constants. [PLAN.md](PLAN.md) carries the staged backlog and the measurements behind it.
+constants. [docs/PLAN.md](docs/PLAN.md) carries the staged backlog and the measurements behind it.
 
 ## Quick start
 

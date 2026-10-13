@@ -128,7 +128,7 @@ export interface LearnerStatus {
 
 /**
  * A learner sees two events and answers one question. That is deliberately the whole interface:
- * every algorithm in LEARNING.md fits it, and `none` is one of them, so the control is the same
+ * every algorithm in docs/LEARNING.md fits it, and `none` is one of them, so the control is the same
  * code path as the experiment.
  */
 export abstract class Learner {

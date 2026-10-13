@@ -18,7 +18,7 @@ import { World } from './world'
  * This world's variance is enormous: the same seed with a different food regime already swings
  * organism counts from 1 to 12. So every number a learner produces has to come from the *same
  * world* with the learner on and off, repeated over many seeds, reported as a median with spread.
- * That protocol is written down in LEARNING.md §7 and this file is its implementation — if it is
+ * That protocol is written down in docs/LEARNING.md §7 and this file is its implementation — if it is
  * easier to run the paired comparison than to run one hopeful world, the honest thing is also the
  * convenient thing.
  */
@@ -61,7 +61,7 @@ export interface Variant {
   learn: Partial<LearnConfig>
 }
 
-/** The controls LEARNING.md §7 insists on, plus whatever is being tested. */
+/** The controls docs/LEARNING.md §7 insists on, plus whatever is being tested. */
 export const CONTROLS: Variant[] = [
   { name: 'off', learn: { algo: 'none' } },
   { name: 'random-search', learn: { algo: 'random' } },

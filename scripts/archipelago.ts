@@ -71,7 +71,7 @@ function base(): Init {
 /**
  * Four islands, differing in the two ways that shape behaviour: the world they live in and what
  * counts as doing well there. CEM throughout, since it is the only algorithm measured to work
- * (LEARNING.md §0) — differences between islands should come from the question asked, not from
+ * (docs/LEARNING.md §0) — differences between islands should come from the question asked, not from
  * three of them having a learner that does nothing.
  */
 const plan: ArchipelagoPlan = {

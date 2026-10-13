@@ -336,7 +336,7 @@ function seedWorld(seed: number, scale = 1): Init {
     substeps: 1,
     // Stability budget: the Brownian step sqrt(2 mu T) must stay under a fifth of the core
     // radius r_0 = 10, which caps T near 4. Hotter worlds can be typed in, and the start screen
-    // flags them; reaching a genuine gas phase needs sub-stepping (see PLAN.md section 1).
+    // flags them; reaching a genuine gas phase needs sub-stepping (see docs/PLAN.md section 1).
     T: Math.round(Math.pow(4, rng.next()) * 10) / 10, // 1 .. 4
     n_intrinsic: (30 + rng.int(21)) * area,
     n_brain: 4 * area,

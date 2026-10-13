@@ -12,7 +12,7 @@ import { type Init, applyFoodLevel, initFromSeed } from '../src/core/params'
  *                         [--fitness offspring,together] [--combine geometric|sum|chebyshev]
  *                         [--spawn 20] [--out learning-run.json]
  *
- * The protocol is LEARNING.md §7: one world per seed handed to every variant, controls always
+ * The protocol is docs/LEARNING.md §7: one world per seed handed to every variant, controls always
  * included, a pre-registered measure, medians with spread, and the paired difference per seed.
  */
 

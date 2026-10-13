@@ -113,7 +113,7 @@ export function mountSetup(
           <div class="pitch-go">
             <button class="primary" id="s-start">Begin →</button>
             <button id="s-roll">roll another</button>
-            <button id="s-best" title="the measured-best world and learner: see RULES.md §24">★ best known</button>
+            <button id="s-best" title="the measured-best world and learner: see docs/RULES.md §24">★ best known</button>
           </div>
           <button class="ghost wide" id="s-toggle-build">Build it yourself →</button>
           <div class="note" id="s-io"></div>
