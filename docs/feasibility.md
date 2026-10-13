@@ -74,61 +74,81 @@ without any learner, and two are tests of the learners specifically.**
 
 ## Results
 
-Five hand-built policies, 9,000 ticks, `reproMut: 0`, in a generous world. `*` means the rung is met.
+Five hand-built policies, 9,000 ticks, `reproMut: 0`, in a generous world. `*` means met.
 
-| policy | Persists | Feeds | Lasts | Taxis | Lingers | Improves | Lineage | Signal | MovesTog |
-|---|---|---|---|---|---|---|---|---|---|
-| **taxis** | \*1.00 | \*4.05 | \*3.07 | **\*8.52** | \*4.64 | 0.00 | 0.00 | 0.00 | 0.16 |
-| **followsSignal** | \*1.00 | 0.00 | 0.06 | 0.51 | 0.28 | 0.00 | 0.21 | **\*1.80** | 0.67 |
-| **movesTogether** | \*1.00 | \*3.10 | \*1.36 | 0.00 | 0.00 | 0.00 | 0.56 | 0.00 | 0.23 |
-| **lingers** | \*1.00 | 0.00 | \*1.39 | 0.02 | 0.86 | 0.00 | 0.00 | 0.00 | 0.29 |
-| **thrifty** (control) | \*1.00 | \*3.12 | \*4.04 | 0.00 | 0.00 | 0.00 | 0.19 | 0.00 | 0.07 |
+| policy | Persists | Feeds | Lasts | Taxis | Lingers | Improves | Lineage | Signal | MovesTog | HoldsTog |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **taxis** | \*1.00 | \*4.05 | \*3.07 | **\*8.52** | 0.52 | 0.00 | 0.00 | 0.00 | 0.00 | 0.07 |
+| **followsSignal** | \*1.00 | 0.00 | 0.06 | 0.51 | 0.43 | 0.00 | 0.21 | **\*1.80** | 0.00 | 0.07 |
+| **movesTogether** | \*1.00 | \*3.10 | \*1.36 | 0.00 | 0.00 | 0.00 | 0.56 | 0.00 | 0.00 | 0.04 |
+| **lingers** | \*1.00 | 0.00 | \*1.39 | 0.02 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.03 |
+| **thrifty** (control) | \*1.00 | \*3.12 | \*4.04 | 0.00 | 0.00 | 0.00 | 0.19 | 0.00 | 0.00 | 0.12 |
 
-**The ladder is climbable. `taxis` reaches level 2** — Reactive and Discriminative — which is the
-first time anything in this project has passed an intelligence tier. It clears Taxis at **8.5×** its
-threshold and drags `Feeds` to 4.05 and `Lasts` to 3.07 behind it: a brain wired straight to the
-food gradient eats deliberately and lives four times longer for it.
+**The ladder is climbable. `taxis` reaches level 1 — Reactive — clearing Taxis at 8.5× its
+threshold** and dragging `Feeds` to 4.05 and `Lasts` to 3.07 behind it: a brain wired straight to
+the food gradient eats deliberately and lives four times longer for it. The do-nothing control
+scores 0.00 on every intelligence rung. `followsSignal` clears its own rung at 1.80.
 
-### Four things E8 found that nothing else would have
+An earlier version of this document reported **level 2**, and that was an artefact of the `Lingers`
+confound described below — plain chemotaxis was passing a rung about area-restricted search. Fixing
+the rung cost the claim, which is the right trade.
 
-**1. A hand-built policy does not survive reproduction.** `bud` inherits weights with Gaussian
+### Six things E8 found that nothing else would have
+
+**1. A hand-built policy does not survive reproduction.** Budding inherits weights with Gaussian
 mutation, so over twelve thousand ticks the descendants of a written brain drift into something
 else. The descendants of a brain whose every weight was **zero** reached a commanded force of 0.77
-and went on to *pass a rung*. The entire first run of this suite was measuring drift, not policy;
-every result above needs `reproMut: 0` to mean anything.
+and went on to *pass a rung*. The entire first run of this suite was measuring drift; every result
+above needs `reproMut: 0` to mean anything.
 
 **2. The signal field is self-extinguishing, which is why `Follows signal` always read ~0.01.** A
 limb deposits into the field only when its own neuron fires, and a limb neuron's largest input is
 what the brain told it — so with every brain silent the field stays at zero, nothing has anything to
-report, and there is no gradient to follow. The first `followsSignal` policy read the socket signals
+report, and there is no gradient. The first `followsSignal` policy read the socket signals
 faithfully, commanded nothing, and scored **identically to the do-nothing control to every decimal
 place**. Adding a bias on the outbound signal outputs took it from 0.00 to **1.80**. The rung was
 never unreachable; the world was never signalling.
 
-**3. `Lingers` does not isolate what it names.** The `taxis` policy — which only knows how to swim
-up a gradient — scores **4.64** on it, because following a wandering gradient means turning when the
-gradient turns, and a gradient turns most inside a patch. The rung is currently a second, noisier
-Taxis. Separately, the best *linear* attempt reaches 0.86: conditioning turn rate on food count
-wants `VEL_Y × FOOD_NEAR`, a **product of two inputs**, and one linear layer cannot multiply. Proper
-area-restricted search needs a hidden layer or a multiplicative input — a world change. The one
-nonlinearity that exists is the `tanh` at each limb, reachable through the socket signals, which is
-how `followsSignal` works and is where a serious attempt should go.
+**3. `Lingers` was a second, noisier Taxis.** Plain chemotaxis scored **4.64** on it, because
+following a wandering gradient means turning when the gradient turns and a gradient turns most
+inside a patch. It now counts a turn only while the gradient is **steady** — within ~11° of last
+tick — so leftover turning cannot be the gradient's doing. Chemotaxis fell to **0.52**.
 
-**4. `Moves together` is three faults deep and is now exempted by name.**
+**4. Area-restricted search is not representable by this brain.** Conditioning turn *rate* on the
+food count wants `VEL_Y × FOOD_NEAR`, a **product of two inputs**, and the brain is a single linear
+layer. The best linear attempt reaches 0.86 — close enough to be worth knowing, and still short. A
+proper attempt needs a hidden layer or a multiplicative input. The one nonlinearity that exists is
+the `tanh` at each limb, reachable through the socket signals, which is how `followsSignal` works
+and where a serious attempt should go.
 
-- It conjoins travelling with persisting, and **which half binds depends on the horizon**: same
-  world, seed and policy gave `heldFrac` **0.554 at 9,000 ticks and 0.057 at 12,000**, because the
-  figure divides by a windowed mean lifespan that moves as lives finish.
-- Its solitary null is weak in both available forms. Excluding anything that had *ever* joined made
-  the baseline vanish in exactly the worlds the rung is about — a structure of **order 41** moving
-  at 0.767 scored **zero**, because all sixty organisms had joined at some point. Asking who is
-  *currently* unbonded fixes that and lets an unaided world through.
-- The policy built for it scored 0.23 while one built for a different rung scored 0.67.
+**5. `Moves together` demanded something physically impossible, and has been split.** It required a
+structure travel **1.5× faster than a solitary organism**. The dynamics are overdamped — velocity
+goes as force over drag and both scale with member count — so a perfectly coherent structure moves
+at exactly solo speed and never faster. Nothing could ever have passed it. Matching solo speed is
+the right claim, because the alternative is what happens: members pulling different ways cancel and
+an incoherent centroid crawls.
 
-Travel against a solitary baseline is sound in itself and reached about **13×**. Persistence is the
-hard thing nothing here can do yet. They belong in separate rungs.
+It also conjoined travelling with persisting, and which half bound depended on the horizon —
+`heldFrac` read **0.554 at 9,000 ticks and 0.057 at 12,000** on one world, seed and policy, because
+it divides by a windowed mean *completed lifespan*. Persistence is now **Holds together**, measured
+in coasting times.
 
-### What is still untested
+**6. A windowed maximum of a ratio is not a statistic.** Reading whichever structure existed at the
+instant of asking made the rung forget a capability it had shown — the multiple reached **2.206**
+while the rung reported 0.00, because the structure alive at the end was 460 ticks old against a
+500-tick guard. So it reads the window; and a maximum over a *ratio* seeks the sample with the
+smallest denominator. The do-nothing control then scored **17.36** on a rung about moving, since its
+organisms only drift. Fixed twice over: the baseline must itself be moving, and the statistic is the
+**median** of qualifying samples.
+
+### What both collective rungs now say
+
+That **structures do not last.** Order 19 and 41 form readily and travel at 2.2× solo when old
+enough to measure, but one that is both order 3+ and 500 ticks old is too rare to sustain the rung,
+and the best hold is about a tenth of a coasting time against a required three. Before the split
+that single fact was hidden inside a composite threshold.
+
+### Still untested
 
 `Improves` and `Lineage improves` cannot be probed this way: they ask for change within a life and
 across lives, and a fixed brain cannot improve at anything. They are tests of TD(λ) and the Hebbian

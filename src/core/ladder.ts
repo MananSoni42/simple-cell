@@ -57,13 +57,42 @@ import type { World } from './world'
 export const LEVELS = ['Viable', 'Reactive', 'Discriminative', 'Adaptive', 'Cumulative', 'Social', 'Collective'] as const
 
 /**
- * How much faster than a lone organism a structure has to travel to count as moving together.
+ * How fast a structure must travel relative to a lone organism to count as moving together.
  *
- * Above 1 by a clear margin, because equalling a solitary organism only shows that joining did not
- * *cost* mobility. Carrying a whole structure somewhere faster than its parts could go alone is
- * the claim worth a rung at the top level.
+ * **0.8, not above 1, and the reason is physics rather than generosity.** This was 1.5 on the
+ * argument that merely equalling a solitary organism shows only that joining did not *cost*
+ * mobility — which read well and is unreachable. The dynamics are overdamped, so velocity goes as
+ * force over drag, and in a structure of N members *both* scale with N: a perfectly coherent
+ * structure moves at exactly solo speed and no faster. Requiring 1.5 asked for a structure that
+ * outruns its own parts, which nothing can do, so the rung could never be passed by anything.
+ *
+ * Equalling solo speed is the right claim after all, because the alternative is what actually
+ * happens: members pulling in different directions cancel, and an incoherent structure's centroid
+ * crawls. So the measure discriminates between about 1.0 for a coherent structure and far below it
+ * for a clump of independent swimmers — and 0.8 sits in that gap with margin on both sides.
  */
-const TRAVEL_OVER_SOLO = 1.5
+const TRAVEL_OVER_SOLO = 0.8
+
+/** A structure has to be this big, and this old in ticks, before either collective rung reports. */
+const STRUCT_MIN_ORDER = 3
+const STRUCT_MIN_AGE = 500
+
+/** How many solitary organisms the travel baseline needs before it is a baseline at all. */
+const SOLO_MIN_N = 5
+
+/**
+ * How fast the solitary population must itself be moving for a comparison against it to mean
+ * anything.
+ *
+ * Without this floor the rung is passed by a world where **nothing moves at all**. The do-nothing
+ * control scored **17.36** on it: its organisms only drift, so the baseline was near zero, and a
+ * structure drifting slightly faster than a near-zero denominator gives an enormous ratio. You
+ * cannot measure "keeps up with a solitary organism" against a population that is standing still.
+ */
+const SOLO_MIN_SPEED = 0.02
+
+/** Coasting times a structure must outlast to count as holding together. */
+const HOLD_COASTS = 3
 
 export interface Rung {
   n: number
@@ -129,6 +158,19 @@ export class LadderTracker {
   private sAlive: number[] = []
   private sJoined: number[] = []
   private sLimbs: number[] = []
+  /**
+   * The collective rungs, sampled as the **best seen in the window** rather than whatever existed
+   * at the instant of asking.
+   *
+   * Every other sampled quantity here is a *presence* fraction, and a mean is right for those. A
+   * structure is different: it comes and goes, so reading the one that happens to exist when the
+   * ladder is consulted makes the rung flicker with membership churn. Measured on a bonding world:
+   * the travel multiple reached 2.206 — nearly three times its threshold — while the rung reported
+   * 0.00 at the end of the run, because the structure alive at that moment was 460 ticks old and
+   * the guard wants 500. The capability was demonstrated and then forgotten.
+   */
+  private sTravel: number[] = []
+  private sHold: number[] = []
   /** When each still-living lineage was first seen, so "outlives its members" is measurable. */
   private founded = new Map<number, number>()
   private met: boolean[] = []
@@ -139,6 +181,8 @@ export class LadderTracker {
     this.sAlive = []
     this.sJoined = []
     this.sLimbs = []
+    this.sTravel = []
+    this.sHold = []
     this.founded.clear()
     this.met = []
   }
@@ -160,6 +204,14 @@ export class LadderTracker {
   }
 
   /** Called on the order tracker's cadence: presence measures and lineage founding dates. */
+  /** Median coasting time over recent lives: a yardstick no dial and no death toll moves. */
+  private medianCoast(): number {
+    const xs = this.lives.filter((l) => l.coasts > 1e-9).map((l) => l.age / l.coasts)
+    if (xs.length === 0) return 0
+    const a = [...xs].sort((p, q) => p - q)
+    return a[a.length >> 1]
+  }
+
   observe(w: World): void {
     let alive = 0
     let limbs = 0
@@ -181,6 +233,20 @@ export class LadderTracker {
     push(this.sAlive, alive > 0 ? 1 : 0)
     push(this.sJoined, o.live.slice(1).some((n) => n > 0) ? 1 : 0)
     push(this.sLimbs, alive > 0 ? limbs / alive : 0)
+    // the two collective quantities, recorded every sample so the window keeps the best
+    const st = o.oldest
+    let travelMult = 0
+    let holdCoasts = 0
+    if (st && st.order >= STRUCT_MIN_ORDER) {
+      const solo = w.soloBaseline()
+      if (st.age >= STRUCT_MIN_AGE && solo.speed >= SOLO_MIN_SPEED && solo.n >= SOLO_MIN_N) {
+        travelMult = st.travel / st.age / solo.speed
+      }
+      const coast = this.medianCoast()
+      if (coast > 1e-9) holdCoasts = st.age / coast
+    }
+    push(this.sTravel, travelMult)
+    push(this.sHold, holdCoasts)
   }
 
   /**
@@ -237,23 +303,50 @@ export class LadderTracker {
      * centroid *implies* coherence, because a structure whose members mill about independently has
      * a centroid that hardly moves however much its parts do.
      */
-    let travelRatio = 0
     /*
-     * `null` where there is nothing solitary to compare against, rather than a number.
+     * Collective: did the structure go further than its members would have gone alone?
      *
-     * The ratio already guarded this and reported 0, but the *readout* divided by a 1e-9 floor and
-     * printed "2° at 141957922.73× solo" next to a rung showing 0% — a screen contradicting
-     * itself, which is worse than a blank. If every organism has joined something there is no
-     * baseline, and the honest display says so.
+     * Three guards, each from a measured failure of an earlier version:
+     *
+     * - the null is what a **currently unbonded** organism in this world achieves, not thermal
+     *   diffusion. A random brain is a constant policy, so a random organism swims persistently and
+     *   its displacement grows far faster than the square root of time: a *solitary* organism with
+     *   random weights reached 0.76–2.27× the old "three times drift" bar on its own.
+     * - the baseline needs **enough organisms to be a baseline**. It once excluded anything that had
+     *   *ever* joined, and `hasJoined` is sticky for life, so in a world that bonds well every
+     *   organism was excluded and the rung silently reported zero — a structure of order 41 moving
+     *   at 0.767 scored nothing. Asking who is currently unbonded fixes that, and then a baseline
+     *   drawn from one or two stragglers let an unaided world through. Both are ruled out by
+     *   requiring a sample.
+     * - the structure must be **old enough in absolute ticks** for its displacement to mean
+     *   anything, which replaces the horizon-sensitive fraction this rung used to multiply in.
      */
-    let soloMultiple: number | null = null
-    if (struct && struct.age > 0) {
-      const solo = w.soloSpeed()
-      if (solo > 1e-9) {
-        soloMultiple = struct.travel / struct.age / solo
-        travelRatio = soloMultiple / TRAVEL_OVER_SOLO
-      }
+    /*
+     * Both collective rungs read the **best sample in the window**, recorded by `observe`.
+     *
+     * See `sTravel` for why: a structure is intermittent, so asking about whichever one exists at
+     * this instant made the rung forget a capability it had already demonstrated.
+     */
+    /**
+     * The **median** of the samples that qualified, not the maximum.
+     *
+     * A maximum over a *ratio* seeks out the noisiest sample in the window — the one where the
+     * denominator happened to be smallest — which is how the do-nothing control came to score
+     * 17.36 on a rung about moving. The median of qualifying samples asks the honest question:
+     * when there was a structure worth measuring, did it typically keep up?
+     */
+    const medianOfQualifying = (a: number[]): number => {
+      const xs = a.filter((v) => v > 0).sort((p, q) => p - q)
+      return xs.length === 0 ? 0 : xs[xs.length >> 1]
     }
+    const soloMultiple = medianOfQualifying(this.sTravel)
+    const travelRatio = soloMultiple / TRAVEL_OVER_SOLO
+    /*
+     * Hold keeps the **maximum**, and the asymmetry is deliberate: its denominator is a coasting
+     * time, which is stable and positive, so there is no small-denominator hazard — and "a
+     * structure once lasted this long" is the claim the rung is actually making.
+     */
+    const heldCoasts = this.sHold.reduce((m, v) => (v > m ? v : m), 0)
 
     const rungs: Rung[] = []
     const add = (level: number, name: string, needs: string, ratio: number, at: string): void => {
@@ -394,9 +487,22 @@ export class LadderTracker {
     add(
       6,
       'Moves together',
-      `a held structure of order 3+ covering ground ${TRAVEL_OVER_SOLO}× faster than a solitary organism manages`,
-      struct && struct.order >= 3 ? Math.min(struct.heldFrac / 0.25, travelRatio) : 0,
-      !struct ? 'none' : soloMultiple === null ? `${struct.order}°, nothing solitary to compare` : `${struct.order}° at ${soloMultiple.toFixed(2)}× solo`,
+      `a structure of order ${STRUCT_MIN_ORDER}+ keeping up with a solitary organism (${TRAVEL_OVER_SOLO}×), rather than cancelling itself out`,
+      travelRatio,
+      soloMultiple > 0
+        ? `${soloMultiple.toFixed(2)}× solo at best`
+        : !struct
+          ? 'none'
+          : struct.order < STRUCT_MIN_ORDER
+            ? `only order ${struct.order}`
+            : `order ${struct.order}, none held long enough to tell`,
+    )
+    add(
+      6,
+      'Holds together',
+      `a structure of order ${STRUCT_MIN_ORDER}+ lasting ${HOLD_COASTS} coasting times`,
+      heldCoasts / HOLD_COASTS,
+      struct ? `${struct.order}° for ${heldCoasts.toFixed(2)} coasts` : 'none',
     )
 
     let reached = -1

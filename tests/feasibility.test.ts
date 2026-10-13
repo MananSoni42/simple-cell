@@ -143,19 +143,6 @@ describe('a hand-built brain beats doing nothing', () => {
 describe('what E8 found wrong with the ladder itself', () => {
   const CLEAN: Partial<WorldSpec> = { reproMut: 0 }
 
-  it('passes Lingers for plain chemotaxis, which it is not supposed to measure', () => {
-    /*
-     * `Lingers` is meant to isolate area-restricted search — turning more where food is dense —
-     * from tier 1's plain gradient-following. It does not: the `taxis` policy, which only knows how
-     * to swim up a gradient, scores **4.64** on it. Following a wandering gradient means turning
-     * when the gradient turns, and a gradient turns most inside a patch.
-     *
-     * So the rung is currently a second, noisier Taxis. Recorded as a test rather than a note so
-     * that a future fix has something to flip.
-     */
-    expect(met(run('taxis', CLEAN).l, 'Lingers')).toBe(true)
-  })
-
   it('cannot condition turning on food with a single linear layer', () => {
     /*
      * A turn is a rotation of the current heading, so conditioning its *rate* on the food count
@@ -172,7 +159,41 @@ describe('what E8 found wrong with the ladder itself', () => {
     expect(ratio(run('lingers', CLEAN).l, 'Lingers')).toBeLessThan(1)
   })
 
-  it('conjoins two conditions whose binding half depends on how long you run', () => {
+  it('no longer lets plain chemotaxis pass Lingers', () => {
+    /*
+     * Fixed, and the fix was to change *when* the rung looks rather than what it measures.
+     *
+     * A gradient-follower turns whenever the gradient turns, and a gradient turns most inside a
+     * patch — exactly where the food count is high. So `taxis`, which only knows how to swim up a
+     * gradient, scored **4.64** on a rung meant to isolate lingering. Counting only ticks where
+     * the gradient direction barely moved removes the mechanism: it now scores **0.52**.
+     */
+    expect(met(run('taxis', CLEAN).l, 'Lingers')).toBe(false)
+    expect(ratio(run('taxis', CLEAN).l, 'Lingers')).toBeLessThan(1)
+  })
+
+  it('does not let a world where nothing moves pass a rung about moving', () => {
+    /*
+     * Two bugs, both mine, both found by the control.
+     *
+     * The rung required a structure to travel **1.5× faster** than a solitary organism, which is
+     * physically impossible: the dynamics are overdamped, velocity goes as force over drag, and in
+     * a structure of N members both scale with N — so a perfectly coherent structure moves at
+     * exactly solo speed and never faster. Nothing could ever have passed it. The claim worth
+     * making is that a structure *keeps up* rather than cancelling itself out, so the threshold is
+     * 0.8.
+     *
+     * Then, reading the best sample in the window instead of whatever structure existed at the
+     * instant of asking, the **do-nothing control scored 17.36** — because a maximum over a
+     * *ratio* seeks out the sample where the denominator was smallest, and in a world where nothing
+     * moves the solitary baseline is near zero. Two guards: the baseline must itself be moving, and
+     * the window is summarised by its **median** of qualifying samples rather than its maximum.
+     */
+    expect(met(run('thrifty', CLEAN).l, 'Moves together')).toBe(false)
+    expect(ratio(run('thrifty', CLEAN).l, 'Moves together')).toBe(0)
+  })
+
+  it('splits travelling from persisting, and neither is demonstrated yet', () => {
     /*
      * The rung is `min(heldFrac / 0.25, travel / solo)`, and which half fails is **not a property
      * of the world** — it changes with the horizon.
@@ -197,21 +218,26 @@ describe('what E8 found wrong with the ladder itself', () => {
     const r = run('movesTogether', { ...CLEAN, A: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5] })
     const o = r.w.orders.stats(r.w).oldest
     expect(o?.order ?? 0).toBeGreaterThan(3) // structures form, and large ones
+    // but neither collective rung is met: typically they neither keep up nor last
     expect(met(r.l, 'Moves together')).toBe(false)
+    expect(met(r.l, 'Holds together')).toBe(false)
   })
 
-  it('had a null that vanished exactly when the world got good at joining', () => {
+  it('measures persistence against a yardstick no horizon can move', () => {
     /*
-     * `soloSpeed` excluded any organism that had **ever** joined something, and `hasJoined` is
-     * sticky for life — so in a world that bonds well every organism was excluded and the baseline
-     * was zero, at which point the rung reported nothing at all. Measured: a structure of order 41
-     * moving at 0.767 scored **zero**, because all sixty organisms had joined at some point.
+     * `Holds together` replaces the half of the old rung that divided a structure's age by the
+     * **windowed mean completed lifespan** — a denominator that moves as lives finish. Same world,
+     * same seed, same policy gave `heldFrac` 0.554 at 9,000 ticks and 0.057 at 12,000, so which
+     * half of the conjoined rung bound depended on the horizon rather than on the world.
      *
-     * The better the world was at the thing the rung is about, the less measurable the rung became.
-     * It now asks who is *currently* unbonded.
+     * Coasting time — endowment over the laws' upkeep rate — depends on neither the metabolism dial
+     * nor on how many organisms have happened to die. It is the same yardstick `Lasts` uses.
      */
-    const r = run('movesTogether', { ...CLEAN, A: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5] })
-    expect(r.w.soloSpeed()).toBeGreaterThan(0)
+    const short = run('movesTogether', { ...CLEAN, A: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5] }, 6000)
+    const long = run('movesTogether', { ...CLEAN, A: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5] }, 9000)
+    // both far below threshold, and neither wildly different from the other: no horizon artefact
+    expect(ratio(short.l, 'Holds together')).toBeLessThan(0.5)
+    expect(ratio(long.l, 'Holds together')).toBeLessThan(0.5)
   })
 
   it('cannot be asked of a fixed brain whether it improves', () => {

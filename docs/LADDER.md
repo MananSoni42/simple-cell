@@ -39,11 +39,12 @@ acting as a collective.
 | | Feeds | the typical life ate more than it was given | its own endowment |
 | | Lasts | 2,000 ticks *and* twice what coasting on the endowment allows | both, so neither direction of the metabolism dial buys it |
 | **1 Reactive** | **Taxis** | commanded heading aligned with the food gradient | the same organism's gradients, shuffled in time |
-| **2 Discriminative** | **Lingers** | commanded *turning rate* rises where the food count is high | the same counts, shuffled in time |
+| **2 Discriminative** | **Lingers** | commanded *turning rate* rises where the food count is high, **while the gradient is steady** | the same counts, shuffled in time |
 | **3 Adaptive** | **Improves** | converts encounters into meals ≥25% better late in life than early | log ratio zero under no trend |
 | **4 Cumulative** | **Lineage improves** | among organisms alive *at the same moment*, later generations forage better | shuffled generation labels |
 | **5 Social** | **Follows signal** | aligned with the part of the signal gradient orthogonal to the food gradient | the same gradients, shuffled in time |
-| **6 Collective** | **Moves together** | a held structure of order ≥3 covering ground 1.5× faster than a solitary organism | solitary organisms in the same world |
+| **6 Collective** | **Moves together** | a structure of order ≥3, ≥500 ticks old, keeping up with a solitary organism (0.8×) | currently-unbonded organisms, which must themselves be moving |
+| | **Holds together** | a structure of order ≥3 lasting 3 coasting times | coasting time, which no dial and no death toll moves |
 
 ## The three rules, and the organism behind each
 
@@ -118,6 +119,46 @@ not a flaw: "blind" blinds only the **new** senses, and the food-pull vector inp
 taxis was never expected to differ. And `Follows signal` sits at 0.01 everywhere, which may mean
 the rung is unreachable rather than hard — signalling may need to be made useful before anything
 can be measured following it.
+
+## What the hand-built brains changed
+
+E8 built a brain per rung (see [feasibility.md](feasibility.md)), and four of the nine rungs moved
+as a result. Each change came from a written policy doing something the rung had not anticipated.
+
+**`Lingers` was a second, noisier Taxis.** Plain chemotaxis scored **4.64** on it: following a
+wandering gradient means turning when the gradient turns, and a gradient turns most inside a patch
+— exactly where the food count is high. It now counts a turn only while the gradient is **steady**,
+within about 11° of where it pointed last tick, so any turning left over cannot be the gradient's
+doing. That took chemotaxis to **0.52**. The cost is discarding most ticks, hence a much lower
+sample floor for this rung than the others.
+
+**`Moves together` has been split in two, and its threshold was physically impossible.** It was
+`min(heldFrac / 0.25, travel / solo)`, and which half bound depended on the horizon: the same
+world, seed and policy gave `heldFrac` **0.554 at 9,000 ticks and 0.057 at 12,000**, because that
+figure divides by a *windowed mean completed lifespan* — a denominator that moves as lives finish.
+Persistence is now its own rung, **Holds together**, measured in coasting times.
+
+The threshold was worse than loose. It demanded a structure travel **1.5× faster than a solitary
+organism**, on the argument that merely matching one shows only that joining did not cost mobility.
+The dynamics are overdamped: velocity goes as force over drag, and in a structure of N members
+*both* scale with N, so a perfectly coherent structure moves at exactly solo speed and no faster.
+The rung asked for something nothing could do. Matching solo speed is the right claim after all,
+because the alternative is what actually happens — members pulling different ways cancel and an
+incoherent structure's centroid crawls. 0.8 sits in that gap.
+
+**The travel statistic took two tries.** Reading whichever structure existed at the instant of
+asking made the rung forget a capability it had shown: the multiple reached **2.206** while the rung
+reported 0.00, because the structure alive at the end was 460 ticks old against a 500-tick guard. So
+it reads the window — and a windowed **maximum of a ratio** seeks the noisiest sample in it, the one
+where the denominator was smallest. The do-nothing control then scored **17.36** on a rung about
+moving, since its organisms only drift and a near-zero baseline makes any ratio enormous. Fixed
+twice: the baseline must itself be moving (`SOLO_MIN_SPEED`), and the statistic is the **median** of
+qualifying samples.
+
+**What both collective rungs now say, cleanly, is that structures do not last.** Order 19 and 41
+form readily and travel at 2.2× solo when old enough to measure, but one that is both order 3+ and
+500 ticks old is too rare to sustain the rung, and the best hold is about a tenth of a coasting time
+against a required three. Before the split that single fact was hidden inside a composite.
 
 ## Known gaps
 

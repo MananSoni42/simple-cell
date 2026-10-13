@@ -938,6 +938,17 @@ export class World {
    * otherwise set the bar for everybody.
    */
   soloSpeed(): number {
+    return this.soloBaseline().speed
+  }
+
+  /**
+   * The solitary baseline, with the sample size it came from.
+   *
+   * The count matters as much as the value. A baseline drawn from one or two organisms is noise,
+   * and a structure beating noise is not evidence of anything — which is how an unaided world came
+   * to pass "moves together" once this measure stopped excluding anything that had ever joined.
+   */
+  soloBaseline(): { speed: number; n: number } {
     const speeds: number[] = []
     for (let b = this.nIntr; b < this.nMatter; b++) {
       // **not currently bonded**, rather than never having been.
@@ -952,9 +963,9 @@ export class World {
       if (age < 100) continue // too young for a displacement to mean anything
       speeds.push(Math.hypot(this.minImage(this.x[b] - this.spawnX[b]), this.minImage(this.y[b] - this.spawnY[b])) / age)
     }
-    if (speeds.length === 0) return 0
+    if (speeds.length === 0) return { speed: 0, n: 0 }
     speeds.sort((a, b) => a - b)
-    return speeds[speeds.length >> 1]
+    return { speed: speeds[speeds.length >> 1], n: speeds.length }
   }
 
   private creditOrders(): void {

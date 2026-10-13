@@ -52,6 +52,14 @@ import { Rng } from './rng'
 const RING = 16
 
 /** Timescale of the trailing efficiency average, and how long the early window lasts. */
+/**
+ * How nearly the food gradient must point where it pointed last tick for a turn to count.
+ *
+ * `cos > 0.98` is about 11 degrees. Tight, because the whole purpose is to exclude turning that
+ * the gradient itself caused.
+ */
+const GRADIENT_STEADY = 0.98
+
 const EARLY_TICKS = 1000
 const EMA_TAU = 1000
 
@@ -143,6 +151,9 @@ export class Cognition {
   private readonly prevMx: Float64Array
   private readonly prevMy: Float64Array
   private readonly hasPrev: Uint8Array
+  /** Last tick's food-gradient direction, to tell a steady gradient from a turning one. */
+  private readonly prevGx: Float64Array
+  private readonly prevGy: Float64Array
 
   // efficiency: an early window frozen after EARLY_TICKS, and a trailing average
   private readonly earlyMeals: Float64Array
@@ -175,6 +186,8 @@ export class Cognition {
     this.sN = f()
     this.prevMx = f()
     this.prevMy = f()
+    this.prevGx = f()
+    this.prevGy = f()
     this.hasPrev = new Uint8Array(cap)
     this.earlyMeals = f()
     this.earlyExp = f()
@@ -189,7 +202,7 @@ export class Cognition {
     for (const a of [
       this.taxR, this.taxS, this.taxN, this.socR, this.socS, this.socN,
       this.sT, this.sF, this.sFs, this.sTF, this.sTFs, this.sT2, this.sF2, this.sFs2, this.sN,
-      this.prevMx, this.prevMy, this.earlyMeals, this.earlyExp, this.emaMeals, this.emaExp, this.lastMeals,
+      this.prevMx, this.prevMy, this.prevGx, this.prevGy, this.earlyMeals, this.earlyExp, this.emaMeals, this.emaExp, this.lastMeals,
     ]) {
       a[b] = 0
     }
@@ -264,7 +277,27 @@ export class Cognition {
      * physically deflects whatever is inside it. Neither of those makes a brain *turn*, and a
      * command cannot be deflected — so the change in commanded heading is clean where speed is not.
      */
-    if (haveShuffle && this.hasPrev[b] && mMag > 1e-9) {
+    /*
+     * Counted **only while the food gradient is steady**, and that condition is the whole fix.
+     *
+     * Without it the rung is passed by plain chemotaxis. A gradient-follower turns whenever the
+     * gradient turns, and a gradient turns most inside a patch — exactly where the food count is
+     * high — so turning correlates with food for an organism that has no notion of lingering at
+     * all. Measured: a policy wired straight to the food gradient and nothing else scored **4.64**
+     * on this rung, against a threshold of 1.
+     *
+     * Restricting to ticks where the gradient direction barely moved removes the mechanism: any
+     * turning left over cannot have been driven by the gradient, so it has to come from the
+     * organism. The cost is throwing away most ticks, which is why the sample floor below is low.
+     */
+    const gSteady = (() => {
+      const gMag = Math.hypot(s.gx, s.gy)
+      const pgMag = Math.hypot(this.prevGx[b], this.prevGy[b])
+      if (gMag < 1e-9 || pgMag < 1e-9) return false
+      const cos = (s.gx * this.prevGx[b] + s.gy * this.prevGy[b]) / (gMag * pgMag)
+      return cos > GRADIENT_STEADY // the gradient pointed nearly the same way as last tick
+    })()
+    if (haveShuffle && this.hasPrev[b] && mMag > 1e-9 && gSteady) {
       const pMag = Math.hypot(this.prevMx[b], this.prevMy[b])
       if (pMag > 1e-9) {
         const cos = (s.mx * this.prevMx[b] + s.my * this.prevMy[b]) / (mMag * pMag)
@@ -285,6 +318,8 @@ export class Cognition {
       this.prevMy[b] = s.my
       this.hasPrev[b] = 1
     }
+    this.prevGx[b] = s.gx
+    this.prevGy[b] = s.gy
 
     // ---- tiers 3 and 4: conversion of encounters into meals ------------------------------
     /*
@@ -360,7 +395,7 @@ export class Cognition {
     const corrDs: number[] = []
     for (const { b } of members) {
       const n = this.sN[b]
-      if (n < 200) continue
+      if (n < 60) continue // most ticks are discarded by the steady-gradient gate above
       const r = corr(n, this.sT[b], this.sF[b], this.sTF[b], this.sT2[b], this.sF2[b])
       const rs = corr(n, this.sT[b], this.sFs[b], this.sTFs[b], this.sT2[b], this.sFs2[b])
       if (Number.isFinite(r) && Number.isFinite(rs)) corrDs.push(r - rs)
