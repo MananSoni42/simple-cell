@@ -112,6 +112,30 @@ export function dialFactors(rows: CatalogEntry[]): Factor[] {
     factor('food patches', group(rows, (e) => e.spec.patches)),
     factor('spoils after', group(rows, (e) => Math.round(e.spec.foodLife / 100) * 100)),
     factor('fission', group(rows, (e) => (e.spec.fission ? 'on' : 'off'))),
+    /*
+     * The physics and the economics, which used to be constants.
+     *
+     * `?? '(default)'` matters: catalog rows written before these dials existed ran under the
+     * law defaults, and labelling them as such keeps them in the analysis as a legitimate cell
+     * instead of either dropping them or pretending they held some particular value.
+     */
+    factor('food mobility', group(rows, (e) => e.spec.muFood ?? '(default)')),
+    factor('brain force', group(rows, (e) => e.spec.fMax ?? '(default)')),
+    factor('bond stiffness', group(rows, (e) => e.spec.kBond ?? '(default)')),
+    factor('bond breaks at', group(rows, (e) => e.spec.fBreak ?? '(default)')),
+    factor('bonds per particle', group(rows, (e) => e.spec.maxBonds ?? '(default)')),
+    factor('mouth width', group(rows, (e) => e.spec.rEat ?? '(default)')),
+    factor('birth cost', group(rows, (e) => e.spec.eBirth ?? '(default)')),
+    factor('breeds at', group(rows, (e) => e.spec.eRepro ?? '(default)')),
+    factor('mutation rate', group(rows, (e) => e.spec.reproMut ?? '(default)')),
+    factor('how it reproduces', group(rows, (e) => e.spec.reproMode ?? 'bud')),
+    factor('spore cost', group(rows, (e) => e.spec.eSpore ?? '(default)')),
+    factor('spore wakes at', group(rows, (e) => e.spec.sporeFood ?? '(default)')),
+    /*
+     * A ratio, not a dial, and the one this review predicts matters most: an organism that cannot
+     * out-pull a bond can never drag a structure anywhere, whatever else is true of it.
+     */
+    factor('brain force vs bond strength', group(rows, (e) => ((e.spec.fMax ?? 1) / (e.spec.fBreak ?? 4)).toFixed(2))),
   ].filter((f) => f.cells.length >= 2)
 }
 

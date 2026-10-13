@@ -50,6 +50,16 @@ export interface StatsSnapshot {
   bondCount: number
   orders: OrderStats
   clampedPct: number
+  /**
+   * Where the world is pressed against a ceiling rather than against its chemistry.
+   *
+   * `lightWasted` is food the sun made that there was no room for; `repBlocked` is reproduction
+   * that could not happen, by cause. Both were silent, and a silent ceiling is indistinguishable
+   * from a shortage — a saturated world looked dim, a population out of free matter looked
+   * infertile.
+   */
+  lightWasted: number
+  repBlocked: { limbless: number; slots: number; matter: number; energy: number; room: number }
   /** Ticks of history held, and the oldest tick we can rewind to. */
   historyTicks: number
   oldestTick: number // how often the per-tick step guardrail bit

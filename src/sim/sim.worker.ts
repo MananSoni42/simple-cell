@@ -218,6 +218,8 @@ function snapshot(w: World, tps: number, heavy: StatsSnapshot | null): StatsSnap
     bondCount: w.bonds.count,
     orders: heavy ? heavy.orders : w.orders.stats(w),
     clampedPct: w.nSteps > 0 ? (100 * w.nClamped) / w.nSteps : 0,
+    lightWasted: w.lightWasted,
+    repBlocked: { ...w.repBlocked },
     historyTicks: ringLen > 0 ? w.tick - snapshots()[0].tick : 0,
     oldestTick: ringLen > 0 ? snapshots()[0].tick : w.tick,
     burned: w.burned,

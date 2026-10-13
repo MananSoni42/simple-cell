@@ -32,6 +32,7 @@ export class StatsPanel {
       ${this.block('Organisms', 'orgs')}
       <div class="sub" id="s-orgs-sub"></div>
       ${this.block('Food', 'food')}
+      <div class="sub" id="s-food-sub"></div>
       ${this.block('Energy', 'energy')}
       <div class="sub" id="s-energy-sub"></div>
       <div class="blk"><div class="row-k"><b>Compound organisms</b><i id="s-order"></i></div>
@@ -45,7 +46,7 @@ export class StatsPanel {
         <div class="sub" id="s-life"></div></div>`
     for (const id of [
       's-tick', 's-rate', 's-world', 's-perf', 's-orgs', 's-orgs-sub', 's-food', 's-energy',
-      's-energy-sub', 's-order', 's-order-sub', 's-lineage', 's-lineage-sub', 's-life', 's-life-head',
+      's-food-sub', 's-energy-sub', 's-order', 's-order-sub', 's-lineage', 's-lineage-sub', 's-life', 's-life-head',
       's-islands', 's-islands-sub', 's-islands-blk',
       's-rung', 's-rung-n', 's-rung-sub', 's-ladder', 's-rung-blk',
     ]) {
@@ -117,6 +118,27 @@ export class StatsPanel {
     set('s-orgs', `${fmt.n(c.organisms)} alive`)
     set('s-orgs-sub', `born ${fmt.n(st.births)} (${fmt.n(st.budded)} bred) · died ${fmt.n(st.deaths)} · ${c.organisms ? (c.limbs / c.organisms).toFixed(1) : '–'} limbs each · ${fmt.n(c.freeMatter)} loose`)
     set('s-food', fmt.n(c.food))
+    /*
+     * Two ceilings, named.
+     *
+     * A world at its food capacity used to look like a world with a dim sun, and a population
+     * out of free matter used to look like one whose chemistry could not reproduce. Both are now
+     * stated, because the first of each pair is a budget to raise and the second is a result.
+     */
+    const b = st.repBlocked
+    const blocked = [
+      ['no free matter', b.matter],
+      ['no brain slot', b.slots],
+      ['not enough energy', b.energy],
+      ['nowhere to put a child', b.room],
+    ]
+      .filter(([, n]) => (n as number) > 0)
+      .sort((p, q) => (q[1] as number) - (p[1] as number))
+    this.el['s-food-sub'].innerHTML =
+      (st.lightWasted > 0
+        ? `<span style="color:${INK.warn}">${fmt.n(st.lightWasted)} food wasted — the world is full</span>`
+        : 'room for more') +
+      (blocked.length ? `<br>births blocked: ${blocked.map(([k, n]) => `${k} ${fmt.n(n as number)}`).join(' · ')}` : '')
     set('s-energy', fmt.n(total))
     set('s-energy-sub', `in organisms ${fmt.n(c.eOrganisms)} · loose ${fmt.n(c.eFree)} · food ${fmt.n(c.eFood)} · burned ${fmt.n(st.burned)}`)
 

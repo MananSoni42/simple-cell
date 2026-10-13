@@ -5,7 +5,7 @@ import { census, clusterStats, lifeStats, meanClusterSize, massByType, potential
 import { type Init, LAWS, type Laws, QUANTA, initFromSeed, stability, substepsFor } from '../src/core/params'
 import { Rng } from '../src/core/rng'
 import { serialBackend } from '../src/core/backend'
-import { BRAIN_OUT } from '../src/core/neurons'
+import { BRAIN_IN, BRAIN_OUT, N_BRAIN_IN } from '../src/core/neurons'
 import { BRAIN } from '../src/core/types'
 import { World } from '../src/core/world'
 import { configText, parseConfig } from '../src/ui/config'
@@ -741,7 +741,7 @@ describe('neuron wiring', () => {
     w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
     // a brain that always shouts at socket 0, and a limb that only repeats what it is told
     w.wBrain![b]!.fill(0)
-    w.wBrain![b]![(BRAIN_OUT.SIG + 0) * 29 + 26] = 5 // weight on the bias input
+    w.wBrain![b]![(BRAIN_OUT.SIG + 0) * N_BRAIN_IN + BRAIN_IN.BIAS] = 5 // weight on the bias input
     w.wLimb![b]!.fill(0)
     w.wLimb![b]![0] = 5 // weight on S_brain
     w.step()
@@ -759,7 +759,7 @@ describe('neuron wiring', () => {
     const b = 2
     w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
     w.wBrain![b]!.fill(0)
-    w.wBrain![b]![(BRAIN_OUT.SIG + 0) * 29 + 26] = 8
+    w.wBrain![b]![(BRAIN_OUT.SIG + 0) * N_BRAIN_IN + BRAIN_IN.BIAS] = 8
     w.step()
     const quiet = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
     quiet.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })

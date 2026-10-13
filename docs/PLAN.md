@@ -192,3 +192,20 @@ the same tick reusing its slot. Any probe that diffs positions across a tick see
 hundreds of units — our first stability numbers were wrong for exactly this reason, and B4 is the
 same root cause showing up on screen. If we ever track particles by identity, slots need a
 generation counter.
+
+## Structural misses not taken
+
+From the review in [structural_misses.md](structural_misses.md). These are not bugs — the code
+does what the rules say. They are things the rules cannot express, which is why each one makes
+some rung of the ladder unreachable rather than merely hard. Numbering is that document's.
+
+| # | Miss | Why it might matter | Cost |
+|---|---|---|---|
+| 4 | **No anabolism.** Energy can never become matter, so every body is assembled from pre-existing free particles and the matter budget is a hard population ceiling. | This is the real reason reproduction cannot be boundless. An organism that could build a limb from its reserve would make growth a decision rather than a lottery over what happens to be drifting nearby. | large — breaks matter conservation, which is a law with tests |
+| 6 | **Nothing ages.** Death is starvation only. | With no senescence there is no pressure to reproduce *early*, so a thrifty immortal is a perfect strategy and the search keeps finding it. Previously rejected on the grounds that particles should loosely represent chemicals, which still holds for bond aging; organism senescence is a separate question. | small, but it changes the economics of every world |
+| 7 | **Bonds have no angular rigidity.** A bond is a distance spring, so a bonded chain has no preferred shape. | "Compound organisms that hold a form" may be unreachable without it: a structure can currently only be a clump or a floppy chain, and the `Holds` rungs ask for something a distance spring cannot represent. | medium — a second force term, and a stability budget to re-derive |
+| 8 | **Comet food does not move.** The pattern whose name implies motion places static food. | A moving food source is the cleanest possible test of pursuit, and the one food pattern that should provide it does not. Cheap to fix and now worth more, since food is heavy enough to be chased. | small |
+| 10 | **Signalling has no addressing.** The field is a scalar everyone reads and writes. | "Transmits joining" and any form of division of labour need a message with a recipient. The brain now at least knows it *has* bonds (R5.5), which is the precondition; passing anything along them is not yet possible. | medium |
+
+The four that were taken are #1, #2, #3 and #5/#9; see that document for what each cost and what
+it bought.

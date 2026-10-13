@@ -1,4 +1,4 @@
-import { type FoodLevel, type FoodMode, type FoodRegime, type Init, LAWS, applyFoodLevel, applyQuantization, initFromSeed, quantize, substepsFor } from './params'
+import { type FoodLevel, type FoodMode, type FoodRegime, type Init, LAWS, type Laws, applyFoodLevel, applyQuantization, initFromSeed, quantize, substepsFor } from './params'
 import { LEARN_DEFAULTS, type LearnAlgo } from './learning'
 import { N_MATRIX } from './types'
 import { specFromKeys } from './fitness'
@@ -43,7 +43,57 @@ export interface WorldSpec {
   scale: number
   /** Off for the search itself; set only when a surviving world is tested with a learner. */
   learn?: LearnAlgo
+  /**
+   * Physics and economics the search is allowed to vary.
+   *
+   * These were constants, and a constant is a decision made before the evidence. Every one of
+   * them was set by a judgement call — food's mobility, how hard a brain can push against how
+   * hard a bond holds, what a child costs, how fast weights drift between generations — and none
+   * of those judgements was ever tested against an alternative. Picking a number and then
+   * searching everything *else* is a search that can only find the best world consistent with my
+   * guesses.
+   *
+   * All optional, so a catalog row written before they existed still parses and still runs: an
+   * absent dial means the law's default, which is what those rows were measured under.
+   *
+   * Discrete sets, not continuous ranges, for the same reason the chemistry is quantized — the
+   * factor analysis in `analyse.ts` reports marginal means per level, and it needs cells with
+   * worlds in them. Continuous dials would give every world its own cell and nothing would ever
+   * clear thirty samples.
+   */
+  /** Food's mobility as a fraction of everything else's (R2.2b). */
+  muFood?: number
+  /** The largest force a brain can exert on itself, against which bond strength is measured. */
+  fMax?: number
+  /** Bond spring stiffness. */
+  kBond?: number
+  /** Tension a bond survives before breaking; the gap to `F_form` is the activation energy. */
+  fBreak?: number
+  /** How many bonds one particle may hold: 2 admits only chains and rings. */
+  maxBonds?: number
+  /** Mouth width — how close a particle must come to food to eat it. */
+  rEat?: number
+  /** What each particle of a newborn starts with, paid by the parent. */
+  eBirth?: number
+  /** The reserve at which a brain may reproduce. */
+  eRepro?: number
+  /** Std-dev of the Gaussian noise added to an inherited brain: the mutation rate. */
+  reproMut?: number
+  /**
+   * Which ways of reproducing are available, on top of budding and the separate `fission` dial.
+   *
+   * A single categorical rather than independent flags, so the factor tables get cells with
+   * worlds in them — the whole reason the chemistry is quantized. `bud` is the old world.
+   */
+  reproMode?: ReproMode
+  /** What a parent invests in a spore, and how much food a spore needs to germinate (R7.10). */
+  eSpore?: number
+  sporeFood?: number
 }
+
+/** The reproduction modes a world may allow. Budding is always available; these add to it. */
+export type ReproMode = 'bud' | 'conjugation' | 'spore' | 'conjugation+spore'
+export const REPRO_MODES: ReproMode[] = ['bud', 'conjugation', 'spore', 'conjugation+spore']
 
 export const N_TRI = 14
 
@@ -99,9 +149,39 @@ export function specInit(spec: WorldSpec): Init {
   init.n_wall = 0
   init.wallPositions = []
   init.learn = { ...LEARN_DEFAULTS, algo: spec.learn ?? 'none', fitness: specFromKeys(['offspring']) }
+  if (spec.reproMut !== undefined) init.repro_mut = spec.reproMut
+  const mode = spec.reproMode ?? 'bud'
+  init.conjugation = mode === 'conjugation' || mode === 'conjugation+spore'
+  init.spore = mode === 'spore' || mode === 'conjugation+spore'
+  // carried on the Init so that every path which takes an Init — the worker, a snapshot, the
+  // Discoveries preview — runs the physics the world was scored under rather than the default
+  init.laws = specLaws(spec)
   applyFoodLevel(init)
   init.substeps = Math.max(1, substepsFor(init) || LAWS.substeps_max)
   return init
+}
+
+/**
+ * The law overrides a spec asks for, as a `Partial<Laws>` to hand to `new World`.
+ *
+ * Returned separately from the `Init` rather than folded into it because laws and initial
+ * conditions are different tiers and this project keeps them apart: an `Init` describes a world
+ * you could set up, a `Laws` override describes a different physics. The search varies both, but
+ * it should never be able to confuse them.
+ */
+export function specLaws(spec: WorldSpec): Partial<Laws> {
+  const L: Partial<Laws> = {}
+  if (spec.muFood !== undefined) L.mu_food = spec.muFood
+  if (spec.fMax !== undefined) L.F_max = spec.fMax
+  if (spec.kBond !== undefined) L.k_bond = spec.kBond
+  if (spec.fBreak !== undefined) L.F_break = spec.fBreak
+  if (spec.maxBonds !== undefined) L.max_bonds = spec.maxBonds
+  if (spec.rEat !== undefined) L.r_eat = spec.rEat
+  if (spec.eBirth !== undefined) L.E_birth = spec.eBirth
+  if (spec.eRepro !== undefined) L.E_repro = spec.eRepro
+  if (spec.eSpore !== undefined) L.E_spore = spec.eSpore
+  if (spec.sporeFood !== undefined) L.spore_food = spec.sporeFood
+  return L
 }
 
 /** Stable id, so the catalog is a set and a search can be resumed by skipping what it holds. */
@@ -123,12 +203,26 @@ export function specId(spec: WorldSpec): string {
     spec.fission ? 1 : 0,
     spec.scale,
     spec.learn ?? 'none',
-  ].join('|')
+  ]
+  /*
+   * The law dials are appended only when at least one is set, and that is deliberate.
+   *
+   * A spec with no law overrides must hash exactly as it did before these dials existed, or every
+   * row in the existing catalog gets a new id and a resumed search re-runs all 260,640 worlds.
+   * Appending an empty field would not do — it still changes the canonical string — so the whole
+   * group is omitted when it is empty.
+   */
+  const laws = [
+    spec.muFood, spec.fMax, spec.kBond, spec.fBreak, spec.maxBonds, spec.rEat, spec.eBirth, spec.eRepro, spec.reproMut,
+    spec.reproMode, spec.eSpore, spec.sporeFood,
+  ]
+  if (laws.some((v) => v !== undefined)) canon.push(laws.map((v) => (v === undefined ? '' : String(v))).join(','))
+  const text = canon.join('|')
   // FNV-1a, 64 bits as two 32-bit halves: short, stable across runs, and no dependency
   let h1 = 0x811c9dc5
   let h2 = 0x01000193
-  for (let i = 0; i < canon.length; i++) {
-    const c = canon.charCodeAt(i)
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i)
     h1 = Math.imul(h1 ^ c, 0x01000193)
     h2 = Math.imul(h2 ^ c, 0x85ebca6b) >>> 0
   }
@@ -171,6 +265,17 @@ export interface CatalogEntry {
     travel: number
     lifeMean: number
     clampPct: number
+    /** Share of the sun's output the world had no room for; see R4.1. */
+    lightWastedPct?: number
+    /**
+     * Why reproduction did not happen, by cause, per thousand ticks (R7.7a). Four scalars rather
+     * than one, because "out of matter" is a budget to raise and "out of energy" is a result
+     * about the chemistry, and they used to be the same silent symptom.
+     */
+    blockedSlots?: number
+    blockedMatter?: number
+    blockedEnergy?: number
+    blockedRoom?: number
   }
   /** Medians across seeds, when a phase ran more than one. */
   seeds: number

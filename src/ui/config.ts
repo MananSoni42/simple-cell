@@ -8,6 +8,7 @@ import {
   type FoodRegime,
   FOOD_REGIMES,
   type Init,
+  type Laws,
   type SeededOrganism,
   WALL_LAYOUTS,
   type WallLayout,
@@ -98,6 +99,37 @@ function fitnessSpec(src: unknown, base: FitnessSpec): FitnessSpec {
   return weights.some((w) => w > 0) ? { weights, combine, window } : { ...base }
 }
 
+/**
+ * The physics a config file is allowed to override, with each dial clamped to a sane range.
+ *
+ * A whitelist rather than a spread, for the same reason the rest of this parser is: a config file
+ * is untrusted input, and `{...src.laws}` would let one set `SIZE` or `fieldN` and desynchronise
+ * every array in the world from the grid that indexes it. Only the dials the search varies are
+ * accepted, and only within bounds the integrator can survive.
+ */
+function lawOverrides(src: unknown): Partial<Laws> | undefined {
+  if (!src || typeof src !== 'object') return undefined
+  const o = src as Record<string, unknown>
+  const out: Partial<Laws> = {}
+  const take = <K extends keyof Laws>(k: K, lo: number, hi: number, round = false): void => {
+    const v = o[k as string]
+    if (typeof v !== 'number' || !Number.isFinite(v)) return
+    const c = Math.min(hi, Math.max(lo, v))
+    out[k] = (round ? Math.round(c) : c) as Laws[K]
+  }
+  take('mu_food', 0.01, 1)
+  take('F_max', 0.1, 16)
+  take('k_bond', 0.05, 8)
+  take('F_break', 0.2, 32)
+  take('max_bonds', 1, 8, true)
+  take('r_eat', 1, 40)
+  take('E_birth', 1, 100)
+  take('E_repro', 5, 400)
+  take('E_spore', 1, 200)
+  take('spore_food', 0, 50)
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 export function parseConfig(text: string): { init: Init; perf?: Perf } {
   const raw = JSON.parse(text) as Partial<ConfigFile> & Record<string, unknown>
   const src = (raw.init ?? raw) as Partial<Init> & Record<string, unknown>
@@ -121,6 +153,7 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
   const init: Init = {
     ...base,
     A,
+    laws: lawOverrides(src.laws),
     quantized: bool(src.quantized, base.quantized),
     substeps: Math.round(num(src.substeps, base.substeps, 1, 64)),
     T: num(src.T, base.T, 0, 1e4),
@@ -134,6 +167,8 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     foodMoves: bool(src.foodMoves, base.foodMoves),
     repro: bool(src.repro, base.repro),
     fission: bool(src.fission, base.fission),
+    conjugation: bool(src.conjugation, base.conjugation),
+    spore: bool(src.spore, base.spore),
     bonds: bool(src.bonds, base.bonds),
     walls: WALL_LAYOUTS.includes(src.walls as WallLayout) ? (src.walls as WallLayout) : base.walls,
     n_wall: Math.round(num(src.n_wall, base.n_wall, 0, 2e5)),

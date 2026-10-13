@@ -110,6 +110,27 @@ x ← x + μ·F·dt + sqrt(2·μ·T·dt)·N(0,1)    then wrap into [0, SIZE)
 
 Bound limbs are not integrated independently; see R3.3–R3.4.
 
+**R2.2b — Food is heavier than life.** Food moves with mobility `μ · mu_food` (0.15) and takes a
+thermal kick scaled by `sqrt(mu_food)`, because a Brownian step goes as `sqrt(μT)`. So its drift
+is damped about seven-fold and its jitter about two and a half.
+
+This was one mobility for everything, and that made pursuit impossible rather than hard: a crumb
+of food drifted exactly as fast as a limb swam and took exactly the same kick, 0.8 to 1.4 units a
+sub-step at ordinary temperatures. **You cannot catch what diffuses as fast as you move.** A
+chase that gains nothing on its target is indistinguishable from thrift, and thrift is the only
+strategy any search here has ever found.
+
+Food still *responds*: an attractive chemistry gathers it, a repulsive one scatters it. It is
+heavy, not nailed down — `foodMoves: false` is the separate option that nails it down.
+
+One limit, measured and worth stating so it is not rediscovered: above the temperature where
+R2.4's guardrail binds, this buys nothing. At `T = 20` with 16 sub-steps the Brownian increment
+wants about 1.1 per sub-step and the budget allows 0.31, so every particle is clamped to the same
+displacement and food is exactly as fast as life whatever its mobility says. Measured ratio of
+food to matter displacement: **0.44 at `T = 3`, 0.96 at `T = 20`.** A world in that regime is one
+where the integrator rather than the chemistry sets the dynamics, which is why the search
+discards worlds that clamp more than 60% of the time.
+
 **R2.6 — Sub-stepping.** A tick may be split into `substeps` smaller moves that reuse the same
 forces. Brownian increments are independent, so each is `sqrt(n)` smaller while the total
 diffusion is unchanged, and the force is applied in `n` pieces. Seeded worlds pick the smallest
@@ -216,6 +237,15 @@ of a particle a tick through a famine, nine a tick through a bloom — and the r
 continuously without the arrival pattern stuttering. The fractional remainder is part of the
 world's state and travels in snapshots.
 
+**The rate is fixed; it is never throttled by how much food is already out there.** The only
+ceiling is storage: `max_food` is the number of food slots the world has, and when every slot is
+occupied the arriving light has nowhere to land and is lost. That used to happen in silence,
+which made a saturated world and a dim one the same observation — in both cases food stopped
+arriving. `lightWasted` now counts the overflow, and `max_food` was raised from 120 to 300 per
+unit area because at 120 it sat close enough to the standing stock of a well-fed world that the
+ceiling, not the sun, was setting the supply. **A capacity that binds is a thermostat whether or
+not it was meant as one.**
+
 The rate is three independent dials, which compose:
 
 ```
@@ -317,10 +347,14 @@ and unlike a scalar count they carry a **direction**.
 **R5.2 — Brain** (one per organism):
 
 ```
-x = for each of 4 sockets: [ alive_i , onehot4(type_i) , S_i ]      // 24
+x = for each of 4 sockets:
+      [ alive_i , onehot4(type_i) , S_i , bond load_i , angle_i ]    // 32
   ⧺ [ reserve/E_ref , S_field , 1 ]                                  //  3
   ⧺ [ tanh(food pull x) , tanh(food pull y) ]                        //  2
-y = W_brain · x                                                      // 29 → 10
+  ⧺ [ tanh(food around / 8) ]                                        //  1
+  ⧺ [ tanh(v_x / d_max) , tanh(v_y / d_max) ]                        //  2
+  ⧺ [ body bond load ]                                               //  1
+y = W_brain · x                                                      // 41 → 10
 
 F_move     = F_max · tanh(y[0..1])   // where to go
 food split = softmax(y[2..5])        // how to divide releaseFrac among sockets
@@ -332,15 +366,48 @@ them, and because a limb's `S` is also what it deposits into the field, the brai
 reach the outside world through its limbs. Talking costs `c_sig · |S|`, charged to the brain,
 exactly as a limb pays for its own signal.
 
+**R5.5 — The brain can perceive its own body.** Three more senses, each closing a gap that made
+a rung of the ladder unreachable rather than merely difficult:
+
+- **Its own motion.** `v` is last tick's *net displacement* — after sub-stepping, after the step
+  clamp, after brain separation — not the force the brain asked for. It is the only input that
+  returns through the world, and so the brain's only memory: without it, "keep going the way I
+  was going" is not expressible, because nothing in the inputs says which way that was. Note the
+  delay: force is chosen in `think()`, which runs after `integrate()`, so a decision moves the
+  body next tick and is felt the tick after. Two ticks of lag is what makes it a report rather
+  than a copy of the command.
+- **Its own limbs' angles.** Each limb's direction within its own quadrant, mapped to [-1, 1].
+  Which quadrant is implicit in which weights read the input, so the pair is a complete heading.
+  A brain that cannot read `theta` does not know which way its body points, which is why
+  coordinated motion was being asked for from an organism that could not have produced it.
+- **Its bonds.** The fraction of bond slots filled, per limb and for the body as a whole. Nothing
+  in the inputs had ever mentioned a bond, so "move together" and "pass a join along" were asking
+  for behaviour conditioned on a fact the brain had no access to.
+
+None of these tells an organism what to do. They make a strategy *representable*, which is the
+precondition for selection finding one.
+
 Why type stays a one-hot rather than a single number: the four types are not ordered, so one
 value would make the layer encode a ranking that does not exist. And why both neurons keep
 `reserve`: a brain that cannot read its own reserve allocates energy blind, and a limb that
 cannot read its own cannot signal that it is starving — which is the whole healing story.
 
-**R5.4 — The brain can see food.** Two additions beyond the limb messages: each socket's own
-food count, and the **net pull toward food on the whole body** as a vector. The force pass
-already computes that pull, so it costs nothing, and it carries a *direction* — which makes
-chemotaxis one weight rather than something to infer from four scalars.
+**R5.4 — The brain can see food, and can tell a feast from a desert.** The **net pull toward
+food on the whole body** is a vector: the force pass already computes it, so it costs nothing,
+and it carries a *direction*, which makes chemotaxis one weight rather than an inference from
+scalars.
+
+A vector sum is not enough on its own, and for a long time it was all there was. An organism in
+the middle of a symmetric cloud of food feels pulls that **cancel exactly** — it reads the same
+zero as an organism in an empty desert, and a sense that returns the same answer in the best and
+worst place in the world is not a sense. So the brain also reads **how much food is around**: the
+count of food particles within `r_c`, which the force pass had been computing all along and which
+nothing had ever read. A count cannot cancel. It is squashed through `tanh(near / 8)` because a
+raw count would saturate the layer at the first crumb, and it is summed over the brain and all
+four limbs, since a limb reaching into a patch is news about the body.
+
+An earlier version of this section claimed each socket carried its own food count. It did not;
+the socket inputs were presence, type and signal only. The body-wide count is what now exists.
 
 **R5.3** There is no policy. A "feed the hungriest" brain is one point in weight space;
 when learning arrives, it is the baseline to beat, not a rule of the world.
@@ -409,6 +476,66 @@ inherits the parent's brain weights plus Gaussian noise of std `repro_mut`, and
 records `parent` and `generation = parent + 1`. Parent and child wait `repro_cooldown`
 ticks. In pool mode the supply of free brains and free limbs of the right type limits
 the population; reproduction is decoupled from everything else and costs nothing when off.
+
+**R7.7a — Reproduction says why it did not happen.** Budding had five silent early returns, so
+"nothing is breeding" could mean a shortage of energy, of free matter of the right type, of brain
+slots, or of space to put a child — four diagnoses with one symptom, and only one of them is a
+result about the chemistry. A world that has run out of *matter* looks exactly like a world whose
+chemistry cannot support reproduction; the first is a budget to raise, the second is a finding.
+`repBlocked` counts each cause separately: `{ limbless, slots, matter, energy, room }`.
+
+**Reproduction is not literally boundless, and cannot be.** A child's body comes from pre-existing
+free particles (R7.5), so making reproduction unlimited would mean creating matter from energy —
+anabolism, a different rule, not yet in the model. What is available instead is a generous matter
+budget plus the counters above, so a population pressed against its matter supply reports that
+fact rather than looking infertile. With `inflow` on (R7.6) the ceiling moves to `3 × n_brain`
+brain slots, which is the closest thing here to unbounded.
+
+**R7.9 — Conjugation (option, off by default).** Two organisms that are **bonded to each other**,
+both at their own reproduction threshold and both off cooldown, may produce one child together.
+The parents split the cost equally and each must still keep `E_hold`; the child appears at their
+midpoint; the body plan is drawn socket by socket from one parent or the other, and the brain and
+limb weights are a **uniform per-weight crossover** of theirs, then mutated as usual. `parent`
+stays single so lineage and generation keep meaning what they meant, and `coparent` records the
+other side: descent through one line, inheritance from two.
+
+Why bonded rather than merely near: a bond is already the world's only notion of association, it
+already costs energy to make and has an activation energy to break, and `Joins` is met by every
+world that has ever been confirmed — so the precondition is something that reliably happens. The
+brain can now also *perceive* its bonds (R5.5), so seeking a mate is at least representable.
+
+Why this matters more than it looks: budding and fission are **both clonal**. Before conjugation
+there was no recombination anywhere in the world — every in-world lineage was a mutation chain,
+and crossover existed only inside the GA learner, between dead organisms, at population level.
+
+Conjugation is tried *before* budding, because a partner is only sometimes available while
+budding almost always succeeds; the other order would make it effectively never happen.
+
+**R7.10 — Spores (option, off by default).** When reproduction fails for any reason, a parent may
+instead convert `E_spore` into a **spore**: one free particle carrying a copy of its genome. A
+spore is not a new kind of thing — it is ordinary free matter with a flag, drifting under the same
+chemistry and decaying at the same rate — so dispersal costs one array and no new physics. It is
+never captured as a limb and never used as spare matter for a body, since that would silently
+discard a reproduction already paid for.
+
+A spore germinates where `foodNear ≥ spore_food` — **the same count the brain reads** (R5.4), so
+perception and germination agree on what "there is food here" means. It needs a free brain slot
+and room; the spore particle then becomes the new organism's first limb, which is both tidy and
+right: the matter that carried the genome is the matter the body starts from. Its own reserve
+endows the whole body, so nothing is injected. A spore whose reserve falls below what a body costs
+stops being a spore and reverts to ordinary matter — the investment is simply lost, which is what
+dispersal risks.
+
+Germination is **not** gated on `repro`: the parent has already paid, and refusing to let a spore
+wake would destroy energy that was spent on a reproduction.
+
+*The measurement that corrected the design.* This was first gated on "nowhere to put a child",
+since crowding is what dispersal intuitively answers. In a world that actually lives, over 6,000
+ticks, `room` blocked reproduction **0** times and a free brain slot blocked it **41,244** times —
+the population cap is the binding constraint, as it has been every time it has been measured. A
+spore needs a slot only at germination, so it *banks* a reproduction the cap would have discarded.
+With spores on, blocked-slot events fell from 41,244 to 853, a 48-fold drop, and 106 of 152 spores
+germinated.
 
 **R7.8 — A corpse is food.** When an organism dissolves, `corpse_frac` (50%) of everything its
 body still held — brain plus limbs — is left behind as food particles scattered within
@@ -841,7 +968,7 @@ Age, limb count and children sit alongside as chips. From there it can be **save
 for.** Every file is therefore stamped with that brain's shape, and a file whose stamp does not
 match this build is **refused with a reason**, not loaded. Padding an old vector to fit produces a
 different organism wearing the same name — it fails quietly instead of loudly, which is worse.
-This matters in practice: the brain's shape has already changed twice here, 27 → 33 → 29 inputs.
+This matters in practice: the brain's shape has already changed three times here, 27 → 33 → 29 → 41 inputs.
 
 Everything merely cosmetic is still repaired: quadrants and types are clamped, duplicate
 quadrants dropped, over-long names truncated. Imported organisms take free matter of the right

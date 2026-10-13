@@ -6,6 +6,21 @@ import { N_MATRIX } from './types'
 export const LAWS = {
   SIZE: 300,
   mu: 0.5, // mobility
+  /**
+   * Food's mobility, as a fraction of everything else's.
+   *
+   * It used to be 1: one global mobility meant a crumb of food drifted exactly as fast as a limb
+   * swam, and took exactly the same thermal kick — about 0.8 to 1.4 units a sub-step at ordinary
+   * temperatures. **You cannot catch what diffuses as fast as you move.** A pursuit that gains
+   * nothing on its target is indistinguishable from thrift, which is one reason the only strategy
+   * any search ever found was to spend less.
+   *
+   * At 0.15 food is heavy: it still responds to chemistry, so an attractive matrix can gather it
+   * and a repulsive one can scatter it, but it drifts slowly enough to be overtaken. The thermal
+   * part scales as sqrt of this, because a Brownian step goes as sqrt(mu T) — so food's kick falls
+   * by about 2.6x rather than 6.7x, and food still wanders rather than sitting on a lattice.
+   */
+  mu_food: 0.15,
   r_c: 40, // interaction cutoff
   beta: 0.25, // hard-core fraction -> r_0 = beta * r_c = 10
   K_core: 3,
@@ -57,6 +72,20 @@ export const LAWS = {
    */
   repro_dist: 28,
   E_birth: 15, // reserve each particle of a budded child starts with
+  /**
+   * What a parent invests in a spore, and how much food a spore needs to find before it wakes.
+   *
+   * A spore is the dispersal strategy the world was missing. Budding places a child `repro_dist`
+   * away, so a lineage can only spread as fast as it breeds and only into space it can already
+   * see is empty — and "nowhere to put a child" is one of the four counted reasons reproduction
+   * fails. A spore instead becomes ordinary free matter carrying a genome: it drifts, it is
+   * subject to the same decay as anything loose, and it germinates only where it finds food.
+   *
+   * `spore_food` is counted in the same units as the brain's new food-count input, so germination
+   * and perception agree about what "food is here" means.
+   */
+  E_spore: 30,
+  spore_food: 3,
   E_viable: 1,
   corpse_frac: 0.5,
   r_wall: 10, // a wall's exclusion radius
@@ -152,6 +181,23 @@ export interface Init {
   seed: number
   size: number // world edge length; counts and rates below already include the area scaling
   scale: number
+  /**
+   * Explicit physics overrides for this world.
+   *
+   * Laws and initial conditions are different tiers and this project keeps them apart: an `Init`
+   * describes a world you could set up, `LAWS` describes the universe it sets up in. So why is
+   * there a `Laws` block on `Init`?
+   *
+   * Because a world that is *searched over* varies both, and the alternative is worse. A search
+   * that returns "this chemistry works, at these forces" has to be able to hand that world to the
+   * renderer, the snapshot format, the worker and the Discoveries page — all of which pass an
+   * `Init` and nothing else. Without this field each of those paths would silently revert to the
+   * default physics, and the world you watched would not be the world that was scored. A named,
+   * validated block is a crossing on purpose; a silent one is a bug.
+   *
+   * `WorldOpts.laws` still wins over this, so an experiment can override a world's own physics.
+   */
+  laws?: Partial<Laws>
   A: number[][] // N_MATRIX x N_MATRIX, symmetric, Food-Food = 0
   quantized: boolean // snap the non-food 4x4 to QUANTA
   substeps: number // integration sub-steps per tick; >1 lets a hotter world stay stable
@@ -160,10 +206,31 @@ export interface Init {
   n_brain: number
   n_start: number // organisms present at tick 0
   n_food0: number // food present at tick 0
-  max_food: number // sun pauses when this much food is in the world
+  /**
+   * How many food particles the world has room for.
+   *
+   * This is a **capacity, not a thermostat**: the sun's rate is fixed by `food_batch / T_food`
+   * and the regime, and nothing throttles it. But storage is finite, so when every slot is
+   * occupied the arriving light has nowhere to land and is wasted. That used to happen silently,
+   * which made the ceiling indistinguishable from a quiet sun; `lightWasted` now counts it, so a
+   * world that is saturated says so instead of merely looking poorly fed.
+   */
+  max_food: number
   food_batch: number // food particles per injection event (area scaling)
   spawn_batch: number // organisms per spawn event (area scaling)
   foodMoves: boolean // food drifts and responds to forces; otherwise it stays where it lands
+  /**
+   * Which ways of reproducing this world allows, beyond budding (R7.7), which is always on when
+   * `repro` is. Both are off by default, so an existing world behaves exactly as it did.
+   *
+   * These are *modes*, not improvements. Budding and fission are both clonal, which means that
+   * before conjugation existed there was **no recombination anywhere in the world** — every
+   * in-world lineage was a mutation chain, and crossover happened only inside the GA learner,
+   * between dead organisms, at population level. That is a large gap for a model whose goal is
+   * evolution.
+   */
+  conjugation: boolean
+  spore: boolean
   /** The stamp a world started from. Terrain itself lives in `wallPositions`. */
   walls: 'none' | 'pillars' | 'maze' | 'ring'
   n_wall: number
@@ -342,10 +409,17 @@ function seedWorld(seed: number, scale = 1): Init {
     n_brain: 4 * area,
     n_start: (1 + rng.int(2)) * area,
     n_food0: 30 * area,
-    max_food: 120 * area,
+    // Room for food to pile up. 120 was close enough to the standing stock of a well-fed world
+    // that the ceiling, not the sun, was setting the supply — and a capacity that binds is a
+    // thermostat whether or not it was meant as one. 300 leaves headroom for food to accumulate
+    // where nothing eats it, which is what makes a patch genuinely rich and a desert genuinely
+    // empty now that food is too heavy to spread itself out.
+    max_food: 300 * area,
     food_batch: area,
     spawn_batch: area,
     foodMoves: false,
+    conjugation: false,
+    spore: false,
     walls: 'none',
     n_wall: 40 * area,
     wallPositions: [],

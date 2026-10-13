@@ -47,6 +47,8 @@ export function evaluate(spec: WorldSpec, opts: EvalOptions): EvalResult {
   const maxTicks = Math.round(horizon * Math.max(1, opts.maxExtend ?? 1))
   const plateau = Math.max(0, opts.plateauFrac ?? 0.25) * horizon
 
+  // the spec's physics travels on the Init (see `specLaws`), so nothing is passed here and
+  // nothing can diverge between what is scored and what the UI later runs
   const w = new World(specInit(spec))
   let best = -1
   let bestAt = 0
@@ -109,6 +111,18 @@ export function evaluate(spec: WorldSpec, opts: EvalOptions): EvalResult {
       travel: o.oldest?.travel ?? 0,
       lifeMean: w.lifeOrganisms.summary().mean,
       clampPct: w.nSteps > 0 ? (100 * w.nClamped) / w.nSteps : 0,
+      /*
+       * Two saturation figures, so a world that ran out of *room* is distinguishable from a world
+       * that could not use what it had. Both were previously invisible: an overflowing sun looked
+       * like a dim one, and a population out of free matter looked infertile.
+       */
+      lightWastedPct: (100 * w.lightWasted) / Math.max(1e-9, w.lightWasted + w.injected / w.L.E_food),
+      // as rates per thousand ticks, so they compare across a 500-tick screen and a 100k
+      // confirmation, and kept as four scalars because every stat here is averaged as a median
+      blockedSlots: (1000 * w.repBlocked.slots) / Math.max(1, t),
+      blockedMatter: (1000 * w.repBlocked.matter) / Math.max(1, t),
+      blockedEnergy: (1000 * w.repBlocked.energy) / Math.max(1, t),
+      blockedRoom: (1000 * w.repBlocked.room) / Math.max(1, t),
     },
   }
 }
@@ -135,7 +149,8 @@ export function evaluateSeeds(spec: WorldSpec, opts: EvalOptions, seeds: number)
   const nRatios = runs[0].ratios.length
   const keys = Object.keys(runs[0].stats) as (keyof CatalogEntry['stats'])[]
   const stats = {} as CatalogEntry['stats']
-  for (const k of keys) stats[k] = median(runs.map((r) => r.stats[k]))
+  // every stat is a number; the optional ones are optional in the *stored* row, not in a result
+  for (const k of keys) stats[k] = median(runs.map((r) => r.stats[k] ?? 0)) as never
   return {
     spec,
     seeds: runs.length,

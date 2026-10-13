@@ -599,11 +599,13 @@ export function mountSetup(
       new Slider({
         label: 'at most',
         min: 10,
-        max: Math.max(400, 400 * init.scale * init.scale),
+        max: Math.max(1000, 1000 * init.scale * init.scale),
         step: 10,
         value: init.max_food,
         curve: 'log',
-        hint: () => 'the sun pauses while this much food is in the world',
+        // Not a thermostat: the sun's rate never changes. This is how many food particles the
+        // world has room for, and light that arrives with every slot taken is simply lost.
+        hint: () => 'room for this much food; the sun keeps shining either way, and the excess is wasted',
         onChange: (v) => {
           init.max_food = v
           init.n_food0 = Math.min(init.n_food0, v)

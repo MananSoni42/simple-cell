@@ -129,7 +129,7 @@ export interface Compatibility {
  *
  * An organism *is* its weights, and those weights only mean anything against the input and output
  * they were trained or evolved against. The brain's shape has already changed twice during this
- * project (27 → 33 → 29 inputs), and padding an old vector to fit produces a creature that is not
+ * project (27 → 33 → 29 → 41 inputs), and padding an old vector to fit produces a creature that is not
  * the one that was saved — it just fails quietly instead of loudly. So a mismatch is refused.
  */
 export function checkCompatibility(raw: unknown): Compatibility {

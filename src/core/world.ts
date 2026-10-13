@@ -7,7 +7,7 @@ import { LadderTracker } from './ladder'
 import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, makeLearner } from './learning'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
-import { BRAIN_OUT, N_BRAIN_IN, N_BRAIN_OUT, randomBrain, randomLimb } from './neurons'
+import { BRAIN_IN, BRAIN_OUT, FOOD_NEAR_SCALE, N_BRAIN_IN, N_BRAIN_OUT, randomBrain, randomLimb } from './neurons'
 import { type Init, type Laws, LAWS, applyQuantization, bondRange, regimeMultiplier } from './params'
 import { Rng } from './rng'
 import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX, WALL } from './types'
@@ -25,6 +25,15 @@ export interface WorldOpts {
   wallRoom?: number
   /** Allocate state in SharedArrayBuffers so worker threads can read and write it. */
   shared?: boolean
+  /**
+   * Brain inputs to hold at zero, by index (see `BRAIN_IN`).
+   *
+   * This is the ablation seam, and it exists so that "the brain can now sense X" is a measurable
+   * claim rather than an asserted one. Adding a sense and adding a world change at the same time
+   * makes neither attributable; blinding one input while changing nothing else does. It costs one
+   * short loop per brain per tick and is off unless asked for.
+   */
+  blind?: number[]
 }
 
 export interface OrganismSpec {
@@ -169,11 +178,31 @@ export class World {
   injected = 0
   nBirths = 0
   nBudded = 0
+  /** Children with two parents (R7.9) and spores sown and germinated (R7.10). */
+  nConjugated = 0
+  nSown = 0
+  nGerminated = 0
   nDeaths = 0
   recordAge = 0
   readonly bornAt: Int32Array
   readonly gen: Int32Array // generation: 0 for spawned organisms, parent + 1 for budded ones
   readonly parent: Int32Array
+  /**
+   * The second parent of a conjugated child, or -1.
+   *
+   * `parent` stays single so that lineage, generation and every statistic built on them keep
+   * meaning what they meant. A second parent is recorded alongside rather than instead, which is
+   * the honest shape: descent through one line, inheritance from two.
+   */
+  readonly coparent: Int32Array
+  /**
+   * A free particle carrying a genome, waiting for somewhere worth waking up (R7.10).
+   *
+   * A spore is not a new kind of particle. It is ordinary free matter with a flag and a stored
+   * brain — it drifts, it decays, it is pushed around by the same chemistry — which is why this
+   * costs one array and no new physics.
+   */
+  readonly isSpore: Uint8Array
   readonly repCool: Int16Array
   /** What the brain last told each socket; the limb neuron reads it next tick. */
   readonly brainSig: Float64Array
@@ -271,6 +300,23 @@ export class World {
   lineageCounter = 1
   nClamped = 0 // how often the per-tick step guardrail has had to bite
   nSteps = 0
+  /**
+   * Food the sun produced that the world had no room for.
+   *
+   * The supply rate is fixed; only storage is finite. Counting the overflow is what distinguishes
+   * "this world is saturated with food" from "this world is barely lit", which were previously the
+   * same observation — in both cases food simply stopped arriving.
+   */
+  lightWasted = 0
+  /**
+   * Why reproduction did not happen, counted by cause.
+   *
+   * `bud` had five silent early returns, so "nothing is breeding" could mean a shortage of energy,
+   * of free matter, of brain slots, or of space — four different diagnoses with one symptom. A
+   * world that has run out of matter looks exactly like a world whose chemistry cannot support
+   * reproduction, and the first is a budget to raise while the second is a result.
+   */
+  repBlocked = { slots: 0, matter: 0, energy: 0, room: 0, limbless: 0 }
   readonly initialEnergy: number
 
   // particle state (struct of arrays)
@@ -295,6 +341,18 @@ export class World {
   readonly limbs: Int32Array // [brain*4 + socket] -> limb particle or -1
   readonly mvx: Float64Array
   readonly mvy: Float64Array
+  /**
+   * Where a brain was at the start of this tick, and how far it actually got.
+   *
+   * `lvx/lvy` is net displacement over the whole tick — after sub-stepping, after the step clamp,
+   * after brain separation — which is why it is worth feeding back to the brain. `mvx/mvy` is the
+   * force the brain *asked* for; this is what the world granted, and the difference between the
+   * two is everything the body ran into.
+   */
+  private readonly preX: Float64Array
+  private readonly preY: Float64Array
+  readonly lvx: Float64Array
+  readonly lvy: Float64Array
   readonly wLimb: (Float64Array | undefined)[]
   readonly wBrain: (Float64Array | undefined)[]
 
@@ -316,6 +374,8 @@ export class World {
   foodOwed = 0
   private spring: [number, number] = [0, 0]
 
+  /** Brain inputs forced to zero, for ablation experiments; null in an ordinary world. */
+  private readonly blind: number[] | null
   private xin = new Float64Array(N_IN)
   private yout = new Float64Array(N_OUT)
 
@@ -332,8 +392,11 @@ export class World {
       c_up: LAWS.c_up * met,
       c_mv: LAWS.c_mv * met,
       c_sig: LAWS.c_sig * met,
+      // a searched world carries its own physics, and an experiment's override still wins over it
+      ...init.laws,
       ...opts.laws,
     }
+    this.blind = opts.blind && opts.blind.length > 0 ? [...opts.blind] : null
     this.rng = new Rng((init.seed ^ 0x9e3779b9) | 0)
     this.learner = makeLearner(init.learn ?? LEARN_DEFAULTS, init.seed)
     this.mergeStart = init.merge_hold ? null : 0
@@ -378,6 +441,8 @@ export class World {
     this.bornAt = new Int32Array(n)
     this.gen = new Int32Array(n)
     this.parent = new Int32Array(n).fill(-1)
+    this.coparent = new Int32Array(n).fill(-1)
+    this.isSpore = new Uint8Array(n)
     this.repCool = new Int16Array(n)
     this.brainSig = new Float64Array(n * 4)
     this.bonds = new Bonds(n, this.L.max_bonds)
@@ -408,6 +473,10 @@ export class World {
     this.limbs = new Int32Array(n * 4).fill(-1)
     this.mvx = new Float64Array(n)
     this.mvy = new Float64Array(n)
+    this.preX = new Float64Array(n)
+    this.preY = new Float64Array(n)
+    this.lvx = new Float64Array(n)
+    this.lvy = new Float64Array(n)
     this.wLimb = new Array(n)
     this.wBrain = new Array(n)
 
@@ -696,6 +765,9 @@ export class World {
     this.deaths()
     // before anything can re-endow a slot this tick, so a death-and-rebirth is still two lives
     this.trackLiveness()
+    // Germination is not gated on `repro`, and deliberately: the parent has already paid for the
+    // spore, so refusing to let it wake would destroy energy that was spent on a reproduction.
+    if (this.init.spore) this.germinate()
     if (this.init.repro) this.reproduce()
     this.captures()
     if (this.init.bonds) {
@@ -976,20 +1048,38 @@ export class World {
     // increments are independent, so each is sqrt(n) smaller and the total variance is unchanged;
     // the force part is simply applied in n pieces. This is how a hot world stays stable.
     const n = Math.max(1, Math.round(this.init.substeps))
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      this.preX[b] = this.x[b]
+      this.preY[b] = this.y[b]
+    }
     for (let k = 0; k < n; k++) this.integrateOnce(this.L.mu / n, Math.sqrt((2 * this.L.mu * this.init.T) / n))
     this.separateBrains()
+    // net displacement over the whole tick, measured last so it includes the separation pass:
+    // what the body actually did, which is the version worth telling the brain about
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      this.lvx[b] = this.minImage(this.x[b] - this.preX[b])
+      this.lvy[b] = this.minImage(this.y[b] - this.preY[b])
+    }
   }
 
   private integrateOnce(mu: number, sn: number): void {
     const { L, x, y, fx, fy, owner, alive, theta } = this
 
     const foodMoves = this.init.foodMoves
+    // Food is heavy (R2.4). The drift scales with mobility and the thermal part with its square
+    // root, because a Brownian step goes as sqrt(mu T) — so food responds to chemistry weakly and
+    // wanders slowly, and a swimmer can gain on it. Both kicks are still drawn either way, so the
+    // random stream is identical to a world where food is light: the two are comparable at a seed.
+    const muFood = mu * L.mu_food
+    const snFood = sn * Math.sqrt(L.mu_food)
     for (let i = 0; i < this.cap; i++) {
       if (!alive[i] || owner[i] !== -1) continue
       const t = this.type[i]
       if (t === WALL) continue // terrain does not move
       if (!foodMoves && t === FOOD) continue
-      const [sx, sy] = this.clampStep(mu * fx[i] + sn * this.kick(), mu * fy[i] + sn * this.kick())
+      const m = t === FOOD ? muFood : mu
+      const s = t === FOOD ? snFood : sn
+      const [sx, sy] = this.clampStep(m * fx[i] + s * this.kick(), m * fy[i] + s * this.kick())
       x[i] = this.wrap(x[i] + sx)
       y[i] = this.wrap(y[i] + sy)
     }
@@ -1137,7 +1227,8 @@ export class World {
   }
 
   private think(): void {
-    const { L, energy, field, xin, yout } = this
+    const { L, energy, field, xin, yout, theta } = this
+    const maxBonds = Math.max(1, this.bonds.max)
     for (let b = this.nIntr; b < this.nMatter; b++) {
       this.mvx[b] = 0
       this.mvy[b] = 0
@@ -1149,6 +1240,14 @@ export class World {
       // direction, so chemotaxis is one weight away rather than an inference from scalars
       let gx = this.ffx[b]
       let gy = this.ffy[b]
+      // How much food is *around*, as opposed to which way it pulls. The pull above is a vector
+      // sum and cancels exactly in the middle of a symmetric cloud; a count cannot cancel, so
+      // this is the input that tells a feast from a desert. Summed over the whole body, since a
+      // limb reaching into a patch is the body's news as much as the brain's.
+      let near = this.foodNear[b]
+      // bond load over the whole body: whether this organism is attached to anything at all
+      let held = 0
+      let slots = 0
       for (let s = 0; s < 4; s++) {
         const l = this.limbs[b * 4 + s]
         if (l < 0) continue
@@ -1168,16 +1267,35 @@ export class World {
         this.msg[l] = sig
         gx += this.ffx[l]
         gy += this.ffy[l]
-        const o = s * 6
+        near += this.foodNear[l]
+        const mine = maxBonds - this.bonds.slots(l)
+        held += mine
+        slots += maxBonds
+        const o = s * BRAIN_IN.SOCKET_W
         xin[o] = 1 // alive
         xin[o + 1 + this.type[l]] = 1
         xin[o + 5] = sig
+        xin[o + 6] = mine / maxBonds
+        // the limb's direction within its own quadrant, mapped to [-1, 1]. Which quadrant it is
+        // in is already implicit in which weights read this input, so the pair is a full heading.
+        const lo = this.quadLo(s)
+        const hi = this.quadHi(s)
+        xin[o + 7] = hi > lo ? (2 * (theta[l] - lo)) / (hi - lo) - 1 : 0
       }
-      xin[24] = energy[b] / L.E_ref
-      xin[25] = Math.min(1, field[this.fieldIndex(this.x[b], this.y[b])])
-      xin[26] = 1
-      xin[27] = Math.tanh(gx)
-      xin[28] = Math.tanh(gy)
+      xin[BRAIN_IN.RESERVE] = energy[b] / L.E_ref
+      xin[BRAIN_IN.FIELD] = Math.min(1, field[this.fieldIndex(this.x[b], this.y[b])])
+      xin[BRAIN_IN.BIAS] = 1
+      xin[BRAIN_IN.FOOD_X] = Math.tanh(gx)
+      xin[BRAIN_IN.FOOD_Y] = Math.tanh(gy)
+      xin[BRAIN_IN.FOOD_NEAR] = Math.tanh(near / FOOD_NEAR_SCALE)
+      // last tick's actual displacement, in units of the step guardrail: the brain's only
+      // feedback from the world about itself, and so its only memory of what it was doing
+      xin[BRAIN_IN.VEL_X] = Math.tanh(this.lvx[b] / L.d_max)
+      xin[BRAIN_IN.VEL_Y] = Math.tanh(this.lvy[b] / L.d_max)
+      held += maxBonds - this.bonds.slots(b)
+      slots += maxBonds
+      xin[BRAIN_IN.BOND_LOAD] = held / slots
+      if (this.blind) for (const i of this.blind) xin[i] = 0
       for (let k = 0; k < N_OUT; k++) {
         let sum = 0
         for (let m = 0; m < N_IN; m++) sum += wb[k * N_IN + m] * xin[m]
@@ -1413,6 +1531,7 @@ export class World {
         for (let k = 0; k < n; k++) {
           const j = grid.buf[k]
           if (j >= this.nIntr || type[j] === FOOD || owner[j] !== -1 || energy[j] < L.E_viable || cool[j] > 0) continue
+          if (this.isSpore[j]) continue // carrying a genome; not available as spare matter
           const dx = this.minImage(x[j] - x[b])
           const dy = this.minImage(y[j] - y[b])
           const err = Math.abs(Math.hypot(dx, dy) - L.L_rod)
@@ -1615,7 +1734,11 @@ export class World {
     while (this.foodOwed >= 1) {
       this.foodOwed -= 1
       if (!this.injectFood()) {
-        this.foodOwed = 0 // the world is full; the rest of this tick's light is wasted
+        // The world has no room left. The sun does not slow down for that — the rate is fixed —
+        // so the rest of this tick's light is wasted, and counted, because an unrecorded ceiling
+        // is a thermostat pretending to be a shortage.
+        this.lightWasted += 1 + this.foodOwed
+        this.foodOwed = 0
         break
       }
     }
@@ -1751,25 +1874,77 @@ export class World {
       if (this.init.fission && this.limbCount(b) >= 2 && this.energy[b] >= this.eRepro[b] * 1.5) {
         if (this.split(b)) continue
       }
-      this.bud(b)
+      /*
+       * Conjugation is tried before budding, and that ordering is a choice worth naming: a
+       * partner is only sometimes available, so trying it first means an organism takes the
+       * recombining option whenever it can and falls back to a clone when it cannot. The reverse
+       * order would make conjugation almost never happen, since budding almost always succeeds.
+       */
+      if (this.init.conjugation) {
+        const mate = this.bondedMate(b)
+        if (mate >= 0) {
+          this.bud(b, mate)
+          continue
+        }
+      }
+      /*
+       * A spore instead of a child, whenever a child could not be made.
+       *
+       * I first gated this on "no room to place a body", reasoning that crowding was what
+       * dispersal answers. Measured in a world that actually lives, that was the wrong scarcity:
+       * over 6,000 ticks `room` blocked reproduction **0** times and a free brain slot blocked it
+       * **41,244** times. The population cap is the binding constraint, as it has been every time
+       * this has been measured.
+       *
+       * Which makes the spore more useful than I thought rather than less. It needs one free
+       * particle now and a brain slot only when it germinates — so sowing *banks* a reproduction
+       * that cannot happen yet, and carries it somewhere else in the meantime. So the trigger is
+       * simply: budding failed, for whatever reason.
+       */
+      if (!this.bud(b) && this.init.spore) this.sow(b)
     }
   }
 
-  private bud(b: number): void {
+  /**
+   * One child, from one parent or two.
+   *
+   * With `mate < 0` this is budding exactly as it was. With a mate it is **conjugation**: the two
+   * parents split the cost, the body plan is drawn socket by socket from one or the other, and the
+   * brain weights are a uniform crossover. One function rather than two, because every hard part
+   * — finding free matter, affording it, finding room for the child, keeping the ledger closed —
+   * is identical, and a parallel reproduction path is exactly where the fission energy bug came
+   * from.
+   */
+  private bud(b: number, mate = -1): boolean {
     const { L, rng } = this
+    const parents = mate >= 0 ? [b, mate] : [b]
     const want: { quad: number; type: number; angle: number }[] = []
     for (let s = 0; s < 4; s++) {
-      const l = this.limbs[b * 4 + s]
+      /*
+       * The body plan recombines by the same rule as the weights: each socket comes from one
+       * parent or the other. Where only one parent has a limb in a socket it is inherited anyway
+       * — a coin flip over an empty socket would make conjugation a way of *losing* limbs, and
+       * selection would then favour never doing it.
+       */
+      const mine = this.limbs[b * 4 + s]
+      const theirs = mate >= 0 ? this.limbs[mate * 4 + s] : -1
+      const l = mine >= 0 && theirs >= 0 ? (rng.next() < 0.5 ? mine : theirs) : mine >= 0 ? mine : theirs
       if (l >= 0) want.push({ quad: s, type: this.type[l], angle: this.theta[l] })
     }
-    if (want.length === 0) return
+    if (want.length === 0) {
+      this.repBlocked.limbless++
+      return false
+    }
 
     // find room: an open brain slot and one open particle per wanted limb
     let childBrain = -1
     for (let i = this.nIntr; i < this.nMatter && childBrain < 0; i++) {
       if (this.continuous ? !this.alive[i] : this.owner[i] === -1) childBrain = i
     }
-    if (childBrain < 0) return
+    if (childBrain < 0) {
+      this.repBlocked.slots++
+      return false
+    }
     const taken = new Set<number>()
     const limbs: OrganismSpec['limbs'] = []
     let cost = Math.max(0, L.E_birth - this.energy[childBrain])
@@ -1777,7 +1952,11 @@ export class World {
       let pick = -1
       for (let i = 0; i < this.nIntr && pick < 0; i++) {
         if (taken.has(i)) continue
-        const open = this.continuous ? !this.alive[i] && this.cool[i] === 0 : this.owner[i] === -1 && this.type[i] === w.type && this.cool[i] === 0
+        // `!isSpore`: a spore is free matter with a genome on it, and letting a body eat one as a
+        // limb would silently discard a reproduction its parent had already paid for
+        const open =
+          !this.isSpore[i] &&
+          (this.continuous ? !this.alive[i] && this.cool[i] === 0 : this.owner[i] === -1 && this.type[i] === w.type && this.cool[i] === 0)
         if (open) pick = i
       }
       if (pick < 0) continue
@@ -1786,16 +1965,30 @@ export class World {
       limbs.push({ idx: pick, quad: w.quad, angle: w.angle })
       if (this.continuous) this.type[pick] = w.type
     }
-    if (limbs.length === 0 || this.energy[b] < cost + L.E_hold) return
+    if (limbs.length === 0) {
+      this.repBlocked.matter++
+      return false
+    }
+    // each parent pays an equal share and each must still keep E_hold: a conjugation that would
+    // starve one partner is not a cheaper child, it is a death
+    const share = cost / parents.length
+    if (parents.some((p) => this.energy[p] < share + L.E_hold)) {
+      this.repBlocked.energy++
+      return false
+    }
 
     // place the child clear of every other body, preferring the parent's own neighbourhood
     let cx = 0
     let cy = 0
     let bestGap = -1
+    // a conjugated child starts from the midpoint of its parents, the one place that belongs to
+    // both; min-image so a pair straddling the world's seam does not aim across the whole world
+    const ox = mate >= 0 ? this.wrap(this.x[b] + this.minImage(this.x[mate] - this.x[b]) / 2) : this.x[b]
+    const oy = mate >= 0 ? this.wrap(this.y[b] + this.minImage(this.y[mate] - this.y[b]) / 2) : this.y[b]
     for (let t = 0; t < 16; t++) {
       const a = rng.next() * TAU
-      const px = this.wrap(this.x[b] + L.repro_dist * Math.cos(a))
-      const py = this.wrap(this.y[b] + L.repro_dist * Math.sin(a))
+      const px = this.wrap(ox + L.repro_dist * Math.cos(a))
+      const py = this.wrap(oy + L.repro_dist * Math.sin(a))
       const gap = this.brainGap2(px, py, b)
       if (gap >= L.r_brain * L.r_brain) {
         cx = px
@@ -1809,23 +2002,47 @@ export class World {
         cy = py
       }
     }
-    if (bestGap < L.r_brain * L.r_brain * 0.25) return // nowhere to put it: wait
+    if (bestGap < L.r_brain * L.r_brain * 0.25) {
+      this.repBlocked.room++ // nowhere to put it: wait
+      return false
+    }
     const sigma = this.init.repro_mut
     const mutate = (w: Float64Array) => Float64Array.from(w, (v) => v + sigma * rng.gauss())
+    /*
+     * Uniform crossover, per weight: the standard operator for a real-valued genome, and the one
+     * that assumes least about how the 418 weights are organised. A one-point crossover would
+     * treat the flattening order as meaningful, and it is not — it is the order the weight matrix
+     * happens to be stored in, nothing more.
+     */
+    const cross = (u: Float64Array, v: Float64Array): Float64Array => Float64Array.from(u, (a, i) => (rng.next() < 0.5 ? a : v[i]))
+    const inherit = (pick: (p: number) => Float64Array): Float64Array => mutate(mate >= 0 ? cross(pick(b), pick(mate)) : pick(b))
+    /*
+     * Energy comes from the parents in equal shares, and the inner loop always draws from
+     * whichever parent currently has most, so no rounding can push one of them negative. The
+     * ledger invariant is what catches a mistake here: the first version of `split` destroyed
+     * about 45 energy a run and nothing but that test noticed.
+     */
     for (const idx of [childBrain, ...limbs.map((l) => l.idx)]) {
       this.alive[idx] = 1
       const add = Math.max(0, L.E_birth - this.energy[idx])
       if (add > 0) this.beginLife(idx)
       this.energy[idx] += add
-      this.energy[b] -= add
+      let owed = add
+      while (owed > 1e-12) {
+        const richest = parents.reduce((x, p) => (this.energy[p] > this.energy[x] ? p : x), parents[0])
+        const take = Math.min(owed, this.energy[richest])
+        if (take <= 0) break
+        this.energy[richest] -= take
+        owed -= take
+      }
     }
     this.placeOrganism({
       brain: childBrain,
       x: cx,
       y: cy,
       limbs,
-      wLimb: mutate(this.wLimb[b]!),
-      wBrain: mutate(this.wBrain[b]!),
+      wLimb: inherit((p) => this.wLimb[p]!),
+      wBrain: inherit((p) => this.wBrain[p]!),
       parent: b,
       gen: this.gen[b] + 1,
       island: this.island[b],
@@ -1846,7 +2063,164 @@ export class World {
       learnId: this.learnId[b],
     })
     this.nBudded++
+    for (const p of parents) this.repCool[p] = this.repWait[p]
+    if (mate >= 0) {
+      this.nConjugated++
+      this.coparent[childBrain] = mate
+    }
+    return true
+  }
+
+  /**
+   * An organism this one is bonded to, or -1.
+   *
+   * Bonded, not merely nearby — which is what makes conjugation fit the world rather than being
+   * bolted onto it. A bond is already the world's only notion of association, it already costs
+   * energy to make and has an activation energy to break, and `Joins` is met by every world that
+   * has ever been confirmed. So the precondition for sexual reproduction is a thing that already
+   * reliably happens, and the brain can now even perceive it (R5.5) and so could learn to seek it.
+   *
+   * Either body's particles count, since an organism touches the world through its limbs. The
+   * partner must be fertile on its own terms too: its own threshold, its own cooldown.
+   */
+  private bondedMate(b: number): number {
+    const max = this.bonds.max
+    for (let s = -1; s < 4; s++) {
+      const i = s < 0 ? b : this.limbs[b * 4 + s]
+      if (i < 0) continue
+      for (let k = 0; k < max; k++) {
+        const j = this.bonds.partner[i * max + k]
+        if (j < 0) continue
+        const o = this.owner[j]
+        if (o < 0 || o === b || !this.isBrain(o)) continue
+        if (this.repCool[o] > 0 || this.energy[o] < this.eRepro[o]) continue
+        return o
+      }
+    }
+    return -1
+  }
+
+  /**
+   * Sows a spore: one free particle, endowed with `E_spore` and carrying a copy of the genome.
+   *
+   * The spore is not a new kind of thing. It is free matter with a flag — it drifts under the same
+   * chemistry, decays at the same rate, and is pushed by the same forces — so dispersal costs the
+   * model one array and no new physics. What it buys is a lineage that can leave: budding can only
+   * place a child in space it can already see is empty, and a spore goes wherever the drift takes
+   * it and wakes where it finds food.
+   */
+  /** Sows a spore on demand, so a test can exercise one without waiting for a crowded world. */
+  sowFor(b: number): boolean {
+    return this.sow(b)
+  }
+
+  private sow(b: number): boolean {
+    const { L } = this
+    if (this.energy[b] < L.E_spore + L.E_hold) {
+      this.repBlocked.energy++
+      return false
+    }
+    let pick = -1
+    for (let i = 0; i < this.nIntr && pick < 0; i++) {
+      if (this.owner[i] === -1 && !this.isSpore[i] && this.alive[i] && this.cool[i] === 0) pick = i
+    }
+    if (pick < 0) {
+      this.repBlocked.matter++
+      return false
+    }
+    // energy moves, it is never created: the parent's loss is exactly the spore's gain
+    this.energy[b] -= L.E_spore
+    this.energy[pick] += L.E_spore
+    this.isSpore[pick] = 1
+    this.wBrain[pick] = Float64Array.from(this.wBrain[b]!)
+    this.wLimb[pick] = Float64Array.from(this.wLimb[b]!)
+    this.parent[pick] = b
+    this.gen[pick] = this.gen[b] + 1
+    this.learnId[pick] = this.learnId[b]
+    this.island[pick] = this.island[b]
+    this.nSown++
     this.repCool[b] = this.repWait[b]
+    return true
+  }
+
+  /**
+   * Wakes any spore that has drifted somewhere worth waking up.
+   *
+   * The germination test is the **same food count the brain reads** (R5.4), so perception and
+   * germination agree about what "there is food here" means — one definition, two uses. The spore
+   * particle becomes the new organism's first limb, which is both tidy and right: the matter that
+   * carried the genome is the matter the body starts from.
+   *
+   * A spore whose reserve falls below what a body costs stops being a spore and goes back to being
+   * ordinary matter. That is the failure mode, and it is a quiet one on purpose — a spore that
+   * never finds food has simply spent its parent's investment on nothing, which is what dispersal
+   * risks.
+   */
+  private germinate(): void {
+    const { L } = this
+    for (let i = 0; i < this.nIntr; i++) {
+      if (!this.isSpore[i]) continue
+      if (this.energy[i] < 2 * L.E_birth) {
+        this.forgetSpore(i)
+        continue
+      }
+      if (this.owner[i] !== -1 || !this.alive[i]) {
+        this.forgetSpore(i)
+        continue
+      }
+      if (this.foodNear[i] < L.spore_food) continue
+      let brain = -1
+      for (let k = this.nIntr; k < this.nMatter && brain < 0; k++) {
+        if (this.continuous ? !this.alive[k] : this.owner[k] === -1) brain = k
+      }
+      if (brain < 0) {
+        this.repBlocked.slots++
+        continue
+      }
+      if (this.brainGap2(this.x[i], this.y[i], brain) < L.r_brain * L.r_brain * 0.25) {
+        this.repBlocked.room++
+        continue
+      }
+      // the spore's own reserve endows the whole body: nothing is injected, nothing is destroyed
+      const half = this.energy[i] / 2
+      this.energy[i] -= half
+      this.alive[brain] = 1
+      this.beginLife(brain)
+      this.energy[brain] += half
+      const quad = this.socketFor(i, brain)
+      this.placeOrganism({
+        brain,
+        x: this.x[i],
+        y: this.y[i],
+        limbs: [{ idx: i, quad, angle: this.quadMid(quad) }],
+        wBrain: this.wBrain[i]!,
+        wLimb: this.wLimb[i]!,
+        parent: this.parent[i],
+        gen: this.gen[i],
+        island: this.island[i],
+        learnId: this.learnId[i],
+      })
+      this.isSpore[i] = 0
+      this.nGerminated++
+    }
+  }
+
+  /** A spore that failed: the flag and the stored genome go, the matter and its energy stay. */
+  private forgetSpore(i: number): void {
+    this.isSpore[i] = 0
+    this.wBrain[i] = undefined
+    this.wLimb[i] = undefined
+  }
+
+  /** The quadrant a particle already lies in relative to a brain, so a rod is born where it is. */
+  private socketFor(i: number, b: number): number {
+    let phi = Math.atan2(this.minImage(this.y[i] - this.y[b]), this.minImage(this.x[i] - this.x[b]))
+    if (phi < 0) phi += TAU
+    return Math.min(3, Math.floor((phi / TAU) * 4))
+  }
+
+  private quadMid(s: number): number {
+    return (this.quadLo(s) + this.quadHi(s)) / 2
   }
 
   private limbCount(b: number): number {
@@ -1970,7 +2344,7 @@ export class World {
     island = 0,
   ): number {
     const { L } = this
-    const open = (i: number) => (this.continuous ? !this.alive[i] : this.owner[i] === -1)
+    const open = (i: number) => !this.isSpore[i] && (this.continuous ? !this.alive[i] : this.owner[i] === -1)
     let brain = -1
     for (let b = this.nIntr; b < this.nMatter && brain < 0; b++) if (open(b)) brain = b
     if (brain < 0) return -1
@@ -2026,7 +2400,7 @@ export class World {
   spawnRandom(at?: [number, number]): boolean {
     const { rng } = this
     const brains: number[] = []
-    const open = (i: number) => (this.continuous ? !this.alive[i] : this.owner[i] === -1)
+    const open = (i: number) => !this.isSpore[i] && (this.continuous ? !this.alive[i] : this.owner[i] === -1)
     for (let b = this.nIntr; b < this.nMatter; b++) if (open(b)) brains.push(b)
     const pool: number[] = []
     for (let i = 0; i < this.nIntr; i++) if (open(i) && this.cool[i] === 0) pool.push(i)
