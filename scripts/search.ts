@@ -344,6 +344,45 @@ if (has('export')) {
   const top = Number(flag('top', '24'))
   const phases = [...new Set(all.map((e) => e.phase))].sort((a, b) => b - a)
   const deepest = phases.find((p) => all.filter((e) => e.phase === p).length >= 200) ?? phases[0] ?? 0
+  /*
+   * Interesting, not merely best.
+   *
+   * Ranking a quarter of a million worlds by one number returns ten near-identical matrices: they
+   * all found the same trick, and nine of the ten in this search shared a metabolism setting. So
+   * the export picks along several axes — the best overall, then the best *at each thing the
+   * ladder measures separately*, then the best per food pattern — and de-duplicates. What comes
+   * out is a set of worlds that are different from each other, each labelled with why it is here,
+   * which is what makes a list worth browsing rather than scrolling.
+   */
+  const ranked = rank(cat)
+  const picks: { why: string; entry: CatalogEntry }[] = []
+  const seen = new Set<string>()
+  const take = (why: string, e: CatalogEntry | undefined): void => {
+    if (!e || seen.has(e.id)) return
+    seen.add(e.id)
+    picks.push({ why, entry: e })
+  }
+  const bestBy = (f: (e: CatalogEntry) => number): CatalogEntry | undefined =>
+    ranked.reduce<CatalogEntry | undefined>((a, e) => (!a || f(e) > f(a) ? e : a), undefined)
+
+  take('highest score overall', ranked[0])
+  take('longest-lived organisms', bestBy((e) => e.stats.p90Coasts ?? 0))
+  take('best fed', bestBy((e) => e.stats.fed ?? 0))
+  take('most food-seeking', bestBy((e) => e.stats.seek ?? 0))
+  take('largest structure', bestBy((e) => e.stats.bestOrder ?? 0))
+  take('longest-held structure', bestBy((e) => e.stats.heldFrac ?? 0))
+  take('most member turnover', bestBy((e) => e.stats.replacements ?? 0))
+  take('furthest-travelling structure', bestBy((e) => e.stats.travel ?? 0))
+  take('deepest lineage', bestBy((e) => e.stats.maxGen ?? 0))
+  take('most bonds standing', bestBy((e) => e.stats.bonds ?? 0))
+  for (const mode of [...new Set(ranked.map((e) => e.spec.foodMode))]) {
+    take(`best with ${mode} food`, ranked.find((e) => e.spec.foodMode === mode))
+  }
+  for (const e of ranked) {
+    if (picks.length >= top) break
+    take('high score', e)
+  }
+
   const out = {
     kind: 'simplecell-discoveries',
     at: Date.now(),
@@ -351,7 +390,7 @@ if (has('export')) {
     phases: phases.map((p) => ({ phase: p, worlds: all.filter((e) => e.phase === p).length })),
     summary: summarise(all.filter((e) => e.phase === deepest)),
     analysedPhase: deepest,
-    top: rank(cat).slice(0, top),
+    top: picks.slice(0, top).map((p) => ({ ...p.entry, why: p.why })),
   }
   writeFileSync(flag('out', 'discoveries.json'), JSON.stringify(out))
   console.log(`wrote ${flag('out', 'discoveries.json')}: ${out.top.length} worlds of ${cat.length} catalogued`)

@@ -55,7 +55,11 @@ export function mountDiscoveries(root: HTMLElement, hooks: DiscoveryHooks): { re
         <div class="row"><button id="d-back">← back</button></div>
       </div>
       <div id="d-aggregate"></div>
-      <h2>Worlds, best first</h2>
+      <h2>Worlds worth looking at</h2>
+      <div class="note" style="margin-bottom:12px">Picked along several axes rather than by score
+        alone — the best overall, then the best at each thing the ladder measures separately, then
+        the best for each food pattern. Ranking a quarter of a million worlds by one number returns
+        ten copies of the same trick.</div>
       <div class="disco-grid" id="d-grid"></div>
     </div>`
 
@@ -125,7 +129,8 @@ export function mountDiscoveries(root: HTMLElement, hooks: DiscoveryHooks): { re
       <article class="disco" data-i="${i}">
         <div class="disco-stage"><canvas></canvas></div>
         <div class="disco-body">
-          <div class="row-k"><b>${e.level >= 0 ? LEVELS[e.level] : 'nothing yet'}</b><i>score ${e.score.toFixed(2)}</i></div>
+          <div class="row-k"><b>${e.why ?? 'high score'}</b><i>score ${e.score.toFixed(2)}</i></div>
+          <div class="note" style="color:var(--good)">${e.level >= 0 ? LEVELS[e.level] : 'nothing yet'} · ${e.ratios?.filter((r) => r >= 1).length ?? 0}/13 rungs</div>
           <div class="note">${e.spec.foodMode} · ${e.spec.foodLevel} · ${e.spec.foodRegime} ·
             metabolism ${e.spec.metabolism} · flow ${e.spec.bondFlow} · T ${e.spec.T}${e.spec.fission ? ' · fission' : ''}</div>
           <div class="chips-row">

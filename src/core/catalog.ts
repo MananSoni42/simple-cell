@@ -184,6 +184,8 @@ export interface CatalogEntry {
    * inference rather than the measurement that was promised.
    */
   source?: 'constrained' | 'uniform' | 'mutant' | 'promoted'
+  /** Set by the export: why this world is worth looking at, rather than merely where it ranked. */
+  why?: string
 }
 
 /** The header line of a catalog shard, so a file explains itself years later. */
