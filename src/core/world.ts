@@ -9,9 +9,9 @@ import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, ONLINE_
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
 import { BRAIN_IN, BRAIN_OUT, FOOD_NEAR_SCALE, N_BRAIN_IN, N_BRAIN_OUT, randomBrain, randomLimb } from './neurons'
-import { type Init, type Laws, LAWS, applyQuantization, bondRange, regimeMultiplier } from './params'
+import { type Init, type Laws, LAWS, applyQuantization, widenMatrix, bondRange, regimeMultiplier } from './params'
 import { Rng } from './rng'
-import { BRAIN, FOOD, MATRIX_INDEX, N_MATRIX, WALL } from './types'
+import { BRAIN, FOOD, FOOD_ROW, MATRIX_INDEX, N_MATRIX, WALL } from './types'
 
 const HALF_PI = Math.PI / 2
 const TAU = Math.PI * 2
@@ -437,8 +437,9 @@ export class World {
     const L = this.L
 
     this.A = new Float64Array(buffer(8 * N_MATRIX * N_MATRIX, opts.shared ?? false))
-    const Araw = init.quantized ? applyQuantization(init.A.map((r) => r.slice())) : init.A
-    const food = N_MATRIX - 1
+    // widened first: a 5x5 matrix is a world from before Brain had chemistry, and means zeros there
+    const Araw = widenMatrix(init.quantized ? applyQuantization(init.A.map((r) => r.slice())) : init.A)
+    const food = FOOD_ROW
     for (let i = 0; i < N_MATRIX; i++) {
       for (let j = 0; j < N_MATRIX; j++) {
         // food couples more weakly than matter does, which biases chemistry toward structure
@@ -1015,7 +1016,16 @@ export class World {
     // it the third pass would see its own earlier transfers and the result would depend on the
     // order particles happen to be visited in
     const e = this.flowE
-    e.set(energy.subarray(0, this.nIntr))
+    /*
+     * `nMatter`, not `nIntr`, and this bound is load-bearing in all four places below.
+     *
+     * A brain's index sits *above* `nIntr`, and brains can now be bond partners. With the snapshot
+     * covering only the intrinsic range, `e[brain]` read a stale zero outside the filled region:
+     * the transfer was computed against a value that was never there, and the receiving end was
+     * credited energy no end had been debited. The ledger test caught it as a reserve exceeding
+     * `E_cap` by 0.65 — energy created out of an array bound.
+     */
+    e.set(energy.subarray(0, this.nMatter))
     out.fill(0)
     inn.fill(0)
 
@@ -1029,7 +1039,7 @@ export class World {
     // Pass one: what every bond would move, from the snapshot. A brain reaches its own limbs
     // through its food share and a limb passes inward, so this is the step that joins two bodies
     // into one metabolism.
-    for (let i = 0; i < this.nIntr; i++) {
+    for (let i = 0; i < this.nMatter; i++) {
       if (!shares(i)) continue
       for (let s = 0; s < max; s++) {
         const j = bonds.partner[i * max + s]
@@ -1048,7 +1058,7 @@ export class World {
     // Pass two: per-particle scale factors, so nobody gives more than it holds or takes more than
     // it can hold. Both are derived from the snapshot, which is what makes the result independent
     // of visiting order — and therefore identical under a threaded backend or after a rewind.
-    for (let i = 0; i < this.nIntr; i++) {
+    for (let i = 0; i < this.nMatter; i++) {
       if (!shares(i)) continue
       out[i] = out[i] > 0 ? Math.min(1, e[i] / out[i]) : 1
       const room = Math.max(0, L.E_cap - e[i])
@@ -1057,7 +1067,7 @@ export class World {
 
     // Pass three: apply, scaled at both ends. Every transfer is one subtraction and one addition
     // of the same number, so the energy ledger closes exactly.
-    for (let i = 0; i < this.nIntr; i++) {
+    for (let i = 0; i < this.nMatter; i++) {
       if (!shares(i)) continue
       for (let s = 0; s < max; s++) {
         const j = bonds.partner[i * max + s]
@@ -1101,18 +1111,31 @@ export class World {
     }, this.cap)
   }
 
-  /** Forms new bonds between touching particles whose chemistry likes the pairing. */
+  /**
+   * Forms new bonds between touching particles whose chemistry likes the pairing.
+   *
+   * The loop runs to `nMatter`, not `nIntr`, which is what lets a **brain** bond now that it has a
+   * matrix row. That was the second half of the exemption: giving brains chemistry achieves nothing
+   * while the bond loop's index range excludes them.
+   *
+   * One consequence worth being plain about: **brain-to-brain bonds still cannot form.**
+   * `separateBrains` holds brains at least `r_brain` (16) apart as a law, and a bond needs the pair
+   * within about 12. So this delivers brain-to-matter bonding — a brain holding loose matter
+   * directly, by chemistry — and multi-brain bodies remain out of reach until that exclusion
+   * becomes a dial, which needs the stability budget re-derived.
+   */
   private formBonds(): void {
     const { L, x, y, grid, bonds, type } = this
     const r2max = bondRange(L).form ** 2
-    for (let i = 0; i < this.nIntr; i++) {
+    for (let i = 0; i < this.nMatter; i++) {
       if (!this.alive[i] || this.bondCool[i] > 0 || bonds.slots(i) === 0) continue
+      if (this.isSpore[i]) continue // carrying a genome; not available for structural chemistry
       const mi = MATRIX_INDEX[type[i]]
       if (mi < 0) continue
       const n = grid.near(x[i], y[i])
       for (let k = 0; k < n; k++) {
         const j = grid.buf[k]
-        if (j <= i || j >= this.nIntr || !this.alive[j] || this.bondCool[j] > 0) continue
+        if (j <= i || j >= this.nMatter || !this.alive[j] || this.bondCool[j] > 0 || this.isSpore[j]) continue
         if (this.owner[i] >= 0 && this.owner[i] === this.owner[j]) continue // siblings are already joined by rods
         if (bonds.has(i, j) || bonds.slots(j) === 0) continue
         const mj = MATRIX_INDEX[type[j]]

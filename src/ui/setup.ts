@@ -21,7 +21,7 @@ import {
 import { describeSpec } from '../core/fitness'
 import { LEARNERS, ONLINE_ALGOS, type LearnAlgo } from '../core/learning'
 import { measurePicker } from './measure'
-import { MATRIX_NAMES, N_MATRIX } from '../core/types'
+import { FOOD_ROW, MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
 import { capture } from '../render/renderer'
 import { Chips, Slider, Toggle, card, fieldsOf } from './controls'
@@ -40,7 +40,7 @@ import {
 import { mountPreview } from './preview'
 import { fmt, reducedMotion } from './theme'
 
-const FOOD = N_MATRIX - 1
+const FOOD = FOOD_ROW
 const TABS = [
   ['physics', 'Physics'],
   ['chemistry', 'Chemistry'],

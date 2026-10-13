@@ -1,5 +1,5 @@
 import { type CatalogEntry, TRI, type WorldSpec } from './catalog'
-import { MATRIX_NAMES, N_MATRIX } from './types'
+import { FOOD_ROW, MATRIX_NAMES } from './types'
 
 /**
  * What the search learned, as opposed to what it found.
@@ -159,7 +159,7 @@ export function chemistryShape(spec: WorldSpec): { nonzero: number; meanAbs: num
   const food: number[] = []
   TRI.forEach(([i, j], k) => {
     const v = spec.A[k] ?? 0
-    if (i === N_MATRIX - 1 || j === N_MATRIX - 1) food.push(v)
+    if (i === FOOD_ROW || j === FOOD_ROW) food.push(v)
     else {
       matter.push(v)
       if (i === j) diag.push(v)

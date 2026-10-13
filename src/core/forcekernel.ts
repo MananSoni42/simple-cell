@@ -101,14 +101,25 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
           }
           let f: number
           if (r < core) f = kcore * (1 - core / Math.max(r, core * 1e-3))
-          else if (iAmBrain || jIsBrain) {
-            // a brain has no chemistry, so beyond its core it simply pushes, fading out by r_brain_push
-            f = r < r_brain_push ? -A_brain * (1 - (r - core) / (r_brain_push - core)) : 0
-          } else {
+          else {
             const mj = MIDX[tj]
             const beta = core / rc
             const u = r / rc
             f = (mi >= 0 && mj >= 0 ? A[mi * N_MATRIX + mj] : 0) * (1 - Math.abs(2 * u - 1 - beta) / (1 - beta))
+            /*
+             * A brain now has chemistry *and* its body radius.
+             *
+             * This branch used to *replace* chemistry with a bare push, because a brain had no
+             * matrix row to consult — which is what made an organism a template held together by
+             * rods rather than an assembly held together by what it is made of. The push is now an
+             * additional term rather than a substitute, and `A_brain` is a dial whose range
+             * includes zero, so a search can discover whether a brain wants to hold its
+             * surroundings clear at all.
+             *
+             * With the Brain row at zero — which is what every world measured so far ran with —
+             * this is bit-identical to the old behaviour.
+             */
+            if (iAmBrain || jIsBrain) f += r < r_brain_push ? -A_brain * (1 - (r - core) / (r_brain_push - core)) : 0
           }
           f /= r
           sx += f * ddx

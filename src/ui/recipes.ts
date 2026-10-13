@@ -2,7 +2,7 @@ import { LEARN_DEFAULTS } from '../core/learning'
 import { specFromKeys } from '../core/fitness'
 import { type FoodLevel, type FoodMode, type FoodRegime, type Init, LAWS, applyFoodLevel, applyQuantization, applyWallStamp, initFromSeed, quantize, substepsFor } from '../core/params'
 import { Rng } from '../core/rng'
-import { N_MATRIX } from '../core/types'
+import { FOOD_ROW, N_MATRIX } from '../core/types'
 
 /**
  * Two dials instead of a list of worlds.
@@ -14,7 +14,7 @@ import { N_MATRIX } from '../core/types'
  * could, and each one is describable in a sentence before you press anything.
  */
 
-const FOOD = N_MATRIX - 1
+const FOOD = FOOD_ROW
 
 export interface Chemistry {
   key: string

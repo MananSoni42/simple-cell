@@ -1,6 +1,6 @@
 import { type FoodLevel, type FoodMode, type FoodRegime, type Init, LAWS, type Laws, applyFoodLevel, applyQuantization, initFromSeed, quantize, substepsFor } from './params'
 import { LEARN_DEFAULTS, type LearnAlgo } from './learning'
-import { N_MATRIX } from './types'
+import { FOOD_ROW, N_MATRIX } from './types'
 import { specFromKeys } from './fitness'
 
 /**
@@ -95,19 +95,28 @@ export interface WorldSpec {
 export type ReproMode = 'bud' | 'conjugation' | 'spore' | 'conjugation+spore'
 export const REPRO_MODES: ReproMode[] = ['bud', 'conjugation', 'spore', 'conjugation+spore']
 
-export const N_TRI = 14
+
 
 /** Lower-triangle index pairs, in the order `WorldSpec.A` stores them. */
 export const TRI: [number, number][] = (() => {
   const out: [number, number][] = []
   for (let i = 0; i < N_MATRIX; i++) {
     for (let j = 0; j <= i; j++) {
-      if (i === N_MATRIX - 1 && j === N_MATRIX - 1) continue // Food x Food is always zero
+      if (i === FOOD_ROW && j === FOOD_ROW) continue // Food x Food is always zero
       out.push([i, j])
     }
   }
   return out
 })()
+
+/**
+ * How many lower-triangle entries a spec carries. 20 with Brain in the matrix, 14 without.
+ *
+ * Derived from `TRI` rather than written down, because the two going out of step would corrupt
+ * every spec silently — `matrixOf` would read past the end of the array and fill the tail with
+ * zeros, which is a world that runs and is not the world that was asked for.
+ */
+export const N_TRI = TRI.length
 
 export function matrixOf(a: number[]): number[][] {
   const A = Array.from({ length: N_MATRIX }, () => new Array<number>(N_MATRIX).fill(0))

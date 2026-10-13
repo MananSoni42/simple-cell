@@ -1,6 +1,6 @@
 import { LEARN_DEFAULTS, type LearnConfig } from './learning'
 import { Rng } from './rng'
-import { N_MATRIX } from './types'
+import { BRAIN_ROW, FOOD_ROW, N_MATRIX, N_MATTER } from './types'
 
 /** Universal constants. Same for every particle; not play material. */
 export const LAWS = {
@@ -305,9 +305,25 @@ export interface Init {
 }
 
 /** Snaps the non-food block of a matrix to QUANTA, in place, keeping it symmetric. */
+/**
+ * Pads a matrix up to the current width, leaving the new rows and columns at zero.
+ *
+ * Exists so that adding Brain to the chemistry did not require touching every preset, recipe,
+ * saved config, test fixture and catalog row in the project. A 5x5 matrix means "the world as it
+ * was, with no brain chemistry", which is precisely the behaviour those worlds were measured
+ * under, so widening with zeros is not a convenience — it is the correct interpretation.
+ *
+ * Returns the input untouched when it is already wide enough, so this is safe to call anywhere.
+ */
+export function widenMatrix(A: number[][]): number[][] {
+  if (A.length >= N_MATRIX && A.every((r) => r.length >= N_MATRIX)) return A
+  return Array.from({ length: N_MATRIX }, (_, i) => Array.from({ length: N_MATRIX }, (_, j) => A[i]?.[j] ?? 0))
+}
+
 export function applyQuantization(A: number[][]): number[][] {
-  for (let i = 0; i < N_MATRIX - 1; i++) {
-    for (let j = i; j < N_MATRIX - 1; j++) {
+  // the matter block only: Food and Brain couplings are scaled rather than quantized
+  for (let i = 0; i < N_MATTER; i++) {
+    for (let j = i; j < N_MATTER; j++) {
       const q = quantize(A[i][j])
       A[i][j] = q
       A[j][i] = q
@@ -386,13 +402,39 @@ function seedWorld(seed: number, scale = 1): Init {
   const rng = new Rng(seed)
   const area = scale * scale
   const A = Array.from({ length: N_MATRIX }, () => new Array<number>(N_MATRIX).fill(0))
-  for (let i = 0; i < N_MATRIX; i++) {
-    for (let j = i; j < N_MATRIX; j++) {
-      if (i === N_MATRIX - 1 && j === N_MATRIX - 1) continue // Food x Food: nothing
+  /*
+   * The P1..P4 and Food block, drawn in exactly the order and count it always was.
+   *
+   * This matters more than it looks. Widening the matrix inside this one loop would have drawn six
+   * extra values from `rng` before everything else in this function — temperature, counts, food
+   * pattern, the lot — so **every seeded world in the project would have become a different
+   * world**, and the change would have looked like a bug in six unrelated tests rather than like
+   * the matrix getting wider.
+   */
+  for (let i = 0; i <= FOOD_ROW; i++) {
+    for (let j = i; j <= FOOD_ROW; j++) {
+      if (i === FOOD_ROW && j === FOOD_ROW) continue // Food x Food: nothing
       const a = Math.round((rng.next() * 2 - 1) * 100) / 100
       A[i][j] = a
       A[j][i] = a
     }
+  }
+  /*
+   * Brain's couplings, from a stream of their own, so not one draw above was displaced.
+   *
+   * A fresh seed therefore produces the world it always did *except* for the brain row, which is
+   * the smallest honest change available: the matrix is the world's genome, so widening it has to
+   * mean something, or the UI's random worlds could never show brain chemistry at all.
+   *
+   * Specs are unaffected either way. A catalog row carries its 14 entries explicitly and widens
+   * with zeros, so every scored world still replays exactly as it was scored. Seeds move, specs
+   * do not — and specs are what the search and the Discoveries page are built on.
+   */
+  const brng = new Rng((seed ^ 0x51a7f0b3) | 0)
+  for (let j = 0; j <= BRAIN_ROW; j++) {
+    const a = Math.round((brng.next() * 2 - 1) * 100) / 100
+    A[BRAIN_ROW][j] = a
+    A[j][BRAIN_ROW] = a
   }
   return {
     seed,

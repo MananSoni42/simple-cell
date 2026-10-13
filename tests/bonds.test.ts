@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { Bonds, bondForce } from '../src/core/bonds'
 import { type Init, LAWS, bondRange, initFromSeed } from '../src/core/params'
 import { World } from '../src/core/world'
+import { specInit } from '../src/core/catalog'
+import { BRAIN, BRAIN_ROW, FOOD_ROW, MATRIX_INDEX } from '../src/core/types'
 
 function pairWorld(over: Partial<Init> = {}): World {
   const init: Init = {
@@ -166,5 +168,74 @@ describe('bond length is bounded', () => {
     w.placeOrganism({ brain: 4, x: 20, y: 280, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
     expect(w.bonds.has(0, 1)).toBe(false)
     expect(w.bonds.count).toBe(0)
+  })
+})
+
+describe('brains are made of the same stuff as everything else', () => {
+  /*
+   * A brain used to map to matrix row -1: no chemistry, unable to bond, held apart from everything
+   * by a hardcoded universal push. That is what made an organism a *template* held together by
+   * rods rather than an assembly held together by what it is made of.
+   *
+   * Two exemptions had to go, and removing either alone achieves nothing: the brain needed a row
+   * in the matrix, *and* `formBonds` needed to stop bounding its loop at `nIntr`, which is below
+   * every brain's index.
+   */
+  const spec = (tail: number[]) => ({
+    seed: 4242,
+    A: [...[0.5, -0.5, 0.5, 0, 0.25, 0.5, 1, 0, 0.5, -0.25, 0.5, 1, 0.25, 0.5], ...tail],
+    slots: 40, matter: 200, metabolism: 0.5, bondFlow: 0.05, T: 2,
+    foodMode: 'patchy' as const, foodLevel: 'average' as const, foodRegime: 'steady' as const,
+    patches: 2, radius: 50, foodLife: 250, fission: false, scale: 1,
+  })
+  const run = (tail: number[]): { brainBonds: number; total: number; w: World } => {
+    const w = new World(specInit(spec(tail)), {})
+    for (let t = 0; t < 3000; t++) w.step()
+    let brainBonds = 0
+    w.bonds.forEach((i, j) => {
+      if (w.type[i] === BRAIN || w.type[j] === BRAIN) brainBonds++
+    }, w.cap)
+    return { brainBonds, total: w.bonds.count, w }
+  }
+
+  it('has a row in the chemistry matrix', () => {
+    expect(MATRIX_INDEX[BRAIN]).toBe(BRAIN_ROW)
+    expect(BRAIN_ROW).toBeGreaterThan(FOOD_ROW) // appended, so the old 14 entries keep their places
+  })
+
+  it('bonds to matter when its chemistry says so, and not when it does not', () => {
+    const off = run([0, 0, 0, 0, 0, 0])
+    const on = run([1, 1, 1, 1, 0, 0])
+    expect(off.brainBonds).toBe(0)
+    expect(on.brainBonds).toBeGreaterThan(10)
+  })
+
+  it('keeps the energy ledger closed while bonded', () => {
+    /*
+     * This is the regression that matters. `flowBonds` snapshotted and looped over `nIntr`, and a
+     * brain's index is *above* it — so `e[brain]` read a stale zero from outside the filled region,
+     * the transfer was computed against a value that was never there, and the receiving end was
+     * credited energy no end had been debited. It showed up as a reserve exceeding `E_cap` by 0.65:
+     * energy created out of an array bound.
+     */
+    const { w } = run([1, 1, 1, 1, 0.5, 0])
+    expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 6)
+    for (let i = 0; i < w.cap; i++) {
+      expect(w.energy[i]).toBeGreaterThanOrEqual(0)
+      expect(w.energy[i]).toBeLessThanOrEqual(LAWS.E_cap + 1e-9)
+    }
+  })
+
+  it('still cannot bond to another brain, because the exclusion law outranks chemistry', () => {
+    // `separateBrains` holds brains at least r_brain (16) apart and a bond needs about 12, so
+    // multi-brain bodies remain out of reach until that exclusion becomes a dial. Stated as a test
+    // so the limitation is recorded rather than assumed.
+    const { w } = run([0, 0, 0, 0, 0, 1])
+    let brainBrain = 0
+    w.bonds.forEach((i, j) => {
+      if (w.type[i] === BRAIN && w.type[j] === BRAIN) brainBrain++
+    }, w.cap)
+    expect(brainBrain).toBe(0)
+    expect(LAWS.r_brain).toBeGreaterThan(bondRange(LAWS).form)
   })
 })

@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import { LEVELS } from '../src/core/ladder'
-import { TRI, type WorldSpec, best, matrixOf, parseCatalog, rank, specId, specInit, triOf } from '../src/core/catalog'
+import { N_TRI, TRI, type WorldSpec, best, matrixOf, parseCatalog, rank, specId, specInit, triOf } from '../src/core/catalog'
 import { evaluate, evaluateSeeds } from '../src/core/evaluate'
 import { chemistryShape, summarise } from '../src/core/analyse'
 import { QUANTA } from '../src/core/params'
-import { N_MATRIX } from '../src/core/types'
+import { BRAIN_ROW, FOOD_ROW, N_MATRIX } from '../src/core/types'
 
 const spec = (over: Partial<WorldSpec> = {}): WorldSpec => ({
   seed: 42,
-  A: [0.5, -0.5, 0.5, 0, 0.25, -1, 1, 0, 0.5, -0.25, 0.5, 1, 0, 0.5],
+  // padded to the matrix's current width, so this fixture does not have to be rewritten every
+  // time the chemistry gains a row. The first fourteen are a real spec from the catalog.
+  A: [...[0.5, -0.5, 0.5, 0, 0.25, -1, 1, 0, 0.5, -0.25, 0.5, 1, 0, 0.5], ...new Array(Math.max(0, N_TRI - 14)).fill(0.25)],
   slots: 24,
   matter: 120,
   metabolism: 0.5,
@@ -27,15 +29,33 @@ const spec = (over: Partial<WorldSpec> = {}): WorldSpec => ({
 
 describe('a world spec', () => {
   it('covers the whole matrix except the one entry that is always zero', () => {
-    expect(TRI).toHaveLength(14)
+    // every pair once, lower triangle, minus Food x Food. 20 with Brain in the matrix, 14 without
+    expect(TRI).toHaveLength((N_MATRIX * (N_MATRIX + 1)) / 2 - 1)
+    expect(N_TRI).toBe(TRI.length)
     const seen = new Set(TRI.map(([i, j]) => `${i},${j}`))
-    expect(seen.size).toBe(14)
-    expect(seen.has(`${N_MATRIX - 1},${N_MATRIX - 1}`)).toBe(false)
+    expect(seen.size).toBe(TRI.length)
+    expect(seen.has(`${FOOD_ROW},${FOOD_ROW}`)).toBe(false)
+    expect(seen.has(`${BRAIN_ROW},${BRAIN_ROW}`)).toBe(true) // brain-to-brain chemistry is allowed
+  })
+
+  it('keeps the first fourteen entries where they have always been', () => {
+    /*
+     * The compatibility guarantee, as an assertion. Brain is appended at the end of the matrix
+     * rather than slotted in at its type index, so the lower triangle's first fourteen entries are
+     * still the P1..P4 and Food block in the same order. Every spec in the catalog, every preset
+     * and every saved config therefore keeps its meaning, and a 14-entry matrix leaves the six
+     * Brain couplings at zero — which is exactly the physics those worlds were measured under.
+     */
+    const old14 = [0.5, -0.5, 0.5, 0, 0.25, 0.5, 1, 0, 0.5, -0.25, 0.5, 1, 0.25, 0.5]
+    const A = matrixOf(old14)
+    expect(triOf(A).slice(0, 14)).toEqual(old14)
+    expect(triOf(A).slice(14).every((v) => v === 0)).toBe(true)
+    for (const [i, j] of TRI.slice(0, 14)) expect(Math.max(i, j)).toBeLessThan(BRAIN_ROW)
   })
 
   it('round-trips through a matrix, staying symmetric and quantized', () => {
     const A = matrixOf(spec().A)
-    expect(A[N_MATRIX - 1][N_MATRIX - 1]).toBe(0)
+    expect(A[FOOD_ROW][FOOD_ROW]).toBe(0)
     for (let i = 0; i < N_MATRIX; i++) {
       for (let j = 0; j < N_MATRIX; j++) {
         expect(A[i][j]).toBe(A[j][i])

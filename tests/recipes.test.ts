@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { CHEMISTRIES, WORLD_KINDS, buildRecipe, randomRecipe } from '../src/ui/recipes'
-import { N_MATRIX } from '../src/core/types'
+import { FOOD_ROW, N_MATRIX } from '../src/core/types'
 import { QUANTA, stability } from '../src/core/params'
 import { World } from '../src/core/world'
 
@@ -29,7 +29,7 @@ describe('a world from two dials', () => {
     for (const c of CHEMISTRIES) {
       for (const seed of [1, 2, 99, 12345]) {
         const A = buildRecipe({ chemistry: c.key, world: 'patchy', seed, scale: 1 }).A
-        expect(A[N_MATRIX - 1][N_MATRIX - 1]).toBe(0)
+        expect(A[FOOD_ROW][FOOD_ROW]).toBe(0)
         for (let i = 0; i < N_MATRIX; i++) {
           for (let j = 0; j < N_MATRIX; j++) {
             expect(A[i][j]).toBe(A[j][i])

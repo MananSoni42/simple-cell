@@ -1,7 +1,7 @@
 import { N_TRI, REPRO_MODES, TRI, type WorldSpec } from './catalog'
 import { QUANTA, type FoodLevel, type FoodMode, type FoodRegime } from './params'
 import { Rng } from './rng'
-import { N_MATRIX } from './types'
+import { BRAIN_ROW, FOOD_ROW } from './types'
 
 /**
  * Where candidates come from.
@@ -33,7 +33,6 @@ import { N_MATRIX } from './types'
 
 export type Source = 'constrained' | 'uniform' | 'mutant'
 
-const MATTER = N_MATRIX - 1
 const pick = <T,>(rng: Rng, xs: readonly T[]): T => xs[rng.int(xs.length)]
 
 /** The dials, as discrete sets, so the catalog's factor analysis has cells with worlds in them. */
@@ -92,8 +91,16 @@ const DIALS = {
   sporeFood: [1, 3, 8],
 } as const
 
-/** Which triangle entries are matter-matter, and which of those are the diagonal. */
-const KIND = TRI.map(([i, j]) => (i === MATTER || j === MATTER ? 'food' : i === j ? 'self' : 'cross'))
+/**
+ * What kind of coupling each triangle entry is, so the constrained draw can treat them differently.
+ *
+ * `brain` is new and is checked *first*: a Brain×Food entry is about whether a brain is drawn to
+ * food, which is a different question from how two kinds of matter stick together, and lumping it
+ * in with the food entries would have the constrained prior shaping it as if it were one.
+ */
+const KIND = TRI.map(([i, j]) =>
+  i === BRAIN_ROW || j === BRAIN_ROW ? 'brain' : i === FOOD_ROW || j === FOOD_ROW ? 'food' : i === j ? 'self' : 'cross',
+)
 
 function constrainedMatrix(rng: Rng): number[] {
   const a = new Array<number>(N_TRI).fill(0)
@@ -116,6 +123,18 @@ function constrainedMatrix(rng: Rng): number[] {
   // differentiated appetites: some types care about food and others do not, which is the
   // ingredient a feeding layer around an indifferent core would need
   for (const i of foodIdx) a[i] = rng.next() < 0.5 ? pick(rng, [0.25, 0.5, 1]) : pick(rng, [0, 0, -0.25])
+
+  /*
+   * Brain couplings, drawn weakly and mostly toward zero.
+   *
+   * A brain had no chemistry at all until now, and every world ever measured ran with these at
+   * zero — so a prior centred near zero keeps the constrained region near the behaviour that is
+   * actually known, and lets the uniform control explore the rest. Weak attraction to matter is
+   * the one thing nudged for: it is what would let a body hold itself together by chemistry rather
+   * than only by its rods.
+   */
+  const brainIdx = KIND.map((k, i) => (k === 'brain' ? i : -1)).filter((i) => i >= 0)
+  for (const i of brainIdx) a[i] = rng.next() < 0.6 ? 0 : pick(rng, [0.25, 0.25, 0.5, -0.25])
   return a
 }
 

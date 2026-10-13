@@ -17,7 +17,7 @@ import {
 } from '../core/params'
 import { COMBINERS, FITNESS, type FitnessKey, type FitnessSpec, specFromKeys } from '../core/fitness'
 import { LEARNERS, type LearnConfig } from '../core/learning'
-import { N_MATRIX } from '../core/types'
+import { FOOD_ROW, N_MATRIX } from '../core/types'
 
 export const CONFIG_VERSION = 1
 
@@ -154,7 +154,7 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
       }
     }
     for (let i = 0; i < N_MATRIX; i++) for (let j = i + 1; j < N_MATRIX; j++) A[j][i] = A[i][j] // enforce symmetry
-    A[N_MATRIX - 1][N_MATRIX - 1] = 0
+    A[FOOD_ROW][FOOD_ROW] = 0
   }
 
   const mode = typeof src.foodMode === 'string' && FOOD_MODES.includes(src.foodMode as FoodMode) ? (src.foodMode as FoodMode) : base.foodMode
