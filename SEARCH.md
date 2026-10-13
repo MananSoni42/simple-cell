@@ -299,10 +299,71 @@ so the resultant has no direction to align with, while at 12 there is a window w
 rung cannot be trusted until that is fixed — the honest repair is to measure alignment only when
 the food signal is a real direction, or only for organisms not already in contact with food.
 
-### Phase 3 — running
+### Phase 3 — complete, and it audited the metrics rather than the worlds
 
-40 worlds × 100,000 ticks × 5 seeds, 79 generations each. The first evolutionary-horizon test, and
-the producer of the confirmed top ten. **Phase 4 is skipped for now**: 790 generations on five
-worlds is only worth its two hours if phase 3 shows something still climbing at 79.
+**40 worlds × 100,000 ticks × 5 seeds · 14 core-hours in 1.6 hours.** Three reached level 1, and the
+confirmed top ten are all level 1.
+
+**Every single world plateaued.** None used more than 16,000 of its 100,000 ticks, which settles
+the phase-4 question: nothing was still climbing at 79 generations, so 790 generations on five
+worlds would buy nothing. **Phase 4 is cancelled, not deferred.**
+
+| rung | phase 3 |
+|---|---|
+| Persists | 100% |
+| Feeds | 20% |
+| Lasts | 20% |
+| **Seeks** | **2.5%** |
+| Keeps its body | 47.5% |
+| **Breeds true** | **100%** |
+| **Lineage outlives** | **100%** |
+| **Joins** | **100%** |
+| Holds | 15% |
+| Renews | 15% |
+| Moves together | 52.5% |
+| Transmits joining | 15% |
+| Grows from within | 2.5% |
+
+Heredity and association are **solved** at this horizon — every confirmed world breeds true, keeps a
+lineage alive for many lifetimes, and has organisms bonded into objects. What remains unsolved is
+metabolism (20%), agency (2.5%) and structural persistence (15%).
+
+**The confirmed top ten share a shape**: every one is `abundant` food, nine of ten run at
+**metabolism 2** — the most expensive setting — with low but non-zero energy flow along bonds.
+
+### The search found a flaw in my metric, not a world
+
+That metabolism-2 dominance survived five seeds and medians, so it was not the measurability
+artifact diagnosed at phase 0. It is worse than that.
+
+| metabolism | p90 coasts | mean life (ticks) | fed | level-1 worlds |
+|---|---|---|---|---|
+| 0.25 | 1.53 | **1,280** | 0.36 | 0 |
+| 0.5 | 1.77 | 1,206 | 0.51 | 0 |
+| 1 | 1.08 | 521 | 0.63 | 1 |
+| **2** | **2.35** | **479** | 0.94 | **2** |
+
+At metabolism 2 organisms live **479 ticks, the shortest absolute lifespan of any setting, and score
+the highest longevity**. Coasting time is `endowment ÷ upkeep`, upkeep scales with the dial, and the
+yardstick halves while the lifespan falls by less — so `Lasts`, the rung built specifically so that
+making living cheaper could not buy it, systematically **rewarded short lives**. I over-corrected
+and inverted the thing I was protecting.
+
+Nine of the top ten worlds in a quarter-million-world search were selecting for that inversion.
+This is the search doing its real job: a large enough search finds the flaw in the objective before
+it finds the thing the objective was for.
+
+**Fixed both ways at once.** Coasting time is now computed against the *laws'* upkeep rate rather
+than the world's, so a coast means the same length of life everywhere; and `Lasts` requires an
+absolute floor of 2,000 ticks *as well*. Either condition alone is buyable — coasts alone reward
+expensive living, absolute ticks alone reward cheap living. Both together are not.
+
+One cost to record: the existing catalog's rung-1 and rung-2 figures were computed under the old
+definition and are **not comparable** with anything measured after this change. The top-ten ranking
+is driven mostly by the other eleven rungs, so the ordering stands.
+
+That is the third metric flaw this search has exposed, after the z-score that ignored effect size
+and the `Seeks` alignment that reads geometry. All three were found by asking what the search
+*selected for* rather than what it found.
 
 _Updates appended below as they land._

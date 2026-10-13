@@ -1718,7 +1718,21 @@ export class World {
       body++
     }
     this.endowment[b] = given
-    this.coastT[b] = given / Math.max(1e-9, body * this.L.c_up)
+    /*
+     * Coasting time against the **laws'** upkeep rate, not this world's.
+     *
+     * It used `this.L.c_up`, which the metabolism dial scales — and that inverted the rung it was
+     * built to protect. Measured over forty confirmed worlds: at metabolism 2 organisms lived 479
+     * ticks, the shortest absolute lifespan of any setting, and scored 2.35 coasting times, the
+     * highest, because the yardstick halves while the lifespan falls by less. Nine of the top ten
+     * worlds in the whole search ran at the most expensive metabolism, which is the search finding
+     * the flaw rather than finding a world.
+     *
+     * A fixed yardstick is the honest version: coasting time is a property of the laws, so "lived
+     * five coasts" means the same length of life in every world. The rung then pairs it with an
+     * absolute floor, so neither a cheap metabolism nor an expensive one can buy it.
+     */
+    this.coastT[b] = given / Math.max(1e-9, body * LAWS.c_up)
     this.hasJoined[b] = 0
     this.parentJoined[b] = spec.parent !== undefined && spec.parent >= 0 ? this.hasJoined[spec.parent] : 0
   }

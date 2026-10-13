@@ -235,7 +235,23 @@ export class LadderTracker {
 
     add(0, 'Persists', 'anything alive, and staying that way', c.organisms > 0 ? frac(this.sAlive) : 0, `${c.organisms} alive`)
     add(1, 'Feeds', 'the typical life ate more than it was given', fedMedian, `ate ${fedMedian.toFixed(2)}× its endowment`)
-    add(1, 'Lasts', 'long lives: twice what coasting on the endowment allows', coastsP90 / 2, `p90 ${coastsP90.toFixed(2)} coasts`)
+    /*
+     * Two conditions, because either alone is buyable by the metabolism dial.
+     *
+     * Coasting time alone rewarded *expensive* living: the yardstick shrinks with upkeep faster
+     * than lifespan does, so the shortest-lived organisms scored the highest. An absolute floor
+     * alone rewards *cheap* living, where everything simply happens more slowly. Requiring both —
+     * a life long in ticks, and longer than a free ride on the endowment would give — is the only
+     * version neither direction of the dial can game.
+     */
+    const lifeP90 = quantile(lives.map((l) => l.age), 0.9)
+    add(
+      1,
+      'Lasts',
+      'long lives: 2,000 ticks, and twice what coasting on the endowment allows',
+      Math.min(coastsP90 / 2, lifeP90 / 2000),
+      `p90 ${Math.round(lifeP90)}t, ${coastsP90.toFixed(2)} coasts`,
+    )
     add(
       2,
       'Seeks',
