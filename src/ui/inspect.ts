@@ -1,5 +1,5 @@
 import { FITNESS, type FitnessSpec, describeSpec, keysOf } from '../core/fitness'
-import { LEARNERS, type LearnAlgo, type LearnerStatus } from '../core/learning'
+import { LEARNERS, ONLINE_ALGOS, type LearnAlgo, type LearnerStatus } from '../core/learning'
 import { measurePicker } from './measure'
 import type { OrganismFile } from '../core/organism'
 import { bodyDiagram, portrait, weightMap } from './portrait'
@@ -119,15 +119,29 @@ export class InspectPanel {
       }
     }
 
-    this.root.querySelector('#l-state')!.innerHTML = on
-      ? `<b>${describeSpec(st.spec)}</b><br>${fmt.n(st.seen)} lives scored · ${fmt.n(st.updates)} updates ·
-         holding ${fmt.n(st.held)} · cohort ${fmt.n(st.cohort)}`
-      : `<b>Nothing is learning.</b><br>every new organism gets random weights, and whatever happens is
+    /*
+     * An online learner's figures mean different things, so they are labelled differently rather
+     * than reusing a line written for batch algorithms. "Holding 40" means forty *living brains
+     * being shaped* here, where for CEM it means one distribution — and "updates" counts ticks of
+     * plasticity, which runs to six figures in a few thousand ticks rather than tens.
+     */
+    const online = ONLINE_ALGOS.includes(st.algo)
+    this.root.querySelector('#l-state')!.innerHTML = !on
+      ? `<b>Nothing is learning.</b><br>every new organism gets random weights, and whatever happens is
          the world doing it unaided`
+      : online
+        ? `<b>${describeSpec(st.spec)}</b> · <i>rewiring living brains</i><br>
+           shaping ${fmt.n(st.held)} organisms · ${fmt.n(st.updates)} weight updates ·
+           ${fmt.n(st.seen)} lives since scored`
+        : `<b>${describeSpec(st.spec)}</b><br>${fmt.n(st.seen)} lives scored · ${fmt.n(st.updates)} updates ·
+           holding ${fmt.n(st.held)} · cohort ${fmt.n(st.cohort)}`
     // with nothing learning there are no scored lives, and nine zeros say less than nothing
     if (on) {
       this.root.querySelector('#l-prog')!.textContent =
-        `score now ${st.recent.toFixed(3)} · best ${st.best.toFixed(3)} (a percentile among recent deaths, so 0.5 is average)`
+        `score now ${st.recent.toFixed(3)} · best ${st.best.toFixed(3)} (a percentile among recent deaths, so 0.5 is average)` +
+        (online && st.updates > 0 && st.seen === 0
+          ? ' — no lives have ended yet, so the graph is empty while the rewiring is not'
+          : '')
     }
     this.paintScalars(st, on)
     this.paintProgress(st, on)

@@ -116,7 +116,17 @@ export class StatsPanel {
       : 'every measured rung reached'
 
     set('s-orgs', `${fmt.n(c.organisms)} alive`)
-    set('s-orgs-sub', `born ${fmt.n(st.births)} (${fmt.n(st.budded)} bred) · died ${fmt.n(st.deaths)} · ${c.organisms ? (c.limbs / c.organisms).toFixed(1) : '–'} limbs each · ${fmt.n(c.freeMatter)} loose`)
+    // the two non-clonal modes are reported only when they happened, so an ordinary world's line
+    // stays as short as it was
+    const ways = [
+      st.conjugated > 0 ? `${fmt.n(st.conjugated)} from two parents` : '',
+      st.sown > 0 ? `${fmt.n(st.germinated)}/${fmt.n(st.sown)} spores woke` : '',
+    ].filter(Boolean)
+    // innerHTML rather than `set`, which writes textContent: this line now has a second row
+    this.el['s-orgs-sub'].innerHTML =
+      `born ${fmt.n(st.births)} (${fmt.n(st.budded)} bred) · died ${fmt.n(st.deaths)} · ` +
+      `${c.organisms ? (c.limbs / c.organisms).toFixed(1) : '–'} limbs each · ${fmt.n(c.freeMatter)} loose` +
+      (ways.length ? `<br><span style="color:${INK.good}">${ways.join(' · ')}</span>` : '')
     set('s-food', fmt.n(c.food))
     /*
      * Two ceilings, named.

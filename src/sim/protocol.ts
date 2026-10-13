@@ -66,6 +66,10 @@ export interface StatsSnapshot {
   burned: number
   births: number
   budded: number
+  /** Children with two parents, and spores sown and woken (R7.9, R7.10). */
+  conjugated: number
+  sown: number
+  germinated: number
   deaths: number
   recordAge: number
   /** Always present: a rail that cannot say "nothing is learning" is worse than one that can. */

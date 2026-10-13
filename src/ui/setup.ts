@@ -4,6 +4,8 @@ import {
   type FoodMode,
   type FoodRegime,
   type Init,
+  LAWS,
+  type Laws,
   LEVEL_MULTIPLIER,
   QUANTA,
   type WallLayout,
@@ -17,7 +19,7 @@ import {
   sustenanceRate,
 } from '../core/params'
 import { describeSpec } from '../core/fitness'
-import { LEARNERS, type LearnAlgo } from '../core/learning'
+import { LEARNERS, ONLINE_ALGOS, type LearnAlgo } from '../core/learning'
 import { measurePicker } from './measure'
 import { MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
@@ -179,6 +181,62 @@ export function mountSetup(
     const left = card('The world')
     const right = card('Matter')
     cols.append(left, right)
+    const forces = card('Forces, and what they cost')
+    p.insertBefore(forces, p.querySelector('.stab'))
+    /*
+     * The dials that used to be constants.
+     *
+     * Every number here was a judgement call written into `LAWS` and never tested against an
+     * alternative — and two of them have since been measured wrong by a wide margin. They are a
+     * `Partial<Laws>` carried on the Init, so a world keeps its own physics through the worker, a
+     * snapshot and a saved config rather than quietly reverting to the defaults.
+     */
+    type NumLaw = { [K in keyof Laws]: Laws[K] extends number ? K : never }[keyof Laws]
+    const lawSlider = (
+      label: string,
+      key: NumLaw,
+      min: number,
+      max: number,
+      step: number,
+      hint: (v: number) => string,
+      round = false,
+    ): HTMLElement =>
+      new Slider({
+        label,
+        min,
+        max,
+        step,
+        value: (init.laws?.[key] as number | undefined) ?? (LAWS[key] as number),
+        curve: 'log',
+        format: (v) => (round ? String(Math.round(v)) : v.toFixed(2)),
+        hint,
+        onChange: (v) => {
+          init.laws = { ...init.laws, [key]: round ? Math.round(v) : v }
+          refresh()
+        },
+      }).el
+    fieldsOf(forces).append(
+      lawSlider('how fast food drifts', 'mu_food', 0.02, 1, 0.01, (v) =>
+        v >= 0.9
+          ? 'food drifts exactly as fast as a limb swims — you cannot catch what diffuses as fast as you move'
+          : `food is ${(1 / v).toFixed(1)}× heavier than matter, so a swimmer can gain on it`,
+      ),
+      lawSlider('how hard a brain can push', 'F_max', 0.1, 8, 0.1, (v) => {
+        const br = (init.laws?.F_break as number) ?? LAWS.F_break
+        return v >= br
+          ? 'stronger than a bond: an organism can tear itself free of a structure, and drag one'
+          : `a bond is ${(br / v).toFixed(1)}× stronger than any swimmer, so nothing can pull a structure anywhere`
+      }),
+      lawSlider('bond stiffness', 'k_bond', 0.05, 4, 0.05, () => 'the spring constant along a bond'),
+      lawSlider('bond breaks at', 'F_break', 0.5, 16, 0.5, (v) => {
+        const f = (init.laws?.F_max as number) ?? LAWS.F_max
+        return `${(v / f).toFixed(1)}× the strongest force a brain can exert. Measured: dropping this from 4 to 2.5 cost four fifths of all standing bonds`
+      }),
+      lawSlider('bonds per particle', 'max_bonds', 1, 8, 1, (v) => (v <= 2 ? 'two admits only chains and rings — never a sheet' : `up to ${Math.round(v)} neighbours, so a particle can sit inside a sheet`), true),
+      lawSlider('mouth width', 'r_eat', 2, 30, 1, (v) => `food is eaten within ${Math.round(v)} units. Measured: 12 beat both 6 and 20`, true),
+      lawSlider('a newborn starts with', 'E_birth', 1, 80, 1, (v) => (v < 10 ? 'barely endowed: newborns starve before they can eat' : `${Math.round(v)} per particle, paid by the parent`)),
+      lawSlider('breeds at', 'E_repro', 10, 300, 5, (v) => `a brain holding ${Math.round(v)} may reproduce`),
+    )
 
     fieldsOf(left).append(
       new Slider({
@@ -698,12 +756,76 @@ export function mountSetup(
         step: 0.005,
         value: init.repro_mut,
         format: (v) => v.toFixed(3),
-        hint: (v) => (v === 0 ? 'children are exact copies' : v < 0.1 ? 'children resemble their parents closely' : 'children differ sharply from their parents'),
+        hint: (v) =>
+          v === 0
+            ? 'children are exact copies — heredity without variation, so nothing can evolve at all'
+            : v < 0.1
+              ? 'children resemble their parents closely'
+              : 'children differ sharply from their parents',
         onChange: (v) => {
           init.repro_mut = v
           sync()
         },
       }).el,
+      /*
+       * The two modes that are not clonal.
+       *
+       * Budding and fission both copy one parent, which meant that before conjugation existed
+       * there was no recombination anywhere in the world: every lineage was a mutation chain, and
+       * crossover happened only inside the GA learner, between dead organisms. That is a large
+       * gap in a model whose stated goal is evolution.
+       */
+      new Toggle({
+        label: 'conjugation',
+        hint: 'two organisms bonded to each other — not merely near — both ready to breed, make one child together — body plan drawn socket by socket from either parent, weights a uniform crossover. A bond is already the world’s only notion of association, and it is met by every world that has ever been confirmed',
+        value: init.conjugation,
+        onChange: (v) => {
+          init.conjugation = v
+          refresh()
+        },
+      }).el,
+      new Toggle({
+        label: 'spores',
+        hint: 'when a child cannot be made, a parent invests in one drifting particle carrying its genome, which wakes where it finds food. Measured: this cut reproductions blocked by the population cap from 41,244 to 853',
+        value: init.spore,
+        onChange: (v) => {
+          init.spore = v
+          refresh()
+        },
+      }).el,
+      ...(init.spore
+        ? [
+            new Slider({
+              label: 'spore investment',
+              min: 5,
+              max: 120,
+              step: 5,
+              value: (init.laws?.E_spore as number | undefined) ?? LAWS.E_spore,
+              format: (v) => String(Math.round(v)),
+              hint: (v) => `the parent spends ${Math.round(v)}, and the spore endows a whole body from it or is wasted`,
+              onChange: (v) => {
+                init.laws = { ...init.laws, E_spore: Math.round(v) }
+                refresh()
+              },
+            }).el,
+            new Slider({
+              label: 'spore wakes at',
+              min: 0,
+              max: 20,
+              step: 1,
+              value: (init.laws?.spore_food as number | undefined) ?? LAWS.spore_food,
+              format: (v) => `${Math.round(v)} food`,
+              hint: (v) =>
+                v === 0
+                  ? 'wakes anywhere, so dispersal is blind'
+                  : `needs ${Math.round(v)} food particles within reach — the same count the brain itself reads, so germination and perception agree about what "food is here" means`,
+              onChange: (v) => {
+                init.laws = { ...init.laws, spore_food: Math.round(v) }
+                refresh()
+              },
+            }).el,
+          ]
+        : []),
       new Slider({
         label: 'free particles decay',
         min: 0,
@@ -737,13 +859,28 @@ export function mountSetup(
     const L = init.learn
     const on = L.algo !== 'none'
     const host = q('#s-learn-panel')
+    const isOnline = ONLINE_ALGOS.includes(L.algo)
+    /*
+     * Two kinds of learner now, and the difference is worth stating plainly on screen rather than
+     * leaving someone to infer it: one chooses who is born, the other changes who is already
+     * alive. The old note said a learner "may only choose the weights a new organism is born
+     * with", which stopped being true the moment TD(λ) existed.
+     */
     host.innerHTML = on
-      ? `<div class="note" style="margin:2px 0 14px">A learner may only choose the weights a
-           <i>new</i> organism is born with, and watch what became of the ones that died. It cannot
-           touch the physics, the chemistry or the energy, and it draws from its own random stream —
-           so switching one on leaves the same world, with the same food in the same places.
-           Budding is left alone: it is already selection plus mutation, and it belongs to the
-           world rather than to an algorithm.</div>
+      ? `<div class="note" style="margin:2px 0 14px">${
+          isOnline
+            ? `This one learns <b>inside a life</b>. Every tick it sees what an organism saw, what it
+               decided and what it was paid, and it rewrites that organism's own weights — so it
+               does not wait for anything to die. That matters: an offline learner may only act at
+               a spawn, a spawn needs a free brain slot, and a healthy population has none, so one
+               was measured handing out 800 samples of which 788 could never be scored.`
+            : `This one may only choose the weights a <i>new</i> organism is born with, and watch
+               what became of the ones that died. Budding is left alone: it is already selection
+               plus mutation, and it belongs to the world rather than to an algorithm.`
+        }
+           It cannot touch the physics, the chemistry or the energy, and it draws from its own
+           random stream — so switching one on leaves the same world, with the same food in the
+           same places.</div>
          <div class="cols"><div id="s-learn-l"></div><div id="s-learn-r"></div></div>`
       : ''
 
@@ -803,7 +940,9 @@ export function mountSetup(
       }).el,
     )
 
-    const right = card(L.algo === 'ga' ? 'Pool and breeding' : 'Distribution')
+    const right = card(
+      L.algo === 'ga' ? 'Pool and breeding' : isOnline ? 'Rates and exploration' : L.algo === 'elites' ? 'The behaviour grid' : 'Distribution',
+    )
     q('#s-learn-r').appendChild(right)
     const slider = (
       label: string,
@@ -820,7 +959,9 @@ export function mountSetup(
         max,
         step,
         value: L[key] as number,
-        format: (v) => (round ? String(Math.round(v)) : v.toFixed(2)),
+        // precision from the step, so a learning rate of 0.001 does not read as "0.00" — which is
+        // indistinguishable on screen from the setting that turns learning off
+        format: (v) => (round ? String(Math.round(v)) : v.toFixed(step < 0.005 ? 4 : step < 0.05 ? 3 : 2)),
         hint,
         onChange: (v) => {
           init.learn = { ...init.learn, [key]: round ? Math.round(v) : v }
@@ -846,12 +987,80 @@ export function mountSetup(
           return d
         })(),
       )
+    } else if (isOnline) {
+      fieldsOf(right).append(
+        slider('exploration', 'explore', 0, 0.6, 0.01, (v) =>
+          v === 0
+            ? 'no noise on the actions — and with none, a policy gradient has no gradient: there is nothing to learn from'
+            : `actions are perturbed by ${v.toFixed(2)}, and that perturbation is itself what it learns from. Only this learner's organisms are affected`,
+        ),
+        slider('policy rate', 'actorLr', 0, 0.05, 0.0005, (v) => `${v.toFixed(4)} per unit of surprise, across all 410 brain weights at once`),
+        ...(L.algo === 'td'
+          ? [
+              slider('value rate', 'criticLr', 0, 0.2, 0.005, () => `how fast the value estimate — "how good is this situation" — is corrected. Shared across this learner's organisms, since it is a model of one world`),
+              slider('discount γ', 'gamma', 0.5, 0.995, 0.005, (v) => `food ${Math.round(1 / (1 - v))} ticks from now is worth about a third of food right now`),
+              slider('trace decay λ', 'lambda', 0, 0.99, 0.01, (v) =>
+                v === 0
+                  ? 'credit goes only to the last tick, so nothing links an action to a meal that followed it'
+                  : `credit reaches about ${Math.round(1 / (1 - v * L.gamma))} ticks back — which is what connects turning left to eating later`,
+              ),
+            ]
+          : []),
+        slider('weight decay', 'decay', 0, 0.02, 0.0005, (v) => (v === 0 ? 'nothing pulls the weights back, so they can grow until every output saturates' : 'a steady pull toward zero, against saturation')),
+        /*
+         * Only meaningful once something learns within a life, which is why it lives here rather
+         * than next to the mutation rate. A real and long-studied distinction, not a detail: left
+         * implicit it would have been Lamarckian by accident, since the world reproduces from
+         * whatever weights an organism currently holds.
+         */
+        new Chips<'learned' | 'birth'>({
+          label: 'children inherit',
+          value: L.inherit,
+          options: [
+            { value: 'learned', label: 'what the parent learned', hint: 'Lamarckian: faster, and known to generalise worse — a lineage can bank adaptations to one situation' },
+            { value: 'birth', label: 'what the parent was born with', hint: 'Darwinian: learning shapes a life, selection alone shapes the lineage' },
+          ],
+          onChange: (v) => {
+            init.learn = { ...init.learn, inherit: v }
+            refresh()
+          },
+        }).el,
+        (() => {
+          const d = document.createElement('div')
+          d.className = 'note'
+          d.innerHTML = `<b>Reward is what it <i>ate</i></b>, in meals, not its net energy change.
+            Net gain would reward sitting still — and spending less is already the only strategy
+            anything in this world has ever found. The cost of moving is left as something an
+            organism has to survive rather than a penalty inside its objective.`
+          return d
+        })(),
+      )
+    } else if (L.algo === 'elites') {
+      fieldsOf(right).append(
+        slider('cells per axis', 'cells', 2, 12, 1, (v) => `${Math.round(v) ** 3} cells over three behaviours, each holding the best genome of its own kind`, true),
+        slider('mutation σ', 'sigma', 0.01, 1, 0.01, (v) => `an elite is drawn at random and nudged by ${v.toFixed(2)} per weight`),
+        (() => {
+          const d = document.createElement('div')
+          d.className = 'note'
+          d.innerHTML = `Elites are drawn <b>uniformly over occupied cells</b>, not by score. Biasing
+            toward the high scorers would turn this back into a plain optimiser wearing a grid,
+            which is the one thing it exists not to be: today's loser is often the only available
+            stepping stone to tomorrow's winner.`
+          return d
+        })(),
+      )
     } else {
       fieldsOf(right).append(
         slider('exploration σ', 'sigma', 0.01, 1, 0.01, (v) => `samples sit ${v.toFixed(2)} away from the mean, per weight`),
         slider('batch', 'batch', 2, 128, 1, (v) => `the mean is updated once every ${Math.round(v)} deaths of its own samples`, true),
         ...(L.algo === 'es'
-          ? [slider('step size', 'lr', 0.01, 2, 0.01, (v) => `the mean moves ${v.toFixed(2)} of the rank-weighted direction each update`)]
+          ? [
+              slider('step size', 'lr', 0.002, 0.2, 0.002, (v) =>
+                v > 0.08
+                  ? `${v.toFixed(3)} — large for Adam, which steps by about this much per weight whatever the gradient says. Measured: at 0.2 the mean moved *away* from a target it was meant to find`
+                  : `${v.toFixed(3)} of a weight per update, normalised per weight by Adam`,
+              ),
+            ]
           : []),
       )
     }
