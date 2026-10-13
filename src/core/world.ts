@@ -4,7 +4,7 @@ import { AggregateTracker } from './aggregates'
 import { Bonds, bondForce } from './bonds'
 import { type FitnessSpec, describeSpec } from './fitness'
 import { LadderTracker } from './ladder'
-import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, makeLearner } from './learning'
+import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, ONLINE_ALGOS, makeLearner } from './learning'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
 import { BRAIN_IN, BRAIN_OUT, FOOD_NEAR_SCALE, N_BRAIN_IN, N_BRAIN_OUT, randomBrain, randomLimb } from './neurons'
@@ -353,6 +353,22 @@ export class World {
   private readonly preY: Float64Array
   readonly lvx: Float64Array
   readonly lvy: Float64Array
+  /**
+   * Harvest already reported to an online learner, so each tick's reward is what was eaten *since
+   * the last look* rather than a running total. Only touched when a learner is online.
+   */
+  private readonly rewarded: Float64Array
+  /**
+   * The weights an organism was born with, kept only when inheritance is Darwinian.
+   *
+   * With `inherit: 'learned'` a child copies its parent's *current* weights, so anything the
+   * parent learned within its life is passed on — Lamarckian, which is known to be faster and to
+   * generalise worse. With `'birth'` it copies what the parent started from, so learning shapes
+   * a life and selection alone shapes the lineage.
+   */
+  private readonly wBirthBrain: (Float64Array | undefined)[]
+  private readonly wBirthLimb: (Float64Array | undefined)[]
+  private readonly darwinian: boolean
   readonly wLimb: (Float64Array | undefined)[]
   readonly wBrain: (Float64Array | undefined)[]
 
@@ -477,6 +493,10 @@ export class World {
     this.preY = new Float64Array(n)
     this.lvx = new Float64Array(n)
     this.lvy = new Float64Array(n)
+    this.rewarded = new Float64Array(n)
+    this.darwinian = (init.learn ?? LEARN_DEFAULTS).inherit === 'birth' && ONLINE_ALGOS.includes((init.learn ?? LEARN_DEFAULTS).algo)
+    this.wBirthBrain = new Array(n)
+    this.wBirthLimb = new Array(n)
     this.wLimb = new Array(n)
     this.wBrain = new Array(n)
 
@@ -1229,6 +1249,7 @@ export class World {
   private think(): void {
     const { L, energy, field, xin, yout, theta } = this
     const maxBonds = Math.max(1, this.bonds.max)
+    const online = this.learner.online
     for (let b = this.nIntr; b < this.nMatter; b++) {
       this.mvx[b] = 0
       this.mvy[b] = 0
@@ -1300,6 +1321,26 @@ export class World {
         let sum = 0
         for (let m = 0; m < N_IN; m++) sum += wb[k * N_IN + m] * xin[m]
         yout[k] = sum
+      }
+
+      /*
+       * An online learner gets its turn here, between the decision and its consequences.
+       *
+       * This is the only point in the tick where what the organism saw, what it decided, and what
+       * it was just paid are all in hand at once — `uptake` has already run, so the reward is this
+       * tick's food rather than last tick's. The learner may rewrite `wBrain` and may add
+       * exploration noise to `yout`, which the lines below then act on.
+       *
+       * Reward is **harvest**, not net energy: net would reward sitting still, and spending less
+       * is already the only strategy anything here has ever found.
+       */
+      if (online) {
+        const got = this.harvested[b] - this.rewarded[b]
+        this.rewarded[b] = this.harvested[b]
+        // in units of **one meal**, not raw energy. A reward of 10 against a value function
+        // starting at 0 is what made TD(λ) diverge on its first run; the natural unit is the meal,
+        // and it keeps the learning rates meaning the same thing at any `E_food`.
+        this.learner.act({ b, wBrain: wb, wLimb: wl, xin, yout, reward: got / L.E_food, tick: this.tick })
       }
 
       this.mvx[b] = L.F_max * Math.tanh(yout[BRAIN_OUT.FX])
@@ -1497,7 +1538,10 @@ export class World {
     }
     this.wLimb[b] = undefined
     this.wBrain[b] = undefined
+    this.wBirthBrain[b] = undefined
+    this.wBirthLimb[b] = undefined
     this.learnId[b] = 0
+    this.learner.forget(b)
   }
 
   private deaths(): void {
@@ -1802,6 +1846,17 @@ export class World {
     this.parent[b] = spec.parent ?? -1
     this.children[b] = 0
     this.harvested[b] = 0
+    this.rewarded[b] = 0
+    /*
+     * Darwinian inheritance needs the weights an organism was *born* with kept aside, because an
+     * online learner rewrites the live ones — so without this copy the world would be Lamarckian
+     * by accident rather than by choice, which is the wrong way to settle a question that has
+     * been studied for a century. Only paid for when it is asked for.
+     */
+    if (this.darwinian) {
+      this.wBirthBrain[b] = Float64Array.from(this.wBrain[b]!)
+      this.wBirthLimb[b] = Float64Array.from(this.wLimb[b]!)
+    }
     this.spent[b] = 0
     this.moved[b] = 0
     this.meals[b] = 0
@@ -2016,6 +2071,8 @@ export class World {
      */
     const cross = (u: Float64Array, v: Float64Array): Float64Array => Float64Array.from(u, (a, i) => (rng.next() < 0.5 ? a : v[i]))
     const inherit = (pick: (p: number) => Float64Array): Float64Array => mutate(mate >= 0 ? cross(pick(b), pick(mate)) : pick(b))
+    const heritable = (p: number, live: (Float64Array | undefined)[], born: (Float64Array | undefined)[]): Float64Array =>
+      (this.darwinian ? born[p] : undefined) ?? live[p]!
     /*
      * Energy comes from the parents in equal shares, and the inner loop always draws from
      * whichever parent currently has most, so no rounding can push one of them negative. The
@@ -2041,8 +2098,8 @@ export class World {
       x: cx,
       y: cy,
       limbs,
-      wLimb: inherit((p) => this.wLimb[p]!),
-      wBrain: inherit((p) => this.wBrain[p]!),
+      wLimb: inherit((p) => heritable(p, this.wLimb, this.wBirthLimb)),
+      wBrain: inherit((p) => heritable(p, this.wBrain, this.wBirthBrain)),
       parent: b,
       gen: this.gen[b] + 1,
       island: this.island[b],

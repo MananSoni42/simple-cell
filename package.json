@@ -17,6 +17,7 @@
     "experiment": "vite-node scripts/experiment.ts",
     "ceiling": "vite-node scripts/ceiling.ts",
     "senses": "vite-node scripts/senses.ts",
+    "learners": "vite-node scripts/learners.ts",
     "archipelago": "vite-node scripts/archipelago.ts",
     "economy": "vite-node scripts/economy.ts",
     "search": "vite-node scripts/search.ts",

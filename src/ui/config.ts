@@ -74,6 +74,14 @@ function learnConfig(src: unknown, base: LearnConfig): LearnConfig {
     crossover: num(r.crossover, base.crossover, 0, 1),
     lr: num(r.lr, base.lr, 0, 10),
     maxAge: Math.round(num(r.maxAge, base.maxAge, 1, 1e9)),
+    decay: num(r.decay, base.decay, 0, 1),
+    explore: num(r.explore, base.explore, 0, 2),
+    actorLr: num(r.actorLr, base.actorLr, 0, 1),
+    criticLr: num(r.criticLr, base.criticLr, 0, 1),
+    gamma: num(r.gamma, base.gamma, 0, 0.9999),
+    lambda: num(r.lambda, base.lambda, 0, 0.9999),
+    inherit: r.inherit === 'birth' ? 'birth' : base.inherit,
+    cells: Math.round(num(r.cells, base.cells, 2, 32)),
   }
 }
 

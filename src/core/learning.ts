@@ -34,7 +34,7 @@ import { Rng } from './rng'
 export const N_GENE_BRAIN = N_BRAIN_IN * N_BRAIN_OUT
 export const N_GENE = N_GENE_BRAIN + N_WLIMB
 
-export type LearnAlgo = 'none' | 'random' | 'ga' | 'es' | 'cem'
+export type LearnAlgo = 'none' | 'random' | 'ga' | 'es' | 'cem' | 'elites' | 'td' | 'hebb'
 
 export const LEARNERS: { key: LearnAlgo; name: string; blurb: string }[] = [
   { key: 'none', name: 'None', blurb: 'every new organism gets random weights — the control, and what the world did before' },
@@ -42,10 +42,56 @@ export const LEARNERS: { key: LearnAlgo; name: string; blurb: string }[] = [
   { key: 'ga', name: 'Steady-state GA', blurb: 'a pool of the best dead organisms; new ones are a tournament winner, crossed and mutated' },
   { key: 'es', name: 'Evolution strategy', blurb: 'one mean genome, nudged toward whatever did better than average; mirrored sampling' },
   { key: 'cem', name: 'Cross-entropy', blurb: 'refits a mean and a spread per weight from the best of each batch; narrows as it converges' },
+  {
+    key: 'elites',
+    name: 'MAP-Elites',
+    blurb: 'keeps the best genome for each *kind* of behaviour rather than the best overall, so a slow-breeding wanderer is not thrown away for losing to a fast-breeding clump',
+  },
+  {
+    key: 'td',
+    name: 'TD(λ) actor–critic',
+    blurb: 'learns *within* a life: a value estimate, eligibility traces, and a policy nudged by its own prediction error. The only learner here that does not need something to die first',
+  },
+  {
+    key: 'hebb',
+    name: 'Reward-modulated Hebbian',
+    blurb: 'three-factor plasticity — input × output × reward, entirely local. The cheap control against TD(λ): if it does as well, the value function is not earning its keep',
+  },
 ]
+
+/** Which learners rewire a living organism rather than only seeding new ones. */
+export const ONLINE_ALGOS: LearnAlgo[] = ['td', 'hebb']
 
 export { FITNESS, type FitnessKey, type LifeStats, fitnessOf, scalarsOf } from './fitness'
 export { COMBINERS, type Combiner, type FitnessSpec, describeSpec, keysOf, specFromKeys } from './fitness'
+
+/**
+ * What an online learner is told about one organism on one tick.
+ *
+ * Deliberately the raw arrays rather than copies: this runs once per organism per tick, inside the
+ * hot loop, and a learner that allocated here would cost more than the simulation it is learning
+ * about.
+ */
+export interface OnlineStep {
+  /** Which organism, used as the key for per-organism state. */
+  b: number
+  wBrain: Float64Array
+  wLimb: Float64Array
+  /** The inputs as read this tick. */
+  xin: Float64Array
+  /** The pre-activation outputs. Writable: see `Learner.act`. */
+  yout: Float64Array
+  /**
+   * The reward for this tick.
+   *
+   * **Energy harvested, not energy gained.** Net gain would reward sitting still, which is the
+   * exact failure this project keeps running into — the only strategy any learner has ever found
+   * is to spend less. Making the reward purely what it *ate* leaves the cost of moving as a
+   * constraint the organism has to survive rather than a penalty inside its objective.
+   */
+  reward: number
+  tick: number
+}
 
 /** One organism's weights, flattened. Brain first, then limb. */
 export interface Genome {
@@ -87,6 +133,39 @@ export interface LearnConfig {
   lr: number
   /** Pool entries older than this many ticks are dropped: fitness from a past regime misleads. */
   maxAge: number
+  /**
+   * Pull toward zero on each update (ES). Without it a gradient estimated from a few dozen noisy
+   * samples wanders off and the weights grow until every output saturates — which is the standard
+   * failure of this method and the reason the published versions all carry a decay term.
+   */
+  decay: number
+  /**
+   * Exploration noise added to an online learner's actions.
+   *
+   * A policy gradient needs a *stochastic* policy to have a gradient at all; ours is a
+   * deterministic tanh. So an online learner perturbs its own organisms' actions and treats the
+   * perturbation as the exploration it is learning from — which is exactly the Gaussian-policy
+   * form of REINFORCE, where `∇log π = noise / σ²`. Only that learner's organisms are affected.
+   */
+  explore: number
+  /** Learning rates for an online learner: the policy and the value estimate. */
+  actorLr: number
+  criticLr: number
+  /** Discount and trace decay for TD(λ). */
+  gamma: number
+  lambda: number
+  /**
+   * Whether a child inherits what its parent *learned* or what it was *born with*.
+   *
+   * A real and well-studied distinction, not an implementation detail: Lamarckian inheritance is
+   * substantially faster and is known to generalise worse, because it lets a lineage bank
+   * adaptations to a particular situation. It has to be a dial, because leaving it implicit means
+   * picking one by accident — and the accident would have been Lamarckian, since the world
+   * reproduces from live weights.
+   */
+  inherit: 'learned' | 'birth'
+  /** Behaviour grid resolution per axis (MAP-Elites). */
+  cells: number
 }
 
 export const LEARN_DEFAULTS: LearnConfig = {
@@ -99,8 +178,20 @@ export const LEARN_DEFAULTS: LearnConfig = {
   pool: 24,
   tournament: 3,
   crossover: 0.5,
-  lr: 0.2,
+  // 0.02, not the 0.2 this was before Adam: see the table in `Es`. Ten times too large made the
+  // mean move away from a target it was supposed to find.
+  lr: 0.02,
   maxAge: 60000,
+  decay: 0.002,
+  explore: 0.1,
+  // small, and measured: see `TdLambda`. Reward is in meals, so these are "fraction of a weight
+  // per meal of surprise" and the actor has 410 weights all moving at once.
+  actorLr: 0.001,
+  criticLr: 0.01,
+  gamma: 0.95,
+  lambda: 0.8,
+  inherit: 'learned',
+  cells: 6,
 }
 
 export interface LearnerStatus {
@@ -198,6 +289,49 @@ export abstract class Learner {
   }
 
   protected abstract sample(): Genome | null
+
+  // ---- the online seam ------------------------------------------------------
+  /*
+   * A second seam, and it needs one.
+   *
+   * Every learner above acts at a *spawn* and is scored at a *death*, and that interface has a
+   * measured ceiling: a spawn needs a free brain slot, a healthy population has none, and the
+   * learner was observed handing out 800 samples of which 788 could never be scored — 431 lives
+   * seen, **zero** updates. The better the world, the more inert the learner.
+   *
+   * An online learner does not wait for anything to die. It is called once per organism per tick
+   * with what that organism just saw, what it decided, and what it got for it, and it rewrites
+   * that organism's own weights. Mortality stops being the rate limit.
+   */
+
+  /** True when this learner rewires living organisms rather than only seeding new ones. */
+  readonly online: boolean = false
+
+  /**
+   * One organism, one tick. May modify `wBrain`, `wLimb` and `yout` in place.
+   *
+   * `yout` is writable on purpose: a policy gradient needs a stochastic policy to have a gradient,
+   * and ours is a deterministic tanh, so an online learner adds its own exploration noise here
+   * and learns from the perturbation it chose. Only its own organisms are affected.
+   */
+  act(_s: OnlineStep): void {}
+
+  /** An organism of this learner's has died; drop whatever per-organism state it held. */
+  forget(_b: number): void {}
+
+  /**
+   * What this learner currently believes, as a genome: the distribution's mean, the best elite, or
+   * null for a learner that holds no single answer.
+   *
+   * Exists because the alternative was to read it by *drawing a sample*, which is how a test of
+   * ES came to be unable to see ES working: a draw is `mean + σ·ε`, the noise is as large as the
+   * quantity being measured, and each draw also consumed a slot in the mirrored-sampling pairing
+   * and so doubled the variance of the very gradient under test. Measuring a thing should not
+   * perturb it.
+   */
+  center(): Float64Array | null {
+    return null
+  }
 
   observe(r: LifeRecord, tick: number): void {
     this.tick = tick
@@ -579,6 +713,10 @@ abstract class Distribution extends Learner {
     return this.updates > 0 ? 1 : 0
   }
 
+  center(): Float64Array {
+    return Float64Array.from(this.mean)
+  }
+
   /**
    * Rank normalisation, centred and scaled to [-0.5, 0.5]. Fitness here can be anything from an
    * offspring count of 0 or 1 to tens of thousands of energy units, so using raw values would make
@@ -612,9 +750,52 @@ abstract class Distribution extends Learner {
   }
 }
 
-/** Evolution strategy (A2): one mean genome, moved along a rank-weighted sum of its own samples. */
+/**
+ * Evolution strategy (A2): one mean genome, moved along a rank-weighted sum of its own samples.
+ *
+ * Three things were missing against the published form of this method, and all three are the
+ * difference between it working and it merely running:
+ *
+ * - **Adam** on the estimated gradient, so one step size is usable across 418 weights of wildly
+ *   uneven gradient scale.
+ * - **Weight decay**, against the mean drifting outward under its own noise until every output
+ *   saturates — a saturated policy cannot be selected on, which is the old oversized-init failure
+ *   reached from a different direction.
+ * - **Rank shaping that is actually centred**, which it already was: linear ranks in [-0.5, 0.5].
+ *   Kept, and noted here so it is not "fixed" again later.
+ *
+ * Mirrored sampling was already in `Distribution` and is the other half of why this works.
+ *
+ * **Adam needed the learning rate cut by ten, and finding out why is the useful part.** With the
+ * inherited `lr` of 0.2 the mean moved *away* from a known target — distance 0.40 → 1.08 over 80
+ * updates, while CEM on the same problem went 0.40 → 0.34. Adam normalises away gradient
+ * magnitude, which is exactly the information that says "this estimate is noise": at a batch of
+ * ten samples over 418 dimensions the estimate is almost pure noise, and Adam then walks it at the
+ * full learning rate. The published versions of this method use populations in the hundreds or
+ * thousands, where the estimate is genuinely informative; our batch is bounded by how many
+ * organisms die.
+ *
+ * Measured on that target (start 0.400, lower is better, 1,200 lives):
+ *
+ * | lr | batch 10 | batch 32 |
+ * |---|---|---|
+ * | 0.002 | 0.376 | 0.385 |
+ * | 0.01 | 0.296 | 0.330 |
+ * | **0.02** | **0.233** | 0.274 |
+ * | 0.05 | 0.247 | 0.204 |
+ * | 0.2 (old) | 1.083 | 0.656 |
+ *
+ * The decay term is *not* justified by that test — with no decay the same setting gives 0.287
+ * against 0.296, a difference inside one seed's noise, and the synthetic target sits away from the
+ * origin so decay is mildly harmful there by construction. It is kept for the saturation argument,
+ * which that test cannot see.
+ */
 class Es extends Distribution {
   readonly algo = 'es' as const
+  /** Adam's first and second moment estimates, per weight. */
+  private m = new Float64Array(N_GENE)
+  private v = new Float64Array(N_GENE)
+  private steps = 0
 
   protected sigmaAt(): number {
     return this.cfg.sigma
@@ -623,13 +804,133 @@ class Es extends Distribution {
   protected update(): void {
     const u = this.ranks()
     const n = u.length
-    const scale = this.cfg.lr / (n * this.cfg.sigma)
+    const scale = 1 / (n * Math.max(1e-9, this.cfg.sigma))
+    const b1 = 0.9
+    const b2 = 0.999
+    const eps = 1e-8
+    this.steps++
+    // bias correction, so the first few updates are not damped to nothing by zero-initialised moments
+    const c1 = 1 - b1 ** this.steps
+    const c2 = 1 - b2 ** this.steps
     for (let i = 0; i < N_GENE; i++) {
       let g = 0
       for (let k = 0; k < n; k++) g += u[k] * this.batch[k].eps[i]
-      this.mean[i] += scale * g
+      g *= scale
+      this.m[i] = b1 * this.m[i] + (1 - b1) * g
+      this.v[i] = b2 * this.v[i] + (1 - b2) * g * g
+      const step = (this.cfg.lr * (this.m[i] / c1)) / (Math.sqrt(this.v[i] / c2) + eps)
+      this.mean[i] += step - this.cfg.decay * this.mean[i]
     }
   }
+
+  saveSize(): number {
+    return super.saveSize() + 2 * N_GENE + 1
+  }
+
+  saveInto(a: Float64Array, off: number): void {
+    super.saveInto(a, off)
+    const o = off + super.saveSize()
+    a.set(this.m, o)
+    a.set(this.v, o + N_GENE)
+    a[o + 2 * N_GENE] = this.steps
+  }
+
+  loadFrom(a: Float64Array, off: number): void {
+    super.loadFrom(a, off)
+    const o = off + super.saveSize()
+    this.m.set(a.subarray(o, o + N_GENE))
+    this.v.set(a.subarray(o + N_GENE, o + 2 * N_GENE))
+    this.steps = a[o + 2 * N_GENE]
+  }
+}
+
+/**
+ * MAP-Elites (quality–diversity): the best genome for each *kind* of behaviour.
+ *
+ * Every other learner here keeps the best genome by one number, and that is the wrong objective
+ * for this project. The goal is organisms that *slowly become more complex*, and a scalar optimum
+ * discards the slow wanderer that would have become something for losing, today, to a fast-
+ * breeding clump. MAP-Elites keeps both, because they are in different cells.
+ *
+ * The machinery is also already here in hand-rolled form: the search stratifies its promotion
+ * instead of taking a top-N, and the Discoveries page picks worlds along several axes rather than
+ * by rank. Both are this idea, applied one level up. This is the standard version of it.
+ *
+ * The behaviour space is three of the fitness scalars, each bucketed by its percentile within the
+ * cohort rather than by raw value — percentiles because the raw scales are incomparable (offspring
+ * counts of 0–3 against energy in the thousands) and because the grid then populates itself
+ * evenly whatever the world's absolute numbers turn out to be.
+ */
+class MapElites extends Learner {
+  readonly algo = 'elites' as const
+  /** cell key -> the genome that holds it, with the raw scalars it was scored on. */
+  private archive = new Map<number, { g: Float64Array; raw: Float64Array }>()
+  /** Live samples: a genome handed out, waiting for its organism to die. */
+  private pending = new Map<number, Float64Array>()
+
+  /** Which three scalars span the behaviour space, by index into the fitness scalars. */
+  private static readonly AXES = 3
+
+  private cellOf(raw: Float64Array): number {
+    const n = Math.max(2, Math.round(this.cfg.cells))
+    let key = 0
+    for (let a = 0; a < MapElites.AXES; a++) {
+      const p = this.cohort.percentile(a, raw[a])
+      key = key * n + Math.min(n - 1, Math.max(0, Math.floor(p * n)))
+    }
+    return key
+  }
+
+  protected sample(): Genome | null {
+    /*
+     * Draw an elite at random and mutate it — *uniformly* over occupied cells, not by score.
+     * Biasing the draw toward high-scoring cells would turn this back into a scalar optimiser
+     * wearing a grid, which is the thing it exists not to be.
+     */
+    if (this.archive.size === 0) return null
+    const keys = [...this.archive.keys()]
+    const pick = this.archive.get(keys[this.rng.int(keys.length)])!
+    const child = Float64Array.from(pick.g, (w) => w + this.cfg.sigma * this.rng.gauss())
+    const g = this.genome(...split(child))
+    this.pending.set(g.id, child)
+    if (this.pending.size > 256) this.pending.delete(this.pending.keys().next().value as number)
+    return g
+  }
+
+  protected score(r: LifeRecord, scalars: Float64Array, fitness: number): void {
+    const raw = Float64Array.from(scalars.subarray(0, N_SCALARS))
+    const gene = this.pending.get(r.id) ?? join(r.wBrain, r.wLimb)
+    this.pending.delete(r.id)
+    const key = this.cellOf(raw)
+    const held = this.archive.get(key)
+    // a cell is won on the chosen measure, but only against whatever else is in *that* cell
+    if (!held || this.cohort.score(held.raw, this.cfg.fitness) < fitness) {
+      this.archive.set(key, { g: gene, raw })
+      this.updates++
+    }
+  }
+
+  protected held(): number {
+    return this.archive.size
+  }
+
+  /** The best cell, for display. The archive's point is the whole set, but a graph needs one. */
+  center(): Float64Array | null {
+    let best: Float64Array | null = null
+    let bestF = -Infinity
+    for (const e of this.archive.values()) {
+      const f = this.cohort.score(e.raw, this.cfg.fitness)
+      if (f > bestF) {
+        bestF = f
+        best = e.g
+      }
+    }
+    return best ? Float64Array.from(best) : null
+  }
+
+  // The archive is a map of unbounded size, so it is not written into the fixed-size snapshot
+  // ring. A rewind therefore keeps the learner's *progress figures* and loses its archive, which
+  // is the same trade the batch learners already make with their in-flight samples.
 }
 
 /** Cross-entropy method (A4): refit the mean and a per-weight spread from the best of each batch. */
@@ -683,6 +984,184 @@ class Cem extends Distribution {
   }
 }
 
+/**
+ * Base for the two within-life learners. Both keep state per organism and both need to clear it
+ * when that organism dies, which is the whole of what they share.
+ */
+abstract class Online extends Learner {
+  readonly online = true
+
+  /** Nothing to hand out at a spawn: an online learner shapes a life, it does not seed one. */
+  protected sample(): Genome | null {
+    return null
+  }
+
+  /** Online learners are still *scored* at death, so the progress graph and the cohort work. */
+  protected score(): void {}
+}
+
+/**
+ * TD(λ) actor–critic: the one learner here that improves an organism inside its own lifetime.
+ *
+ * The textbook method for a *continuing* task with linear function approximation and no episode
+ * boundary, which is exactly this world — organisms do not have episodes, they have lives, and a
+ * life can run for a hundred thousand ticks. A value head `V(x) = v·x` predicts future reward, the
+ * prediction error `δ = r + γV(x') − V(x)` says whether things went better or worse than expected,
+ * and eligibility traces carry that error back to the inputs and actions that led there, which is
+ * the credit-assignment problem solved properly rather than by a heuristic.
+ *
+ * **The critic is shared across the learner's organisms; the actor is not.** The critic answers
+ * "how good is this situation", and the situation is the same world for everybody, so sharing it
+ * multiplies the data behind it. The actor is the organism's own brain weights, modified in place,
+ * because an organism learning within its life is precisely a change to its own policy. (This is
+ * the shape of A3C and of every shared-critic method: one world model, many bodies.)
+ *
+ * Exploration is Gaussian noise on the action, and the actor update is `δ · noise · x`, which is
+ * the Gaussian-policy form of the policy gradient — `∇log π = noise / σ²`, with the `1/σ²` folded
+ * into the learning rate. Nothing here is novel; that is the point of choosing it.
+ */
+/** How far δ may run before it is clipped. See `TdLambda.act` for why this is not optional. */
+const DELTA_CLIP = 2
+
+class TdLambda extends Online {
+  readonly algo = 'td' as const
+  /** The shared value head, one weight per brain input. */
+  private v = new Float64Array(N_BRAIN_IN)
+  private state = new Map<number, { eV: Float64Array; eA: Float64Array; prevV: number; started: boolean }>()
+  private deltaSum = 0
+  private deltaN = 0
+
+  private forOrganism(b: number) {
+    let st = this.state.get(b)
+    if (!st) {
+      st = { eV: new Float64Array(N_BRAIN_IN), eA: new Float64Array(N_GENE_BRAIN), prevV: 0, started: false }
+      this.state.set(b, st)
+    }
+    return st
+  }
+
+  forget(b: number): void {
+    this.state.delete(b)
+  }
+
+  act(s: OnlineStep): void {
+    const { cfg } = this
+    const st = this.forOrganism(s.b)
+    let value = 0
+    for (let i = 0; i < N_BRAIN_IN; i++) value += this.v[i] * s.xin[i]
+
+    if (st.started) {
+      /*
+       * δ against *last* tick's prediction. The traces already hold last tick's inputs and action
+       * noise, so the error lands on what actually caused it — which is the entire reason to use
+       * traces rather than updating on the current step.
+       *
+       * Clipped, because an unclipped δ is how this method destroys itself: the first run drove
+       * the whole population extinct inside 500 ticks — 89,500 updates, zero completed lives —
+       * as a large δ blew up the actor weights, the policy saturated, and movement cost at
+       * `c_mv·μ·F²` finished the job. Clipping is the standard guard and it is load-bearing here.
+       */
+      const delta = Math.max(-DELTA_CLIP, Math.min(DELTA_CLIP, s.reward + cfg.gamma * value - st.prevV))
+      this.deltaSum += Math.abs(delta)
+      this.deltaN++
+      for (let i = 0; i < N_BRAIN_IN; i++) this.v[i] += cfg.criticLr * delta * st.eV[i]
+      for (let k = 0; k < N_GENE_BRAIN; k++) s.wBrain[k] += cfg.actorLr * delta * st.eA[k] - cfg.decay * s.wBrain[k]
+      this.updates++
+    }
+
+    /*
+     * **Replacing traces**, not accumulating ones.
+     *
+     * An accumulating trace for a feature that is on every tick — the bias input is exactly 1
+     * forever — grows to `1/(1 − γλ)`, which is 4.2 at the defaults and unbounded as λ → 1. Every
+     * update then multiplies δ by that, and a method whose step size depends on how long the
+     * episode has been running is a method that diverges. Replacing traces are the textbook
+     * answer and bound the trace by the feature itself.
+     */
+    const decay = cfg.gamma * cfg.lambda
+    for (let i = 0; i < N_BRAIN_IN; i++) {
+      const d = decay * st.eV[i]
+      st.eV[i] = Math.abs(s.xin[i]) > Math.abs(d) ? s.xin[i] : d
+    }
+    if (cfg.explore > 0) {
+      for (let o = 0; o < N_BRAIN_OUT; o++) {
+        const noise = cfg.explore * this.rng.gauss()
+        s.yout[o] += noise
+        const row = o * N_BRAIN_IN
+        for (let i = 0; i < N_BRAIN_IN; i++) {
+          const e = noise * s.xin[i]
+          const d = decay * st.eA[row + i]
+          st.eA[row + i] = Math.abs(e) > Math.abs(d) ? e : d
+        }
+      }
+    } else {
+      for (let k = 0; k < N_GENE_BRAIN; k++) st.eA[k] *= decay
+    }
+    st.prevV = value
+    st.started = true
+  }
+
+  protected held(): number {
+    return this.state.size
+  }
+
+  /** Mean |δ|, which is the honest "is it learning" figure for a critic: it should fall. */
+  meanError(): number {
+    return this.deltaN > 0 ? this.deltaSum / this.deltaN : 0
+  }
+}
+
+/**
+ * Reward-modulated Hebbian plasticity: `Δw = η · (r − r̄) · x · y`.
+ *
+ * Three factors — input, output, and reward relative to this organism's own recent average. It is
+ * entirely local, needs no value function and no traces, and it is the **control against TD(λ)**:
+ * if a rule this simple does as well, then the value head is not earning its complexity, and that
+ * is worth knowing before any of it goes into a search.
+ *
+ * The baseline subtraction is not optional. With raw reward the rule only ever strengthens
+ * whatever an organism was doing when it happened to eat, including the parts that had nothing to
+ * do with eating, and the weights grow without bound. Against its own running mean the update has
+ * a sign, and doing *worse* than usual weakens the association that led there.
+ */
+class Hebbian extends Online {
+  readonly algo = 'hebb' as const
+  private state = new Map<number, { base: number; n: number }>()
+
+  forget(b: number): void {
+    this.state.delete(b)
+  }
+
+  act(s: OnlineStep): void {
+    const { cfg } = this
+    let st = this.state.get(s.b)
+    if (!st) {
+      st = { base: 0, n: 0 }
+      this.state.set(s.b, st)
+    }
+    if (cfg.explore > 0) for (let o = 0; o < N_BRAIN_OUT; o++) s.yout[o] += cfg.explore * this.rng.gauss()
+    const adv = s.reward - st.base
+    // the baseline tracks this organism's own recent reward, so "better than usual" is personal
+    st.base += 0.01 * adv
+    st.n++
+    if (adv === 0) return
+    for (let o = 0; o < N_BRAIN_OUT; o++) {
+      const post = Math.tanh(s.yout[o])
+      const row = o * N_BRAIN_IN
+      const g = cfg.actorLr * adv * post
+      for (let i = 0; i < N_BRAIN_IN; i++) {
+        const w = row + i
+        s.wBrain[w] += g * s.xin[i] - cfg.decay * s.wBrain[w]
+      }
+    }
+    this.updates++
+  }
+
+  protected held(): number {
+    return this.state.size
+  }
+}
+
 export function makeLearner(cfg: LearnConfig, seed: number): Learner {
   switch (cfg.algo) {
     case 'random':
@@ -693,6 +1172,12 @@ export function makeLearner(cfg: LearnConfig, seed: number): Learner {
       return new Es(cfg, seed)
     case 'cem':
       return new Cem(cfg, seed)
+    case 'elites':
+      return new MapElites(cfg, seed)
+    case 'td':
+      return new TdLambda(cfg, seed)
+    case 'hebb':
+      return new Hebbian(cfg, seed)
     default:
       return new NoLearner(cfg, seed)
   }
