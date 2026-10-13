@@ -20,6 +20,16 @@ export interface KernelArrays {
   ffx: Float64Array
   ffy: Float64Array
   A: Float64Array
+  /**
+   * Each particle's **own** affinity row, `rows[i * N_MATRIX + m]`, indexed by real particle index.
+   *
+   * This replaces the single shared matrix as the thing the force consults. Two particles of the
+   * same type are no longer interchangeable: each has its own opinion of everything else, and the
+   * coupling between a pair is the **symmetric mean** of their two opinions. Symmetric is not a
+   * stylistic choice — an asymmetric coupling has no potential-energy function, and `potentialEnergy`
+   * and the energy ledger would both stop meaning anything.
+   */
+  rows: Float64Array
 }
 
 export interface KernelParams {
@@ -58,7 +68,7 @@ const MIDX = Int8Array.from(MATRIX_INDEX)
  * so equal-sized ranges carry equal work.
  */
 export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: KernelParams): void {
-  const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, ffx, ffy, A } = a
+  const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, ffx, ffy, rows } = a
   const { SIZE: S, r_c: rc, K_core: K, r_brain_core, r_brain, K_brain, A_brain, r_brain_push, r_wall, K_wall, nc, skipFood, radius } = p
   const rc2 = rc * rc
   const half = S / 2
@@ -71,6 +81,7 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
     const mi = MIDX[ti]
     const oi = powner[k0]
     const iAmBrain = ti === BRAIN
+    const myRow = items[k0] * N_MATRIX
     const c = pcell[k0]
     const cx = c % nc
     const cy = (c - cx) / nc
@@ -116,7 +127,11 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
             const mj = MIDX[tj]
             const beta = core / rc
             const u = r / rc
-            f = (mi >= 0 && mj >= 0 ? A[mi * N_MATRIX + mj] : 0) * (1 - Math.abs(2 * u - 1 - beta) / (1 - beta))
+            // the pair's coupling: the mean of what each one thinks of the other's kind. One extra
+            // indirection per pair — `items` maps a packed slot back to its particle — against
+            // which `myRow` is hoisted out of the loop because it never changes.
+            const a = mi >= 0 && mj >= 0 ? 0.5 * (rows[myRow + mj] + rows[items[k] * N_MATRIX + mi]) : 0
+            f = a * (1 - Math.abs(2 * u - 1 - beta) / (1 - beta))
             /*
              * A brain now has chemistry *and* its body radius.
              *

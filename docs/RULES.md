@@ -110,6 +110,48 @@ x ← x + μ·F·dt + sqrt(2·μ·T·dt)·N(0,1)    then wrap into [0, SIZE)
 
 Bound limbs are not integrated independently; see R3.3–R3.4.
 
+**R2.1b — Every particle has its own chemistry.** The matrix is no longer the law. Each particle
+carries its **own affinity row** — six numbers saying what it sticks to — seeded at init from its
+type's row in `A`, which makes `A` the *ancestral* chemistry rather than a constant. The coupling
+between a pair is the **symmetric mean** of their two opinions:
+
+```
+coupling(i, j) = ( row_i[type_j] + row_j[type_i] ) / 2
+```
+
+Symmetric is not a stylistic choice. An asymmetric coupling has no potential-energy function, so
+`potentialEnergy` and the energy ledger would both stop meaning anything.
+
+Two consequences to know. **Writing `A` on a running world is a no-op** — the live chemistry is in
+the rows, and `setChemistry` is the way to replace it. And **`setType` is the only safe way to
+retype a particle**: a direct write to `type[i]` leaves a stale row, so the particle looks like a P1
+while still being attracted to whatever kind it was built as — a silent wrong answer rather than a
+crash.
+
+**R7.11 — Particles replicate (option, off by default).** A particle that is **bonded** and holds
+`E_template` to spare copies itself into a matter slot that decay has emptied, paying from its own
+reserve, with its row mutated by `row_mut` and re-quantized. That gives the three Darwinian
+requirements in the one property a particle has: variation by mutation, heredity by copying, and
+differential reproduction because **only a bonded particle with energy can copy at all**.
+
+That last condition is doing the work. Without it the attractor is immortal self-attracting clots
+crowding everything else out; with it, a particle has to be useful to a body to replicate, which
+selects chemistry for being recruitable rather than merely sticky.
+
+So there are now **two coupled inheritance systems**: brains inherit 418 policy weights through
+budding and conjugation, selected by surviving and reproducing; particles inherit six affinity
+numbers through templating, selected by being bonded where energy flows. Each needs the other.
+
+*Measured, over 8,000 ticks and eight seeds.* Affinity to matter fell by 0.135 ± 0.013 and affinity
+to Food **rose** by 0.140 ± 0.043. The fall is not evidence of anything — mutation on a quantized
+lattice regresses toward the middle and these rows start net-positive, so any entry falling is what
+diffusion gives for free. The **rise** is the finding, because it runs against that same
+regression.
+
+`massByType` stops being constant when this is on, and that is deliberate: a chemistry that works
+becoming more numerous is the entire point. The invariant weakens from "per-type counts fixed" to
+"total slots fixed".
+
 **R2.1c — Particles are elements, not just chemistries.** Each particle *type* carries its own
 size, mobility, valence, bond strength, bond cost and decay rate — the properties a chemical
 element has. Before this the chemistry matrix was the only thing distinguishing P1 from P2, and

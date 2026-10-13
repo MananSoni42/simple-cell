@@ -215,6 +215,8 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     repro: bool(src.repro, base.repro),
     fission: bool(src.fission, base.fission),
     conjugation: bool(src.conjugation, base.conjugation),
+    templating: bool(src.templating, base.templating),
+    row_mut: num(src.row_mut, base.row_mut, 0, 2),
     spore: bool(src.spore, base.spore),
     bonds: bool(src.bonds, base.bonds),
     walls: WALL_LAYOUTS.includes(src.walls as WallLayout) ? (src.walls as WallLayout) : base.walls,

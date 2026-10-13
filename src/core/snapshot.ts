@@ -29,7 +29,17 @@ export interface Snapshot {
   valid: boolean
 }
 
-/** Per-particle arrays, in a fixed order. Keep this list in step with World's state. */
+/**
+ * Per-particle arrays, in a fixed order. Keep this list in step with World's state.
+ *
+ * That instruction was already being disobeyed when `rows` was added, and the omissions are
+ * instructive about how this fails: a missing array does not break a snapshot, it silently
+ * restores a *different world*. Twelve arrays had accumulated outside the list —
+ * `endowment` and `coastT` (so a rewind corrupted the ladder's per-organism yardsticks),
+ * `hasJoined`, `parentJoined`, `wasLive`, `coparent`, `spawnX/Y`, `isSpore` (so a rewind orphaned
+ * every spore), and `lvx/lvy`. The snapshot test only caught `rows` because `rows` changes the
+ * forces and therefore the state hash; the others change bookkeeping, which nothing hashes.
+ */
 function views(w: World): (Float64Array | Float32Array | Int32Array | Int16Array | Int8Array | Uint8Array)[] {
   return [
     w.x, w.y, w.fx, w.fy, w.energy, w.theta, w.sig, w.msg, w.ffx, w.ffy,
@@ -39,6 +49,11 @@ function views(w: World): (Float64Array | Float32Array | Int32Array | Int16Array
     w.since, w.limbs, w.brainSig, w.bondCool, w.bonds.partner,
     w.harvested, w.spent, w.moved, w.meals, w.orderTicks, w.peakReserve, w.learnId, w.island,
     w.seeking, w.seekTicks, w.eRepro, w.repWait,
+    // every particle's own chemistry: the thing that makes two P1s different, so a rewind that
+    // dropped it would restore a world with the same positions and the wrong physics
+    w.rows,
+    w.endowment, w.coastT, w.hasJoined, w.parentJoined, w.wasLive, w.coparent,
+    w.spawnX, w.spawnY, w.isSpore, w.lvx, w.lvy,
   ]
 }
 

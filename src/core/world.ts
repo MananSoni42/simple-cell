@@ -9,7 +9,7 @@ import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, ONLINE_
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
 import { BRAIN_IN, BRAIN_OUT, FOOD_NEAR_SCALE, N_BRAIN_IN, N_BRAIN_OUT, randomBrain, randomLimb } from './neurons'
-import { type Element, type Init, type Laws, LAWS, applyQuantization, elementsOf, widenMatrix, regimeMultiplier } from './params'
+import { type Element, type Init, type Laws, LAWS, applyQuantization, clamp11, elementsOf, quantize, widenMatrix, regimeMultiplier } from './params'
 import { Rng } from './rng'
 import { BRAIN, FOOD, FOOD_ROW, MATRIX_INDEX, N_MATRIX, WALL } from './types'
 
@@ -183,6 +183,8 @@ export class World {
   nConjugated = 0
   nSown = 0
   nGerminated = 0
+  /** Particles that have copied themselves (R7.11). */
+  nTemplated = 0
   nDeaths = 0
   recordAge = 0
   readonly bornAt: Int32Array
@@ -211,7 +213,8 @@ export class World {
   readonly bondCool: Int16Array
   /** Tick at which a matter particle last became "live" (alive with energy > 0). */
   readonly since: Int32Array
-  private wasLive: Uint8Array
+  /** Snapshotted, so a rewind restores liveness bookkeeping rather than silently re-deriving it. */
+  wasLive: Uint8Array
   readonly lifeParticles = new LifeTracker()
   readonly lifeOrganisms = new LifeTracker()
   readonly aggregates = new AggregateTracker()
@@ -290,6 +293,24 @@ export class World {
   readonly eBondStrength: Float64Array
   readonly eBondCost: Float64Array
   readonly eDecay: Float64Array
+  /** Each particle's own affinity row: `rows[i * N_MATRIX + m]`. See the constructor. */
+  readonly rows: Float64Array
+  /** Ticks before a particle may copy itself again. */
+  private readonly tmplCool: Int16Array
+  /**
+   * Where the next scan for an empty matter slot starts.
+   *
+   * A rotating cursor over a *scan*, deliberately not a free list. The first version kept a list
+   * of slots emptied by decay, and the list went stale: `bud` recruits free matter by testing
+   * `owner === -1 && type matches && cool === 0` with **no liveness check** — which was safe while
+   * matter was immortal and every slot was alive. Once matter could die, budding began recruiting
+   * corpses as limbs, and the stale list then let a replication overwrite a live limb and destroy
+   * its reserve. Measured: 361 of the list's entries were alive, and 150 energy went missing.
+   *
+   * A scan cannot go stale, which is worth more here than the cost of the scan — and the cursor
+   * means each pass starts where the last finished, so the work is spread rather than repeated.
+   */
+  private matterCursor = 0
   readonly parentJoined: Uint8Array
   /**
    * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
@@ -528,6 +549,20 @@ export class World {
     this.spawnX = new Float64Array(n)
     this.spawnY = new Float64Array(n)
     this.cognition = new Cognition(n, init.seed)
+    /*
+     * Each particle's own affinity row.
+     *
+     * Initialised from its type's row in the matrix, so at tick zero every particle of a type is
+     * identical and the world is exactly the world it was. The matrix stops being the law and
+     * becomes the **ancestral** chemistry: what a particle starts with, and what it drifts away
+     * from as replication copies it with mutation.
+     *
+     * This is the particle's genome. The brain's genome is 418 numbers saying what to *do*; this is
+     * six numbers saying what to *stick to* — and unlike the brain's, it belongs to a particle
+     * rather than to an organism, which is what finally gives non-brain matter something to evolve.
+     */
+    this.rows = new Float64Array(buffer(8 * n * N_MATRIX, sh))
+    this.tmplCool = new Int16Array(n)
     this.parentJoined = new Uint8Array(n)
     this.learnId = new Int32Array(n)
     this.island = new Int8Array(n)
@@ -559,6 +594,7 @@ export class World {
       this.wasLive[i] = active ? 1 : 0
     }
     this.placeWalls()
+    this.seedRows()
     for (let i = this.cap - 1; i >= this.nMatter + this.nWall; i--) this.freeFood.push(i)
 
     this.grid = new Grid(L.SIZE, L.r_c, n, this.nMatter, this, sh)
@@ -566,7 +602,7 @@ export class World {
     this.kernelArrays = {
       px: g.px, py: g.py, ptype: g.ptype, powner: g.powner, pcell: g.pcell, items: g.items,
       cellStart: g.start, fx: this.fx, fy: this.fy, foodNear: this.foodNear,
-      ffx: this.ffx, ffy: this.ffy, A: this.A,
+      ffx: this.ffx, ffy: this.ffy, A: this.A, rows: this.rows,
     }
     this.kernelParams = {
       SIZE: L.SIZE, r_c: L.r_c, K_core: L.K_core, r_0: L.beta * L.r_c,
@@ -850,6 +886,7 @@ export class World {
     this.trackLiveness()
     // Germination is not gated on `repro`, and deliberately: the parent has already paid for the
     // spore, so refusing to let it wake would destroy energy that was spent on a reproduction.
+    if (this.init.templating) this.templateParticles()
     if (this.init.spore) this.germinate()
     if (this.init.repro) this.reproduce()
     this.captures()
@@ -871,6 +908,7 @@ export class World {
       if (this.cool[i] > 0) this.cool[i]--
       if (this.repCool[i] > 0) this.repCool[i]--
       if (this.bondCool[i] > 0) this.bondCool[i]--
+      if (this.tmplCool[i] > 0) this.tmplCool[i]--
     }
   }
 
@@ -986,6 +1024,131 @@ export class World {
    * Bond springs, and the breaking test. Tension above F_break snaps the bond: that is the
    * hysteresis, since forming only needed the pair to touch with F_form of pull behind it.
    */
+  /**
+   * Replaces the world's ancestral chemistry and reseeds every particle from it.
+   *
+   * The counterpart to per-particle rows: writing `A` directly is now a no-op, because the live
+   * chemistry is in the rows and `A` only seeds them. This discards whatever the particles had
+   * evolved, which is the honest meaning of changing a world's chemistry mid-run.
+   */
+  setChemistry(A: number[][]): void {
+    const wide = widenMatrix(A)
+    const food = FOOD_ROW
+    for (let i = 0; i < N_MATRIX; i++) {
+      for (let j = 0; j < N_MATRIX; j++) {
+        const w = i === food || j === food ? this.L.food_coupling : 1
+        this.A[i * N_MATRIX + j] = w * wide[i][j]
+      }
+    }
+    this.seedRows()
+  }
+
+  /**
+   * Particles copying themselves: the substrate's own evolution.
+   *
+   * The three Darwinian requirements, in the one property a particle actually has:
+   *
+   * - **variation** — the copy's row is mutated by `row_mut` and re-quantized
+   * - **heredity** — the copy takes its parent's row, not its type's ancestral one
+   * - **differential reproduction** — only a *bonded* particle with energy to spare can copy, so
+   *   what gets copied is the chemistry that got itself attached somewhere energy flows
+   *
+   * That last condition is doing the work. Without it the attractor is obvious and useless:
+   * maximally self-attracting particles forming dense immortal clots, crowding out everything
+   * else. Requiring a bond *and* a reserve means a particle has to be useful to a body to
+   * replicate, which selects chemistry for being recruitable rather than merely sticky.
+   */
+  private templateParticles(): void {
+    const { L } = this
+    if (!this.init.templating) return
+    const sigma = this.init.row_mut
+    /** The next empty matter slot, found by scanning from where the last pass left off. */
+    const takeSlot = (): number => {
+      for (let n = 0; n < this.nIntr; n++) {
+        const j = this.matterCursor
+        this.matterCursor = (this.matterCursor + 1) % this.nIntr
+        if (!this.alive[j] && this.owner[j] === -1 && !this.isSpore[j]) return j
+      }
+      return -1
+    }
+    for (let i = 0; i < this.nIntr; i++) {
+      if (!this.alive[i] || this.isSpore[i] || this.tmplCool[i] > 0) continue
+      if (this.bonds.held(i) === 0) continue // unbonded: no structure, no replication
+      if (this.energy[i] < L.E_template + L.E_viable) continue
+      const j = takeSlot()
+      if (j < 0) return // nothing has died yet, so there is nowhere for a copy to go
+      // energy moves, never appears: the parent's loss is exactly the copy's endowment
+      this.energy[i] -= L.E_template
+      this.energy[j] = L.E_template
+      this.alive[j] = 1
+      this.beginLife(j)
+      this.type[j] = this.type[i]
+      this.owner[j] = -1
+      this.socket[j] = -1
+      this.cool[j] = 0
+      this.bondCool[j] = 0
+      this.isSpore[j] = 0
+      this.tmplCool[i] = L.template_cooldown
+      this.tmplCool[j] = L.template_cooldown
+      // placed a core's width away, so the copy starts clear of its parent rather than inside it
+      const a = this.rng.next() * TAU
+      const d = this.eRadius[this.type[i]] * 2 + 1
+      this.x[j] = this.wrap(this.x[i] + d * Math.cos(a))
+      this.y[j] = this.wrap(this.y[i] + d * Math.sin(a))
+      // the genome: the parent's row, mutated, and re-quantized so the space stays countable
+      const src = i * N_MATRIX
+      const dst = j * N_MATRIX
+      for (let k = 0; k < N_MATRIX; k++) {
+        this.rows[dst + k] = sigma > 0 ? quantize(clamp11(this.rows[src + k] + sigma * this.rng.gauss())) : this.rows[src + k]
+      }
+      this.nTemplated++
+    }
+  }
+
+  /** Gives every particle its type's ancestral row. Called once at init. */
+  private seedRows(): void {
+    for (let i = 0; i < this.cap; i++) this.resetRow(i)
+  }
+
+  /**
+   * Changes a particle's kind, and its row with it.
+   *
+   * **The only safe way to retype a particle.** Writing `type[i]` directly now leaves a stale
+   * affinity row behind — the particle looks like a P1 and is still attracted to whatever its
+   * previous kind was. That is a silent wrong answer rather than a crash, which is the worst kind,
+   * so the write goes through here.
+   */
+  setType(i: number, t: number): void {
+    this.type[i] = t
+    this.resetRow(i)
+  }
+
+  /**
+   * Resets one particle's row to its type's ancestral chemistry.
+   *
+   * Needed wherever a particle's *type* changes — under continuous inflow a child's limb is
+   * retyped to match its parent's — because a row is an opinion about other kinds held *by* a
+   * kind, and carrying one across a change of type would be carrying somebody else's genome.
+   */
+  private resetRow(i: number): void {
+    const m = MATRIX_INDEX[this.type[i]]
+    const o = i * N_MATRIX
+    for (let k = 0; k < N_MATRIX; k++) this.rows[o + k] = m >= 0 ? this.A[m * N_MATRIX + k] : 0
+  }
+
+  /**
+   * The coupling between two particles: the mean of what each thinks of the other's kind.
+   *
+   * The single place this is computed outside the force kernel, so the bond test and the force can
+   * never disagree about whether a pair likes each other.
+   */
+  coupling(i: number, j: number): number {
+    const mi = MATRIX_INDEX[this.type[i]]
+    const mj = MATRIX_INDEX[this.type[j]]
+    if (mi < 0 || mj < 0) return 0
+    return 0.5 * (this.rows[i * N_MATRIX + mj] + this.rows[j * N_MATRIX + mi])
+  }
+
   /**
    * A bond takes the **weaker** of its two partners' bond strengths.
    *
@@ -1187,7 +1350,9 @@ export class World {
         if (this.owner[i] >= 0 && this.owner[i] === this.owner[j]) continue // siblings are already joined by rods
         if (bonds.has(i, j) || bonds.slots(j, this.eValence[tj]) === 0) continue
         const mj = MATRIX_INDEX[tj]
-        if (mj < 0 || this.A[mi * N_MATRIX + mj] < L.A_form) continue
+        // the pair's own coupling, not their types' — two P1 particles may now disagree about
+        // whether they like each other, and the bond test has to ask the same question the force does
+        if (mj < 0 || this.coupling(i, j) < L.A_form) continue
         const dx = this.minImage(x[j] - x[i])
         const dy = this.minImage(y[j] - y[i])
         const r2 = dx * dx + dy * dy
@@ -1728,6 +1893,32 @@ export class World {
   }
 
   private deaths(): void {
+    /*
+     * Loose matter can now die, and that is what makes replication possible at all.
+     *
+     * Matter was previously immortal: `decayFree` ran a particle's reserve to zero and left it
+     * sitting there, because nothing ever needed a free matter slot. Templating does — a copy has
+     * to go *somewhere*, and total matter stays conserved precisely because the only slots
+     * available are the ones decay has emptied. So abundance becomes the outcome of replication
+     * against decay rather than a number set at init.
+     *
+     * Only with templating on, so a world that does not replicate keeps immortal matter and every
+     * existing `massByType` invariant.
+     */
+    if (this.init.templating) {
+      for (let i = 0; i < this.nIntr; i++) {
+        if (!this.alive[i] || this.owner[i] !== -1 || this.isSpore[i]) continue
+        if (this.energy[i] > 1e-12) continue
+        // the residue is **burned**, not dropped. `totalEnergy` counts only live particles, so
+        // clearing `alive` without booking what was left would quietly delete it — a per-death
+        // crumb of about 1e-13 that still accumulated past the ledger's tolerance over a few
+        // hundred deaths. Burning it is the same convention decay and corpses already use.
+        this.burned += this.energy[i]
+        this.energy[i] = 0
+        this.alive[i] = 0
+        this.bonds.clear(i)
+      }
+    }
     for (let b = this.nIntr; b < this.nMatter; b++) {
       if (!this.isBrain(b)) continue
       if (this.energy[b] <= 1e-12) {
@@ -2204,7 +2395,7 @@ export class World {
       taken.add(pick)
       cost += Math.max(0, L.E_birth - this.energy[pick])
       limbs.push({ idx: pick, quad: w.quad, angle: w.angle })
-      if (this.continuous) this.type[pick] = w.type
+      if (this.continuous) this.setType(pick, w.type) // a row cannot survive a change of kind
     }
     if (limbs.length === 0) {
       this.repBlocked.matter++
@@ -2603,7 +2794,7 @@ export class World {
       }
       if (pick < 0) continue
       taken.add(pick)
-      if (this.continuous) this.type[pick] = want.type
+      if (this.continuous) this.setType(pick, want.type)
       limbs.push({ idx: pick, quad: want.quad, angle: Math.min(this.quadHi(want.quad), Math.max(this.quadLo(want.quad), want.angle)) })
     }
     if (limbs.length === 0) return -1

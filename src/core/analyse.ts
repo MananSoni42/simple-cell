@@ -136,6 +136,11 @@ export function dialFactors(rows: CatalogEntry[]): Factor[] {
      * the four kinds of matter to differ in more than their chemistry?
      */
     factor('types differ by', group(rows, (e) => e.spec.elementSpread ?? '(uniform)')),
+    // whether the chemistry evolves. Read this one first: it decides what every *other* chemistry
+    // factor in the report is even about — a starting point, or a law
+    factor('chemistry evolves', group(rows, (e) => (e.spec.templating ? 'yes' : 'no'))),
+    factor('row mutation', group(rows, (e) => e.spec.rowMut ?? '(default)')),
+    factor('matter decays at', group(rows, (e) => e.spec.decayScale ?? '(never)')),
     factor('spore cost', group(rows, (e) => e.spec.eSpore ?? '(default)')),
     factor('spore wakes at', group(rows, (e) => e.spec.sporeFood ?? '(default)')),
     /*

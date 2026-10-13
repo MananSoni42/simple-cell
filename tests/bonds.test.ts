@@ -15,7 +15,9 @@ function pairWorld(over: Partial<Init> = {}): World {
   init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
   init.A[0][0] = 1 // P1 likes P1, so a pair of them may bond
   const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
-  for (let i = 0; i < 4; i++) w.type[i] = 0
+  // setType, not a direct write: retyping a particle has to reseed its affinity row, or it
+  // looks like a P1 while still being attracted to whatever kind it was built as
+  for (let i = 0; i < 4; i++) w.setType(i, 0)
   return w
 }
 
@@ -106,8 +108,16 @@ describe('bond hysteresis', () => {
   })
 
   it('refuses to bond when chemistry is indifferent, and charges both particles when it does', () => {
+    /*
+     * Built indifferent, rather than made indifferent after the fact.
+     *
+     * Writing `cold.A[0] = 0` on a live world used to work and is now a no-op, which is the whole
+     * point of per-particle chemistry: `A` is the *ancestral* matrix that seeds each particle's own
+     * row at init, and the live chemistry is in the rows. Anything that wants to change a running
+     * world's chemistry has to go through `setChemistry`, which reseeds them.
+     */
     const cold = pairWorld()
-    cold.A[0] = 0 // P1 x P1 no longer attractive
+    cold.setChemistry(Array.from({ length: 5 }, () => new Array(5).fill(0)))
     place(cold, 11)
     cold.step()
     expect(cold.bonds.count).toBe(0)

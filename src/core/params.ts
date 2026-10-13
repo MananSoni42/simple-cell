@@ -86,6 +86,18 @@ export const LAWS = {
    */
   E_spore: 30,
   spore_food: 3,
+  /**
+   * What a particle spends to copy itself, and how long it waits before doing so again.
+   *
+   * Replication rather than creation, and the distinction is the whole design. A creation *rate*
+   * spawns particles the world did not earn; this makes a particle copy itself, paying from its
+   * own reserve, and only when **bonded** — so the chemistry that gets copied is the chemistry
+   * that got itself attached to something where energy flows. A particle that merely clumps with
+   * its own kind in a corner has no energy to spend, which is what stops the obvious degenerate
+   * attractor: immortal self-attracting clots crowding everything else out.
+   */
+  E_template: 25,
+  template_cooldown: 200,
   E_viable: 1,
   corpse_frac: 0.5,
   r_wall: 10, // a wall's exclusion radius
@@ -239,6 +251,22 @@ export interface Init {
    */
   conjugation: boolean
   spore: boolean
+  /**
+   * Whether particles replicate and mutate their own chemistry — evolution of the *substrate*,
+   * alongside the brains' evolution of behaviour.
+   *
+   * Off by default: with it on, `massByType` stops being constant, because the point is that a
+   * chemistry which works becomes more numerous.
+   */
+  templating: boolean
+  /**
+   * Std-dev of the mutation applied to a copied affinity row, in quanta.
+   *
+   * Its own dial rather than sharing `repro_mut`: that is a std-dev over brain *weights*, on a
+   * different scale and a different timescale — a brain's genome turns over once per generation,
+   * a particle's once per replication.
+   */
+  row_mut: number
   /** The stamp a world started from. Terrain itself lives in `wallPositions`. */
   walls: 'none' | 'pillars' | 'maze' | 'ring'
   n_wall: number
@@ -537,6 +565,8 @@ function seedWorld(seed: number, scale = 1): Init {
     foodMoves: false,
     conjugation: false,
     spore: false,
+    templating: false,
+    row_mut: 0.25, // one quantum: the smallest step the chemistry can actually represent
     walls: 'none',
     n_wall: 40 * area,
     wallPositions: [],

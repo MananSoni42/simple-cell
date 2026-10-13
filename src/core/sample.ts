@@ -103,6 +103,19 @@ const DIALS = {
    * and tuned entry by entry; this only decides how varied the draw is.
    */
   elementSpread: [0, 0.3, 0.6, 1],
+  /**
+   * Whether the chemistry itself evolves.
+   *
+   * The largest single question in the dial set, because it changes what the search is searching
+   * for: with it off, `A` is the world's law and the factor analysis says which couplings work;
+   * with it on, `A` is only where the world *starts* and the analysis can only say which starting
+   * points lead somewhere. Both are worth knowing, which is why it is a dial rather than a
+   * decision.
+   */
+  templating: [false, true],
+  rowMut: [0.1, 0.25, 0.5],
+  /** Decay is what frees a slot, so replication without it stalls once the empty slots are used. */
+  decayScale: [0.001, 0.004, 0.012],
 } as const
 
 /**
@@ -207,6 +220,9 @@ function dials(rng: Rng, spec: Partial<WorldSpec> = {}): Omit<WorldSpec, 'seed' 
     eSpore: spec.eSpore ?? pick(rng, DIALS.eSpore),
     sporeFood: spec.sporeFood ?? pick(rng, DIALS.sporeFood),
     elementSpread: spec.elementSpread ?? pick(rng, DIALS.elementSpread),
+    templating: spec.templating ?? pick(rng, DIALS.templating),
+    rowMut: spec.rowMut ?? pick(rng, DIALS.rowMut),
+    decayScale: spec.decayScale ?? pick(rng, DIALS.decayScale),
   }
 }
 

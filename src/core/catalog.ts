@@ -101,6 +101,19 @@ export interface WorldSpec {
   elements?: (Partial<Element> | undefined)[]
   /** How differentiated the element table is: 0 uniform, 1 strongly varied. Analysis handle. */
   elementSpread?: number
+  /**
+   * Whether particles replicate and mutate their own chemistry (R7.11).
+   *
+   * With this on, the matrix stops being the world's law and becomes its **ancestral** chemistry:
+   * what every particle starts from and drifts away from. That is a tier change — `A` becomes an
+   * initial condition rather than a constant — so the factor analysis reports what a world
+   * *started* with, not what it ran.
+   */
+  templating?: boolean
+  /** Mutation std-dev on a copied affinity row, in quanta. */
+  rowMut?: number
+  /** Per-type decay, as a single multiplier on the drawn table: what makes slots free to copy into. */
+  decayScale?: number
 }
 
 /** The reproduction modes a world may allow. Budding is always available; these add to it. */
@@ -175,6 +188,13 @@ export function specInit(spec: WorldSpec): Init {
   init.learn = { ...LEARN_DEFAULTS, algo: spec.learn ?? 'none', fitness: specFromKeys(['offspring']) }
   if (spec.reproMut !== undefined) init.repro_mut = spec.reproMut
   if (spec.elements) init.elements = spec.elements
+  if (spec.templating !== undefined) init.templating = spec.templating
+  if (spec.rowMut !== undefined) init.row_mut = spec.rowMut
+  if (spec.decayScale !== undefined && spec.decayScale > 0) {
+    // templating needs somewhere to copy *into*, and only decay frees a slot — so a world that
+    // replicates without decaying would stall after filling whatever was empty at init
+    init.elements = [0, 1, 2, 3].map((t) => ({ ...(init.elements?.[t] ?? {}), decay: spec.decayScale }))
+  }
   const mode = spec.reproMode ?? 'bud'
   init.conjugation = mode === 'conjugation' || mode === 'conjugation+spore'
   init.spore = mode === 'spore' || mode === 'conjugation+spore'
@@ -240,6 +260,7 @@ export function specId(spec: WorldSpec): string {
   const laws = [
     spec.muFood, spec.fMax, spec.kBond, spec.fBreak, spec.maxBonds, spec.rEat, spec.eBirth, spec.eRepro, spec.reproMut,
     spec.reproMode, spec.eSpore, spec.sporeFood,
+    spec.templating === undefined ? undefined : spec.templating ? 1 : 0, spec.rowMut, spec.decayScale,
     // the element table, canonicalised: field order fixed by `ELEMENT_FIELDS` so two equal tables
     // written in different key orders cannot hash differently
     spec.elements

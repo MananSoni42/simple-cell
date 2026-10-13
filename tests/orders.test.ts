@@ -15,7 +15,7 @@ function joined(over: Partial<Init> = {}): { w: World; a: number; b: number; c: 
   init.A[0][0] = 1
   // releaseFrac 0 so the brains do not hand their whole reserve to their limbs and starve
   const w = new World(init, { laws: { SIZE: 400, releaseFrac: 0 }, autoSpawn: false })
-  for (let i = 0; i < 6; i++) w.type[i] = 0
+  for (let i = 0; i < 6; i++) w.setType(i, 0)
   const [a, b, c] = [w.nIntr, w.nIntr + 1, w.nIntr + 2]
   // limbs pointing at each other, tips a bond-length apart
   w.placeOrganism({ brain: a, x: 180, y: 200, limbs: [{ idx: 0, quad: 0, angle: 0.08 }] })

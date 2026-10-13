@@ -155,8 +155,8 @@ describe('phenomenology', () => {
       init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
       init.A[0][0] = a
       const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
-      w.type[0] = 0
-      w.type[1] = 0
+      w.setType(0, 0)
+      w.setType(1, 0)
       w.placeOrganism({
         brain: 2,
         x: 150,
@@ -610,7 +610,7 @@ describe('food sensing', () => {
     init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
     init.A[0][4] = init.A[4][0] = 1 // P1 is a mouth
     const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
-    w.type[0] = 0
+    w.setType(0, 0)
     w.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
     // one food particle to the right of the limb, inside the interaction range
     w.injectFood()
@@ -625,7 +625,7 @@ describe('food sensing', () => {
 
     // with the mouth type repelled instead, the same geometry pulls the other way
     const w2 = new World({ ...init, A: init.A.map((r, i) => r.map((v, j) => ((i === 4 || j === 4) && v !== 0 ? -1 : v))) }, { laws: { SIZE: 300 }, autoSpawn: false })
-    w2.type[0] = 0
+    w2.setType(0, 0)
     w2.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
     w2.injectFood()
     w2.x[w2.foodStart] = w2.x[0] + 22
