@@ -232,4 +232,70 @@ fed **1.22**, order 20, generation 12. It does feed itself, which is why it tops
 600 worlds × 20,000 ticks × 2 seeds. Estimated **2.2 hours**. The first phase that can judge
 structure, and the one that tests the pre-registered self-repulsion prediction.
 
+### Phase 2 — complete, and a correction
+
+**597 worlds · 11.6M ticks · 20.7 core-hours in 1.8 hours.** 59 of them reached **level 1**, against
+five in the sixty thousand of phase 1.
+
+| rung | 2,000 ticks (small) | 20,000 ticks (default) |
+|---|---|---|
+| Feeds | 0.1% | **21.6%** |
+| Lasts | 0.1% | **16.9%** |
+| **Seeks** | 0.3% | **0.0%** |
+| Breeds true | 61% | 98.3% |
+| Joins | 79% | 98.5% |
+| Holds | 37% | 10.5% |
+
+**My phase-1 conclusion was wrong.** I wrote that the metabolism wall "is mostly not the horizon"
+because quadrupling the ticks had not moved it. Ten times the ticks moved it a great deal — Feeds
+from 0.1% to 21.6%. The claim was overconfident, and note the confound that remains: phase 2
+changed the horizon *and* the world size, so the credit cannot be split between them from this data.
+
+**The pre-registered prediction is falsified.** I predicted the self-repulsion effect would flip to
+favour 2–3 types by phase 2. It did not flip; it vanished — z=1.5, cells at 8.37 / 8.31 / 8.24 /
+8.24. So the phase-0 effect was a short-horizon artifact as suspected, but the reversal I expected
+does not exist. With 474 worlds here against 200,000 there, "within noise" is weak evidence of
+absence rather than proof of it.
+
+`Seeks` at **zero of 597** became the wall.
+
+### The eating experiment — a lever, and a broken metric
+
+Run alongside phase 3 on one hand-picked good spec, single seed, so these are leads rather than
+conclusions.
+
+| config | level | rungs | lasts (coasts) | seeks | meals/organism |
+|---|---|---|---|---|---|
+| as it is | 0 | 6/13 | 1.80 | 0.000 | 28.1 |
+| r_eat 12 | **1** | **7/13** | 2.26 | 0.107 | 42.1 |
+| r_eat 20 | 1 | 6/13 | 1.81 | 0.000 | 49.8 |
+| E_birth 5 | 0 | 4/13 | 1.24 | 0.000 | 20.7 |
+| **r_eat 12 + E_birth 5** | **1** | **7/13** | **4.05** | 0.000 | 56.7 |
+
+**Doubling the eating radius is a real lever.** It doubles meals and lifts the world a level, and
+combined with a small birth endowment it gives **4.05 coasting times** — 2.25× the baseline, and
+the best intrinsic lifespan measured anywhere in this project. The interaction is the interesting
+part: `E_birth` 5 *alone* is the worst row in the table, because newborns die before eating; with a
+wider mouth it becomes the best, because starting poor then forces feeding rather than preventing it.
+Both ends of the ratio, but only in that order.
+
+**And a second correction.** The phase-1 claim that "organisms live on their inheritance" is true of
+the **median random chemistry** — fed 0.067 — and not of a good world, where this baseline already
+feeds itself at 1.57 with 28 meals a life. I stated a property of the median as a property of the
+world.
+
+**`Seeks` is measuring geometry, not behaviour.** Alignment runs 0.000 → 0.107 → 0.000 as `r_eat`
+goes 6 → 12 → 20, with no learner running and nothing to learn from. Non-monotonic in a parameter
+that should only help says the metric is picking up the geometry of eating range against food
+density: at radius 6 and 20 an organism sits inside a cloud of food whose pull directions cancel,
+so the resultant has no direction to align with, while at 12 there is a window where it does. The
+rung cannot be trusted until that is fixed — the honest repair is to measure alignment only when
+the food signal is a real direction, or only for organisms not already in contact with food.
+
+### Phase 3 — running
+
+40 worlds × 100,000 ticks × 5 seeds, 79 generations each. The first evolutionary-horizon test, and
+the producer of the confirmed top ten. **Phase 4 is skipped for now**: 790 generations on five
+worlds is only worth its two hours if phase 3 shows something still climbing at 79.
+
 _Updates appended below as they land._

@@ -18,7 +18,8 @@
     "ceiling": "vite-node scripts/ceiling.ts",
     "archipelago": "vite-node scripts/archipelago.ts",
     "economy": "vite-node scripts/economy.ts",
-    "search": "vite-node scripts/search.ts"
+    "search": "vite-node scripts/search.ts",
+    "eating": "vite-node scripts/eating.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
