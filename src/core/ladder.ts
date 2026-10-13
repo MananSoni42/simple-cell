@@ -31,6 +31,15 @@ import type { World } from './world'
 
 export const LEVELS = ['Matter', 'Metabolism', 'Agency', 'Heredity', 'Association', 'Collective'] as const
 
+/**
+ * How much faster than a lone organism a structure has to travel to count as moving together.
+ *
+ * Above 1 by a clear margin, because equalling a solitary organism only shows that joining did not
+ * *cost* mobility. Carrying a whole structure somewhere faster than its parts could go alone is
+ * the claim worth a rung at the top level.
+ */
+const TRAVEL_OVER_SOLO = 1.5
+
 export interface Rung {
   n: number
   /** Which level of organisation this rung belongs to, as an index into LEVELS. */
@@ -201,13 +210,28 @@ export class LadderTracker {
     let oldestLineage = 0
     for (const [, t0] of this.founded) oldestLineage = Math.max(oldestLineage, w.tick - t0)
 
-    // collective: did the structure go anywhere, against the drift of a clump its size? The
-    // centroid of k particles diffuses with 1/k the variance of one particle
+    /*
+     * Collective: did the structure go further than its members would have gone alone?
+     *
+     * This was measured against **thermal diffusion** — `sqrt(2·μ·T·age/k)`, the drift of a
+     * passive clump of k particles — and that is the wrong null in kind, not merely too low. A
+     * random brain is a *constant* policy: `tanh` of a fixed linear combination is a fixed force,
+     * so a random organism swims persistently in one direction and its net displacement grows far
+     * faster than the square root of time. Measured directly: a **solitary** organism with random
+     * weights and no senses reached 0.76 to 2.27× the "three times drift" bar by itself, which is
+     * why a blind world with no learner was passing this rung.
+     *
+     * The null is now what a solitary organism in *this* world achieves (`w.soloSpeed()`), so the
+     * rung asks what its name says. Two further consequences worth having: it cancels every dial,
+     * since temperature and mobility and brain force all apply equally to both sides; and a fast
+     * centroid *implies* coherence, because a structure whose members mill about independently has
+     * a centroid that hardly moves however much its parts do.
+     */
     let travelRatio = 0
     if (struct && struct.age > 0) {
-      const particles = Math.max(2, struct.order * 5)
-      const nullDrift = Math.sqrt((2 * w.L.mu * w.init.T * struct.age) / particles)
-      travelRatio = struct.travel / Math.max(1e-9, 3 * nullDrift)
+      const solo = w.soloSpeed()
+      // with nothing solitary to compare against, the rung reports nothing rather than guessing
+      if (solo > 1e-9) travelRatio = struct.travel / struct.age / (TRAVEL_OVER_SOLO * solo)
     }
 
     // transmission: do children of joiners join more? Laplace-smoothed, and silent below eight of
@@ -286,9 +310,9 @@ export class LadderTracker {
     add(
       5,
       'Moves together',
-      'a held structure travelling three times what drift gives',
+      `a held structure covering ground ${TRAVEL_OVER_SOLO}× faster than a solitary organism manages`,
       struct ? Math.min(struct.heldFrac / 0.25, travelRatio) : 0,
-      struct ? `travelled ${Math.round(struct.travel)} against drift` : 'none',
+      struct ? `${(struct.travel / Math.max(1, struct.age) / Math.max(1e-9, w.soloSpeed())).toFixed(2)}× solo speed` : 'none',
     )
     add(5, 'Transmits joining', 'children of joiners join twice as often as others', transmit, transmitAt)
     add(

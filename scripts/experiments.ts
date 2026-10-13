@@ -70,8 +70,38 @@ function measure(w: World): Row {
   for (let b = w.nIntr; b < w.nMatter; b++) if (w.isBrain(b) && w.alive[b]) alive++
   const st = w.learner.status()
   const blocked = w.repBlocked
+  /*
+   * The **raw quantities** each rung thresholds, not only whether it passed.
+   *
+   * Pass/fail data goes stale the instant a threshold changes, so calibrating from it means
+   * re-running the whole sweep per adjustment. The distributions of the underlying measurements do
+   * not go stale: a threshold can be set from them analytically, and the only thing a re-run then
+   * has to confirm is that the chosen number does what the distribution said it would.
+   */
+  let maxGen = 0
+  let limbs = 0
+  let nOrg = 0
+  for (let b = w.nIntr; b < w.nMatter; b++) {
+    if (!w.isBrain(b) || !w.alive[b]) continue
+    nOrg++
+    if (w.gen[b] > maxGen) maxGen = w.gen[b]
+    for (let k = 0; k < 4; k++) if (w.limbs[b * 4 + k] >= 0) limbs++
+  }
+  const solo = w.soloSpeed()
+  const raw: Row = {
+    'q:maxGen': maxGen,
+    'q:limbsEach': nOrg > 0 ? limbs / nOrg : 0,
+    'q:order': o.oldest?.order ?? 0,
+    'q:heldFrac': o.oldest?.heldFrac ?? 0,
+    'q:replaced': o.oldest?.replacements ?? 0,
+    'q:birthsInside': o.oldest?.births ?? 0,
+    'q:soloSpeed': solo,
+    'q:structSpeed': o.oldest && o.oldest.age > 0 ? o.oldest.travel / o.oldest.age : 0,
+    'q:travelOverSolo': o.oldest && o.oldest.age > 0 && solo > 1e-9 ? o.oldest.travel / o.oldest.age / solo : 0,
+  }
   return {
     ...perRung,
+    ...raw,
     fed: by('Feeds'),
     lasts: by('Lasts') * 2,
     seeks: by('Seeks') * 0.25,
@@ -194,6 +224,18 @@ export const EXPERIMENTS: Record<string, Experiment> = {
     // every rung, by name, so the table *is* the calibration data
     report: [
       { key: 'level', label: 'level', dp: 2 },
+      // the raw quantities first: these are the calibration data and they do not go stale when a
+      // threshold moves, which pass/fail does
+      { key: 'q:maxGen', label: 'gen', dp: 1 },
+      { key: 'q:limbsEach', label: 'limbs', dp: 2 },
+      { key: 'q:order', label: 'order', dp: 1 },
+      { key: 'q:heldFrac', label: 'heldFrac', dp: 2 },
+      { key: 'q:replaced', label: 'replaced', dp: 1 },
+      { key: 'q:birthsInside', label: 'birthsIn', dp: 1 },
+      { key: 'q:travelOverSolo', label: 'travel/solo', dp: 2 },
+      { key: 'fed', label: 'fed', dp: 2 },
+      { key: 'lasts', label: 'lasts', dp: 2 },
+      { key: 'seeks', label: 'seeks', dp: 3 },
       { key: 'met:Persists', label: 'Persists', dp: 2 },
       { key: 'met:Feeds', label: 'Feeds', dp: 2 },
       { key: 'met:Lasts', label: 'Lasts', dp: 2 },

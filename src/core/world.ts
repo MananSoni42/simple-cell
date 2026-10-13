@@ -264,6 +264,16 @@ export class World {
   readonly coastT: Float64Array
   /** Has this organism ever been part of an order-2+ group, and was its parent one when it was born. */
   readonly hasJoined: Uint8Array
+  /**
+   * Where an organism began, so its **net** displacement is available rather than only its path
+   * length (`moved`).
+   *
+   * These two are not interchangeable and the difference decides a rung. A thrashing organism
+   * accumulates path length and goes nowhere; one that swims straight accumulates both. "Did a
+   * structure travel" is a question about net displacement, and nothing recorded it.
+   */
+  readonly spawnX: Float64Array
+  readonly spawnY: Float64Array
   readonly parentJoined: Uint8Array
   /**
    * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
@@ -481,6 +491,8 @@ export class World {
     this.endowment = new Float64Array(n)
     this.coastT = new Float64Array(n)
     this.hasJoined = new Uint8Array(n)
+    this.spawnX = new Float64Array(n)
+    this.spawnY = new Float64Array(n)
     this.parentJoined = new Uint8Array(n)
     this.learnId = new Int32Array(n)
     this.island = new Int8Array(n)
@@ -817,6 +829,37 @@ export class World {
    * per tick, superlinear so that a long-held large compound counts for much more than a long
    * small one. Sampled on the tracker's cadence and scaled, rather than recomputed every tick.
    */
+  /**
+   * How fast a **solitary** organism gets anywhere in this world, as net displacement per tick.
+   *
+   * This is the null that "moves together" needs, and the one it did not have. It used to be
+   * compared against thermal diffusion, `sqrt(2·μ·T·age/k)` — but a random brain is a *constant*
+   * policy, so a random organism swims persistently in one direction and its net displacement
+   * grows far faster than the square root of time. Measured: a solitary organism with random
+   * weights and no senses reached 0.76–2.27× the "three times drift" bar on its own, with no
+   * structure and nothing coordinated. The rung was testing whether anything was swimming.
+   *
+   * A within-world null fixes it in kind rather than by degree: the question becomes "does a
+   * structure go further than its members would alone", which is what the rung's name claims. It
+   * also cancels every dial — temperature, mobility, how hard a brain may push — because both
+   * sides of the comparison are subject to all of them.
+   *
+   * Median rather than mean: one organism that happens to find a clear run across the world would
+   * otherwise set the bar for everybody.
+   */
+  soloSpeed(): number {
+    const speeds: number[] = []
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      if (!this.isBrain(b) || !this.alive[b] || this.hasJoined[b]) continue
+      const age = this.tick - this.bornAt[b]
+      if (age < 100) continue // too young for a displacement to mean anything
+      speeds.push(Math.hypot(this.minImage(this.x[b] - this.spawnX[b]), this.minImage(this.y[b] - this.spawnY[b])) / age)
+    }
+    if (speeds.length === 0) return 0
+    speeds.sort((a, b) => a - b)
+    return speeds[speeds.length >> 1]
+  }
+
   private creditOrders(): void {
     if (this.tick % this.orders.sampleEvery !== 0) return
     const alpha = this.L.order_alpha
@@ -1912,6 +1955,8 @@ export class World {
      */
     this.coastT[b] = given / Math.max(1e-9, body * LAWS.c_up)
     this.hasJoined[b] = 0
+    this.spawnX[b] = this.x[b]
+    this.spawnY[b] = this.y[b]
     this.parentJoined[b] = spec.parent !== undefined && spec.parent >= 0 ? this.hasJoined[spec.parent] : 0
   }
 
