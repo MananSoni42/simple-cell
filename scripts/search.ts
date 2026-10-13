@@ -272,9 +272,17 @@ function runPhase(phase: Phase): void {
     const n = readCatalog().filter((e) => e.phase === phase.n).length
     const el = (Date.now() - t0) / 1000
     const rate = n / Math.max(1, el)
-    process.stdout.write(
-      `\r  ${n}/${total} · ${rate.toFixed(1)}/s · elapsed ${fmtDur(el)} · left ${fmtDur((total - n) / Math.max(0.001, rate))}   `,
-    )
+    /*
+     * No estimate until every worker has reported at least once.
+     *
+     * A rate computed from zero completions is zero, and dividing by it produced "left 11.1h" on a
+     * phase that finished in 1.5 — which is worse than printing nothing, because it looks like
+     * information. In a phase of forty long runs across ten workers, the first completions all
+     * arrive at once, so the first honest estimate is available only after that.
+     */
+    const warm = n >= Math.min(WORKERS, total)
+    const left = warm ? `left ${fmtDur((total - n) / Math.max(1e-6, rate))}` : 'estimating…'
+    process.stdout.write(`\r  ${n}/${total} · ${rate.toFixed(2)}/s · elapsed ${fmtDur(el)} · ${left}   `)
   }, 15000)
 
   Promise.all(jobs)

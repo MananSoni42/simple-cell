@@ -271,6 +271,13 @@ conclusions.
 | r_eat 20 | 1 | 6/13 | 1.81 | 0.000 | 49.8 |
 | E_birth 5 | 0 | 4/13 | 1.24 | 0.000 | 20.7 |
 | **r_eat 12 + E_birth 5** | **1** | **7/13** | **4.05** | 0.000 | 56.7 |
+| r_eat 20 + E_birth 5 | 1 | 6/13 | 3.59 | 0.000 | 49.3 |
+| r_eat 12 + E_food 30 | 1 | 7/13 | 2.84 | 0.060 | 17.3 |
+
+**Twelve is a window, not a direction.** `r_eat` 12 beats 20 in both pairings, 7 rungs against 6,
+so this is not "a bigger mouth is better" — there is a radius that suits the food density, and
+past it the gain in meals buys nothing. `E_food` 30 is the other shape of the same lever: a third
+as many meals, each worth three times as much, giving the highest `fed` of any row at 1.95.
 
 **Doubling the eating radius is a real lever.** It doubles meals and lifts the world a level, and
 combined with a small birth endowment it gives **4.05 coasting times** — 2.25× the baseline, and
