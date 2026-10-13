@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { type WorldSpec, specInit } from '../src/core/catalog'
 import { massByType } from '../src/core/metrics'
-import { N_MATRIX } from '../src/core/types'
+import { FOOD_ROW, N_MATRIX } from '../src/core/types'
 import { QUANTA } from '../src/core/params'
 import { World } from '../src/core/world'
 
@@ -91,47 +91,77 @@ describe('the chemistry evolves, and only when asked to', () => {
     expect(w.nTemplated).toBeGreaterThan(100)
     const after = meanRow(w)
     expect(after.some((v, k) => Math.abs(v - before[k]) > 0.05)).toBe(true)
-    // every row stays on the quantized lattice, so the space the search explores stays countable
+    /*
+     * The matter and brain columns stay on the quantized lattice; the **food column does not**, and
+     * that asymmetry is the rule rather than an oversight. R1.4a keeps the food row continuous —
+     * `applyQuantization` touches only the 4×4 matter block — and `food_coupling` caps every food
+     * entry at 0.5 because `A` is pre-scaled by it.
+     *
+     * Mutating all six alike broke both: it quantized a continuous row, and the lattice reaches ±1,
+     * so replication walked food affinity through its ceiling. Measured: the largest food entry went
+     * from 0.500, exactly the legal maximum, to 1.000.
+     */
     for (let i = 0; i < w.nIntr; i++) {
       if (!w.alive[i]) continue
       for (let k = 0; k < N_MATRIX; k++) {
-        expect(QUANTA as readonly number[]).toContain(w.rows[i * N_MATRIX + k])
+        const v = w.rows[i * N_MATRIX + k]
+        if (k === FOOD_ROW) expect(Math.abs(v)).toBeLessThanOrEqual(w.L.food_coupling + 1e-12)
+        else expect(QUANTA as readonly number[]).toContain(v)
       }
     }
   })
 
-  it('selects for liking food, against the pull of mutation alone', () => {
+  it('does not show selection on food affinity — a retraction', () => {
     /*
-     * The prediction behind the design, stated as the **contrast** rather than as a drift, because
-     * a drift on its own proves nothing here.
+     * **This test used to assert the opposite, and the earlier claim was an artefact of a bug.**
      *
-     * Mutation on a quantized lattice is a random walk that regresses toward the middle, and these
-     * rows start net-positive — so *any* entry falling over time is what diffusion gives for free.
-     * Measured over 8,000 ticks across eight seeds: affinity to matter fell by 0.135 ± 0.013
-     * (t = −10.7) and affinity to Food **rose** by 0.140 ± 0.043 (t = 3.2). The fall is not
-     * evidence of anything; the rise is, because it goes *against* the same regression that
-     * produced the fall.
+     * It reported "affinity to Food rose by 0.140 ± 0.043 (t 3.2) against the pull of mutation" and
+     * called the rise the finding. The rise was replication walking food entries through their
+     * ceiling: all six row entries were mutated alike and snapped onto the matter lattice, which
+     * reaches ±1, while a food entry's legal maximum is `food_coupling` = 0.5. Measured, the largest
+     * food entry went 0.500 → 1.000.
      *
-     * Why food in particular: only a *bonded* particle with energy to spare can copy itself, so
-     * what gets copied is the chemistry that got itself attached somewhere energy flows. Liking
-     * food is selected; merely being sticky is not — which is what rules out the degenerate
-     * attractor of immortal self-attracting clots.
+     * With the cap enforced the same eight seeds give food **−0.091 ± 0.018** — it falls. And pure
+     * mutation with no selection at all, simulated on the same operator for the same number of
+     * generations, gives −0.10 to −0.18. The world's food drift is therefore **indistinguishable
+     * from doing nothing**.
      *
-     * The contrast, not the food drift, is what is asserted: on one of those eight seeds food
-     * drifted slightly *negative* while still beating matter by 0.118, so a single-seed test on
-     * the drift alone would be flaky. The contrast held on all eight.
-     *
-     * An earlier version of this comment claimed +0.32, which was measured on code with the
-     * stale-free-list bug below — replications overwriting live limbs is a different world.
+     * So this asserts the honest negative: food affinity does not rise. If a future change makes it
+     * rise, this test fails and the claim can be made again — properly, with a null.
      */
     const w = world({ templating: true, decayScale: 0.004 })
     const before = meanRow(w)
     for (let t = 0; t < 8000; t++) w.step()
     const after = meanRow(w)
-    const FOODM = 4
-    const foodDrift = after[FOODM] - before[FOODM]
+    expect(w.nTemplated).toBeGreaterThan(100)
+    expect(after[FOOD_ROW] - before[FOOD_ROW]).toBeLessThan(0.02)
+  })
+
+  it('shows matter affinity falling far below what mutation alone gives', () => {
+    /*
+     * The one candidate for selection that survives, and it points the **opposite way to the
+     * obvious prediction**.
+     *
+     * Only a bonded particle can replicate, and bonding needs a coupling of at least `A_form`, so
+     * the naive expectation is that affinity to matter should *rise*. It falls hard: **−0.173 ±
+     * 0.020** across eight seeds, where the same mutation operator with no selection, run for the
+     * same number of generations, gives **+0.03 to +0.09**. That is a gap of about 0.2 in the
+     * opposite direction from the null.
+     *
+     * A coherent reading, not yet tested: selection favours *just enough* affinity to hold one
+     * bond, not maximal affinity — a particle buried in a clump pays `E_bond` repeatedly and sits
+     * where food cannot reach it, so it never accumulates the reserve a copy costs.
+     *
+     * The null is a crude simulation of the operator (`/tmp` script, population-replacement model,
+     * generation count estimated from copies per particle), so this asserts a direction and a
+     * rough magnitude, not a precise effect.
+     */
+    const w = world({ templating: true, decayScale: 0.004 })
+    const before = meanRow(w)
+    for (let t = 0; t < 8000; t++) w.step()
+    const after = meanRow(w)
     const matterDrift = [0, 1, 2, 3].reduce((a, k) => a + (after[k] - before[k]), 0) / 4
-    expect(foodDrift - matterDrift).toBeGreaterThan(0.05)
+    expect(matterDrift).toBeLessThan(-0.05)
   })
 
   it('keeps the energy ledger closed, which it did not at first', () => {

@@ -1118,7 +1118,30 @@ export class World {
       const src = i * N_MATRIX
       const dst = j * N_MATRIX
       for (let k = 0; k < N_MATRIX; k++) {
-        this.rows[dst + k] = sigma > 0 ? quantize(clamp11(this.rows[src + k] + sigma * this.rng.gauss())) : this.rows[src + k]
+        if (sigma <= 0) {
+          this.rows[dst + k] = this.rows[src + k]
+          continue
+        }
+        const mutated = this.rows[src + k] + sigma * this.rng.gauss()
+        /*
+         * The **food column keeps its own rules**: continuous, and capped at `food_coupling`.
+         *
+         * Mutating all six entries alike broke two of them. R1.4a keeps the food row continuous —
+         * `applyQuantization` deliberately touches only the 4×4 matter block — and `food_coupling`
+         * caps every food entry at 0.5, because `A` is pre-scaled by it in the constructor.
+         * Snapping a food entry onto the matter lattice did both wrongs at once: it quantized a row
+         * meant to be continuous, and the lattice reaches ±1, so replication walked food affinity
+         * clean through its ceiling. Measured over 8,000 ticks: the largest food entry went from
+         * 0.500 — exactly the legal maximum — to **1.000**, and the realised pair coupling to food
+         * reached about 0.735 against a legal 0.5.
+         *
+         * The Brain column is left quantized and clamped to ±1, which is correct: nothing
+         * pre-scales it, so ±1 *is* its legal range, and starting from zero it simply explores it.
+         */
+        this.rows[dst + k] =
+          k === FOOD_ROW
+            ? Math.max(-this.L.food_coupling, Math.min(this.L.food_coupling, mutated))
+            : quantize(clamp11(mutated))
       }
       this.nTemplated++
     }

@@ -142,11 +142,29 @@ So there are now **two coupled inheritance systems**: brains inherit 418 policy 
 budding and conjugation, selected by surviving and reproducing; particles inherit six affinity
 numbers through templating, selected by being bonded where energy flows. Each needs the other.
 
-*Measured, over 8,000 ticks and eight seeds.* Affinity to matter fell by 0.135 ± 0.013 and affinity
-to Food **rose** by 0.140 ± 0.043. The fall is not evidence of anything — mutation on a quantized
-lattice regresses toward the middle and these rows start net-positive, so any entry falling is what
-diffusion gives for free. The **rise** is the finding, because it runs against that same
-regression.
+**The food column keeps its own rules**: continuous, and capped at `food_coupling`. R1.4a keeps the
+food row continuous and `A` is pre-scaled by `food_coupling`, so a food entry's legal maximum is
+0.5. Mutating all six entries alike broke both rules at once, and it mattered — see below.
+
+*Measured, over 8,000 ticks and eight seeds, and this paragraph replaces a retracted claim.* An
+earlier version of this rule reported that affinity to **Food rose by 0.140 ± 0.043** and called the
+rise the finding, "because it runs against regression toward the middle". That was an artefact of
+the bug above: all six entries were snapped onto the matter lattice, which reaches ±1, so
+replication walked food affinity straight through its 0.5 ceiling — the largest food entry went
+from 0.500, exactly the legal maximum, to **1.000**.
+
+With the cap enforced, food affinity **falls**, by 0.091 ± 0.018. Pure mutation with no selection
+whatsoever — the same operator, the same number of generations, simulated directly — gives −0.10 to
+−0.18. So the world's food drift is **indistinguishable from doing nothing**, and there is no
+evidence of selection on food affinity.
+
+What survives is the matter column, pointing **the opposite way to the obvious prediction**.
+Affinity to matter falls by 0.173 ± 0.020 where the same null gives **+0.03 to +0.09** — a gap of
+about 0.2 against the null. Since only a *bonded* particle can replicate, and bonding needs a
+coupling of at least `A_form`, the naive expectation was that matter affinity should rise. A
+coherent reading, not yet tested: selection favours *just enough* affinity to hold one bond rather
+than maximal affinity, because a particle buried in a clump pays `E_bond` repeatedly and sits where
+food cannot reach it, so it never accumulates what a copy costs.
 
 `massByType` stops being constant when this is on, and that is deliberate: a chemistry that works
 becoming more numerous is the entire point. The invariant weakens from "per-type counts fixed" to
