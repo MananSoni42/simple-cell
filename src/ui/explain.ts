@@ -33,8 +33,26 @@ export function explainHTML(): string {
       <section>
         <h2>Chemistry</h2>
         ${matrixSvg()}
-        <p>One symmetric 5×5 matrix over {P1…P4, Food} is the world's entire chemistry: 15 numbers
-        in [−1, 1], snapped to ${QUANTA.join(', ')}. Positive attracts.</p>
+        <p>One symmetric 6×6 matrix over {P1…P4, Food, Brain} is the world's <b>ancestral</b>
+        chemistry: 20 numbers in [−1, 1], snapped to ${QUANTA.join(', ')}. Positive attracts.
+        Symmetric by law — an asymmetric coupling would have no potential-energy function, and the
+        energy ledger would stop meaning anything.</p>
+        <p>Ancestral, because each particle carries its <i>own</i> copy of its row, and the coupling
+        between a pair is the mean of what each one thinks of the other's kind. Two P1 particles are
+        no longer interchangeable. If the chemistry is set to evolve, a bonded particle with energy
+        to spare copies itself into a slot that decay has emptied, mutating its affinities as it
+        goes — so the matrix is only where the world begins. Only <i>bonded</i> particles can copy,
+        which is what selects chemistry for getting itself attached where energy flows rather than
+        for being merely sticky.</p>
+        <p>Brain has a row too. It used to have none at all — no chemistry, unable to bond, held
+        apart from everything by a hardcoded push — which is what made an organism a template held
+        together by rods rather than an assembly held together by what it is made of. It still never
+        bonds to another brain, which is a rule rather than an accident.</p>
+        <p>And each <i>kind</i> of matter has the properties of an element besides: size, mass,
+        valence, bond strength, and how fast it runs down. Measured, one of those is the opposite of
+        the obvious guess — a <b>heavy</b> type ends up <i>more</i> bonded, not less, because it is
+        not dragged out of its bonds by the jostling that breaks everything else's. Slow matter is
+        structural matter.</p>
         <p>Every pair also has a universal <b>hard core</b> that diverges at contact, so nothing can
         be squeezed through anything. A brain carries a body radius (${L.r_brain_core}) and is kept
         ${L.r_brain} from other brains, so <b>organisms can only touch through their limbs</b>.</p>

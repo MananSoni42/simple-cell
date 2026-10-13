@@ -113,8 +113,8 @@ export const CHEMISTRIES: Chemistry[] = [
   {
     key: 'random',
     name: 'Random',
-    blurb: 'no character at all — fifteen numbers drawn at random, which is what the world did before these dials existed',
-    describe: () => 'fifteen numbers drawn at random: no character was chosen for this matter, so whatever it does is luck rather than design',
+    blurb: 'no character at all — the whole table drawn at random, which is what the world did before these dials existed',
+    describe: () => 'the whole table drawn at random: no character was chosen for this matter, so whatever it does is luck rather than design',
     matrix: (rng) => {
       const A = blank()
       for (let i = 0; i < N_MATRIX; i++) {

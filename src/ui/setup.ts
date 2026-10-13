@@ -3,9 +3,13 @@ import {
   type FoodLevel,
   type FoodMode,
   type FoodRegime,
+  // aliased: `Element` is a DOM global, and the collision reports as "cannot assign to read-only
+  // property ATTRIBUTE_NODE", which points nowhere near the actual problem
+  type Element as Elem,
   type Init,
   LAWS,
   type Laws,
+  elementsOf,
   LEVEL_MULTIPLIER,
   QUANTA,
   type WallLayout,
@@ -41,12 +45,24 @@ import { mountPreview } from './preview'
 import { fmt, reducedMotion } from './theme'
 
 const FOOD = FOOD_ROW
+/**
+ * The drawer's tabs, grouped by **what each setting is a property of**.
+ *
+ * They used to be Physics / Chemistry / Food / Life / Compute, which mixed tiers: a particle's
+ * bond strength and an organism's breeding threshold both sat under "Physics" because both were
+ * universal constants, and that stopped being the right story once properties moved down to
+ * particles and organisms. The grouping now follows the thing that owns the property, so a
+ * question like "what makes P1 different from P2" has one place to look.
+ *
+ * Learning is deliberately *not* here. It is the third dial on the main screen, level with what
+ * the matter wants and what the world is like, because whether anything in a world is being
+ * optimised is not a detail of that world.
+ */
 const TABS = [
-  ['physics', 'Physics'],
-  ['chemistry', 'Chemistry'],
+  ['particles', 'Particles'],
+  ['organisms', 'Organisms'],
   ['food', 'Food'],
-  ['life', 'Life'],
-  ['compute', 'Compute'],
+  ['world', 'World'],
 ] as const
 type Tab = (typeof TABS)[number][0]
 
@@ -74,7 +90,7 @@ export function mountSetup(
   let recipe: Recipe = randomRecipe()
   let init = buildRecipe(recipe)
   const perf: Perf = { threads: 1, gpu: false }
-  let tab: Tab = 'physics'
+  let tab: Tab = 'particles'
   /** Which named preset is selected, or -1 when the world came from the dials. */
   let chosen = -1
   /** True once the world stopped being a recipe — a preset, an import, a hand-edited number. */
@@ -173,70 +189,47 @@ export function mountSetup(
   const ioEl = q('#s-io')
   const panel = (k: Tab): HTMLElement => q(`[data-panel="${k}"]`)
 
+  type NumLaw = { [K in keyof Laws]: Laws[K] extends number ? K : never }[keyof Laws]
+  /**
+   * A slider over one of the world's law overrides.
+   *
+   * Every number these touch was a universal constant, and two of them have since been measured
+   * wrong by a wide margin. They are a `Partial<Laws>` carried on the Init, so a world keeps its
+   * own physics through the worker, a snapshot and a saved config rather than quietly reverting.
+   */
+  const lawSlider = (
+    label: string,
+    key: NumLaw,
+    min: number,
+    max: number,
+    step: number,
+    hint: (v: number) => string,
+    round = false,
+  ): HTMLElement =>
+    new Slider({
+      label,
+      min,
+      max,
+      step,
+      value: (init.laws?.[key] as number | undefined) ?? (LAWS[key] as number),
+      curve: 'log',
+      format: (v) => (round ? String(Math.round(v)) : v.toFixed(2)),
+      hint,
+      onChange: (v) => {
+        init.laws = { ...init.laws, [key]: round ? Math.round(v) : v }
+        refresh()
+      },
+    }).el
+
+
   // ------------------------------------------------------------------ physics
-  const physics = (): void => {
-    const p = panel('physics')
+  const world = (): void => {
+    const p = panel('world')
     p.innerHTML = '<div class="cols"></div><div class="stab" id="s-stab"></div>'
     const cols = p.querySelector('.cols')!
     const left = card('The world')
     const right = card('Matter')
     cols.append(left, right)
-    const forces = card('Forces, and what they cost')
-    p.insertBefore(forces, p.querySelector('.stab'))
-    /*
-     * The dials that used to be constants.
-     *
-     * Every number here was a judgement call written into `LAWS` and never tested against an
-     * alternative — and two of them have since been measured wrong by a wide margin. They are a
-     * `Partial<Laws>` carried on the Init, so a world keeps its own physics through the worker, a
-     * snapshot and a saved config rather than quietly reverting to the defaults.
-     */
-    type NumLaw = { [K in keyof Laws]: Laws[K] extends number ? K : never }[keyof Laws]
-    const lawSlider = (
-      label: string,
-      key: NumLaw,
-      min: number,
-      max: number,
-      step: number,
-      hint: (v: number) => string,
-      round = false,
-    ): HTMLElement =>
-      new Slider({
-        label,
-        min,
-        max,
-        step,
-        value: (init.laws?.[key] as number | undefined) ?? (LAWS[key] as number),
-        curve: 'log',
-        format: (v) => (round ? String(Math.round(v)) : v.toFixed(2)),
-        hint,
-        onChange: (v) => {
-          init.laws = { ...init.laws, [key]: round ? Math.round(v) : v }
-          refresh()
-        },
-      }).el
-    fieldsOf(forces).append(
-      lawSlider('how fast food drifts', 'mu_food', 0.02, 1, 0.01, (v) =>
-        v >= 0.9
-          ? 'food drifts exactly as fast as a limb swims — you cannot catch what diffuses as fast as you move'
-          : `food is ${(1 / v).toFixed(1)}× heavier than matter, so a swimmer can gain on it`,
-      ),
-      lawSlider('how hard a brain can push', 'F_max', 0.1, 8, 0.1, (v) => {
-        const br = (init.laws?.F_break as number) ?? LAWS.F_break
-        return v >= br
-          ? 'stronger than a bond: an organism can tear itself free of a structure, and drag one'
-          : `a bond is ${(br / v).toFixed(1)}× stronger than any swimmer, so nothing can pull a structure anywhere`
-      }),
-      lawSlider('bond stiffness', 'k_bond', 0.05, 4, 0.05, () => 'the spring constant along a bond'),
-      lawSlider('bond breaks at', 'F_break', 0.5, 16, 0.5, (v) => {
-        const f = (init.laws?.F_max as number) ?? LAWS.F_max
-        return `${(v / f).toFixed(1)}× the strongest force a brain can exert. Measured: dropping this from 4 to 2.5 cost four fifths of all standing bonds`
-      }),
-      lawSlider('bonds per particle', 'max_bonds', 1, 8, 1, (v) => (v <= 2 ? 'two admits only chains and rings — never a sheet' : `up to ${Math.round(v)} neighbours, so a particle can sit inside a sheet`), true),
-      lawSlider('mouth width', 'r_eat', 2, 30, 1, (v) => `food is eaten within ${Math.round(v)} units. Measured: 12 beat both 6 and 20`, true),
-      lawSlider('a newborn starts with', 'E_birth', 1, 80, 1, (v) => (v < 10 ? 'barely endowed: newborns starve before they can eat' : `${Math.round(v)} per particle, paid by the parent`)),
-      lawSlider('breeds at', 'E_repro', 10, 300, 5, (v) => `a brain holding ${Math.round(v)} may reproduce`),
-    )
 
     fieldsOf(left).append(
       new Slider({
@@ -396,19 +389,24 @@ export function mountSetup(
   }
 
   // ------------------------------------------------------------------ chemistry
-  const chemistry = (): void => {
-    const p = panel('chemistry')
+  const particles = (): void => {
+    const p = panel('particles')
     p.innerHTML = `
-      <div class="note" style="margin-bottom:12px">Fifteen numbers decide everything the world can build.
-        Positive attracts, negative repels. Drag a cell up or down, or double-click to type.
-        Only one half is shown: the table is symmetric by law.</div>
+      <div class="note" style="margin-bottom:12px">The <b>ancestral</b> chemistry: what every
+        particle starts from. Positive attracts, negative repels. Drag a cell up or down, or
+        double-click to type. Only one half is shown, since the table is symmetric by law — an
+        asymmetric coupling would have no potential energy and the energy ledger would stop meaning
+        anything.<br>Each particle carries its <i>own</i> copy of its row, so if the chemistry
+        evolves this table is only where the world begins.</div>
       <table class="m" id="s-matrix"></table>
       <div class="legend" style="margin-bottom:16px">
         <span><span class="swatch" style="background:rgba(255,170,60,.8)"></span>attract</span>
         <span><span class="swatch" style="background:rgba(80,140,255,.8)"></span>repel</span>
-        <span class="note">Food×Food is always 0 · the Food row acts at half strength</span>
+        <span class="note">Food×Food is always 0 · the Food row acts at half strength · Brain has a
+          row too now, so a body can be held together by what it is made of rather than only by its rods</span>
       </div>
-      <div class="cols"><div id="s-chem-l"></div></div>`
+      <div class="cols"><div id="s-chem-l"></div><div id="s-chem-r"></div></div>
+      <div id="s-elements"></div>`
     const l = q('#s-chem-l')
     l.append(
       new Toggle({
@@ -483,9 +481,146 @@ export function mountSetup(
       })
       td.addEventListener('dblclick', ask)
     }
+    bondingCard()
+    elementEditor()
+  }
+
+  /** How bonds behave, which is a property of the matter holding them rather than of the world. */
+  const bondingCard = (): void => {
+    const c = card('How matter holds together')
+    q('#s-chem-r').appendChild(c)
+    fieldsOf(c).append(
+      lawSlider('bond stiffness', 'k_bond', 0.05, 4, 0.05, () => 'the spring constant along a bond'),
+      lawSlider('bond breaks at', 'F_break', 0.5, 16, 0.5, (v) => {
+        const f = (init.laws?.F_max as number | undefined) ?? LAWS.F_max
+        return `${(v / f).toFixed(1)}× the strongest force a brain can exert. Measured: dropping this from 4 to 2.5 cost four fifths of all standing bonds`
+      }),
+      lawSlider('bonds per particle', 'max_bonds', 1, 8, 1, (v) => (v <= 2 ? 'two admits only chains and rings — never a sheet' : `up to ${Math.round(v)} neighbours, so a particle can sit inside a sheet`), true),
+      new Toggle({
+        label: 'the chemistry evolves',
+        hint: 'a bonded particle with energy to spare copies itself into a slot decay has emptied, mutating its own affinities. Only *bonded* particles can copy, so what gets selected is chemistry that gets itself attached where energy flows — measured, affinity to food rises against the pull of mutation alone',
+        value: init.templating,
+        onChange: (v) => {
+          init.templating = v
+          refresh()
+        },
+      }).el,
+      ...(init.templating
+        ? [
+            new Slider({
+              label: 'row mutation',
+              min: 0,
+              max: 1,
+              step: 0.05,
+              value: init.row_mut,
+              format: (v) => v.toFixed(2),
+              hint: (v) =>
+                v === 0
+                  ? 'copies are exact, so the chemistry can spread but never change'
+                  : `each copy's affinities shift by about ${v.toFixed(2)}, then snap back to the quantized lattice`,
+              onChange: (v) => {
+                init.row_mut = v
+                sync()
+              },
+            }).el,
+          ]
+        : []),
+    )
   }
 
   // ------------------------------------------------------------------ food
+  /**
+   * What a kind of matter *is*, beyond who it sticks to.
+   *
+   * Six properties per type — the properties a chemical element has. Every one of them was a
+   * single global constant until recently, which meant four types differing in one dimension, and
+   * four types differing in one dimension are barely four types.
+   */
+  /**
+   * What a kind of matter *is*, beyond who it sticks to — as a grid, not a column of sliders.
+   *
+   * Six properties across four types is twenty numbers, and twenty sliders stacked vertically came
+   * to 2,190 pixels of wall. A grid is both shorter and the right shape for the data: **read down a
+   * column and you have one property across every kind; read across and you have one kind.** It
+   * also matches the chemistry matrix directly above it, so the same drag-or-double-click gesture
+   * works in both.
+   */
+  const ELEMENT_COLS: { key: keyof Elem; label: string; min: number; max: number; step: number; dp: number; what: string }[] = [
+    { key: 'radius', label: 'size', min: 1, max: 14, step: 0.5, dp: 1, what: 'hard core; a pair parts at the sum of their two radii' },
+    { key: 'mobility', label: 'mass', min: 0.02, max: 3, step: 0.02, dp: 2, what: 'mobility. A heavy type ends up MORE bonded, not less: it is not dragged out of its bonds' },
+    { key: 'valence', label: 'bonds', min: 0, max: 8, step: 1, dp: 0, what: 'how many neighbours it can hold; two admits only chains and rings' },
+    { key: 'bondStrength', label: 'strength', min: 0, max: 4, step: 0.05, dp: 2, what: 'multiplies forming and breaking; a bond takes the WEAKER of its partners' },
+    { key: 'decay', label: 'decay', min: 0, max: 0.05, step: 0.001, dp: 3, what: 'how fast it runs down while loose — and what frees a slot for a copy' },
+  ]
+
+  const elementEditor = (): void => {
+    const host = q('#s-elements')
+    const now = elementsOf(init.elements, { ...LAWS, ...init.laws })
+    const names = ['P1', 'P2', 'P3', 'P4']
+    host.innerHTML = `
+      <div class="row-k" style="margin-top:4px"><b>What each kind of matter is</b></div>
+      <div class="note" style="margin-bottom:8px">Drag a cell up or down, or double-click to type.
+        Every one of these was a single global constant until recently — four types differing only in
+        their chemistry are barely four types.</div>
+      <table class="m" id="s-elgrid"></table>
+      <div class="note" id="s-elhint">&nbsp;</div>`
+    const table = q<HTMLTableElement>('#s-elgrid')
+    let html = `<tr><th></th>${ELEMENT_COLS.map((c) => `<th>${c.label}</th>`).join('')}</tr>`
+    for (const [t, name] of names.entries()) {
+      html += `<tr><th style="text-align:right">${name}</th>`
+      for (const [ci, c] of ELEMENT_COLS.entries()) {
+        const v = now[t][c.key]
+        // shaded by how far the value sits from its default, so an edited table reads at a glance
+        const base = elementsOf(undefined, { ...LAWS, ...init.laws })[t][c.key]
+        const off = Math.min(1, Math.abs(v - base) / Math.max(1e-9, c.max - c.min))
+        html += `<td tabindex="0" data-t="${t}" data-c="${ci}" style="background:rgba(255,170,60,${(0.06 + 0.5 * off).toFixed(3)})">${v.toFixed(c.dp)}</td>`
+      }
+      html += '</tr>'
+    }
+    table.innerHTML = html
+    const hint = q('#s-elhint')
+    for (const td of Array.from(table.querySelectorAll<HTMLTableCellElement>('td[data-t]'))) {
+      const t = Number(td.dataset.t)
+      const c = ELEMENT_COLS[Number(td.dataset.c)]
+      const set = (v: number): void => {
+        const clamped = Math.min(c.max, Math.max(c.min, c.step >= 1 ? Math.round(v) : v))
+        const els = (init.elements ?? []).slice()
+        els[t] = { ...(els[t] ?? {}), [c.key]: clamped }
+        init.elements = els
+        refresh()
+      }
+      td.addEventListener('pointerenter', () => {
+        hint.textContent = `${names[t]} ${c.label} — ${c.what}`
+      })
+      const ask = (): void => {
+        const typed = prompt(`${names[t]} ${c.label}  (${c.min} … ${c.max})`, String(now[t][c.key]))
+        if (typed !== null && Number.isFinite(Number(typed))) set(Number(typed))
+      }
+      td.addEventListener('pointerdown', (e) => {
+        e.preventDefault()
+        capture(td, e)
+        const y0 = e.clientY
+        const v0 = now[t][c.key]
+        const span = c.max - c.min
+        const move = (ev: PointerEvent): void => set(v0 - ((ev.clientY - y0) / 200) * span)
+        const up = (): void => {
+          td.removeEventListener('pointermove', move)
+          td.removeEventListener('pointerup', up)
+        }
+        td.addEventListener('pointermove', move)
+        td.addEventListener('pointerup', up)
+      })
+      td.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowUp') set(now[t][c.key] + c.step)
+        else if (e.key === 'ArrowDown') set(now[t][c.key] - c.step)
+        else if (/^-?[0-9.]$/.test(e.key)) ask()
+      })
+      td.addEventListener('dblclick', ask)
+    }
+  }
+
+  // ------------------------------------------------------------------ food
+
   const food = (): void => {
     const p = panel('food')
     p.innerHTML = '<div class="cols"></div>'
@@ -654,6 +789,12 @@ export function mountSetup(
           refresh()
         },
       }).el,
+      lawSlider('how fast food drifts', 'mu_food', 0.02, 1, 0.01, (v) =>
+        v >= 0.9
+          ? 'food drifts exactly as fast as a limb swims — you cannot catch what diffuses as fast as you move'
+          : `food is ${(1 / v).toFixed(1)}× heavier than matter, so a swimmer can gain on it`,
+      ),
+      lawSlider('mouth width', 'r_eat', 2, 30, 1, (v) => `food is eaten within ${Math.round(v)} units. Measured: 12 beat both 6 and 20`, true),
       new Slider({
         label: 'at most',
         min: 10,
@@ -703,8 +844,8 @@ export function mountSetup(
   }
 
   // ------------------------------------------------------------------ life
-  const life = (): void => {
-    const p = panel('life')
+  const organisms = (): void => {
+    const p = panel('organisms')
     p.innerHTML = '<div class="cols"></div>'
     const cols = p.querySelector('.cols')!
     const arrive = card('Arrivals')
@@ -784,6 +925,14 @@ export function mountSetup(
           refresh()
         },
       }).el,
+      lawSlider('how hard a brain can push', 'F_max', 0.1, 8, 0.1, (v) => {
+        const br = (init.laws?.F_break as number | undefined) ?? LAWS.F_break
+        return v >= br
+          ? 'stronger than a bond: an organism can tear itself free of a structure, and drag one'
+          : `a bond is ${(br / v).toFixed(1)}× stronger than any swimmer, so nothing can pull a structure anywhere`
+      }),
+      lawSlider('a newborn starts with', 'E_birth', 1, 80, 1, (v) => (v < 10 ? 'barely endowed: newborns starve before they can eat' : `${Math.round(v)} per particle, paid by the parent`), true),
+      lawSlider('breeds at', 'E_repro', 10, 300, 5, (v) => `a brain holding ${Math.round(v)} may reproduce`, true),
       new Toggle({
         label: 'spores',
         hint: 'when a child cannot be made, a parent invests in one drifting particle carrying its genome, which wakes where it finds food. Measured: this cut reproductions blocked by the population cap from 41,244 to 853',
@@ -1068,8 +1217,11 @@ export function mountSetup(
 
   // ------------------------------------------------------------------ compute
   const compute = (): void => {
-    const p = panel('compute')
-    p.innerHTML = `
+    const p = panel('world')
+    // appended: `world()` owns this panel's markup, and this adds a section to the end of it
+    const host = document.createElement('div')
+    p.appendChild(host)
+    host.innerHTML = `
       <div class="note" style="margin-bottom:14px">${MAX_THREADS} cores detected. These change only
         <i>where</i> the forces are computed, never what the world does — threads give bit-identical
         results, and the GPU matches to about one part in ten thousand.</div>
@@ -1305,12 +1457,13 @@ export function mountSetup(
     q<HTMLElement>('#s-builder').hidden = !building
     q('#s-toggle-build').textContent = building ? 'hide the builder' : 'Build it yourself →'
 
-    physics()
-    chemistry()
-    food()
-    life()
-    learning()
+    // `world()` first, because `compute()` appends into the same panel rather than owning one
+    world()
     compute()
+    particles()
+    food()
+    organisms()
+    learning()
     paintTabs()
     sync()
     repreview()
