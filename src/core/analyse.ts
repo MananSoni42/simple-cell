@@ -129,6 +129,13 @@ export function dialFactors(rows: CatalogEntry[]): Factor[] {
     factor('breeds at', group(rows, (e) => e.spec.eRepro ?? '(default)')),
     factor('mutation rate', group(rows, (e) => e.spec.reproMut ?? '(default)')),
     factor('how it reproduces', group(rows, (e) => e.spec.reproMode ?? 'bud')),
+    /*
+     * One factor for the whole element table, which is the point of having a spread dial at all.
+     * Twenty-four per-type properties would give twenty-four factors of three cells each and no
+     * interpretable answer; this asks the question the table exists to answer — does it help for
+     * the four kinds of matter to differ in more than their chemistry?
+     */
+    factor('types differ by', group(rows, (e) => e.spec.elementSpread ?? '(uniform)')),
     factor('spore cost', group(rows, (e) => e.spec.eSpore ?? '(default)')),
     factor('spore wakes at', group(rows, (e) => e.spec.sporeFood ?? '(default)')),
     /*

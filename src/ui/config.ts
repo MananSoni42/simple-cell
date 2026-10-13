@@ -1,6 +1,9 @@
 import type { Perf } from '../compute/select'
 import {
   applyWallStamp,
+  // aliased: `Element` is a DOM global, and in a UI file the collision is silent and baffling —
+  // every field assignment reports "cannot assign to read-only property ATTRIBUTE_NODE"
+  type Element as Elem,
   type FoodLevel,
   FOOD_LEVELS,
   type FoodMode,
@@ -138,6 +141,41 @@ function lawOverrides(src: unknown): Partial<Laws> | undefined {
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+/**
+ * The per-type element table from untrusted JSON, each field clamped to a range the world survives.
+ *
+ * A whitelist like `lawOverrides`, and for a sharper reason: a radius of zero would let particles
+ * sit on top of each other and the force at `r -> 0` is where an integrator goes to die, while a
+ * mobility of ten would clear the step guardrail on every tick. Both are bounds, not preferences.
+ */
+function elementTable(src: unknown): (Partial<Elem> | undefined)[] | undefined {
+  if (!Array.isArray(src)) return undefined
+  const out: (Partial<Elem> | undefined)[] = []
+  let any = false
+  src.slice(0, 7).forEach((raw, t) => {
+    if (!raw || typeof raw !== 'object') return
+    const o = raw as Record<string, unknown>
+    const e: Partial<Elem> = {}
+    const take = (k: keyof Elem, lo: number, hi: number, round = false): void => {
+      const v = o[k]
+      if (typeof v !== 'number' || !Number.isFinite(v)) return
+      const c = Math.min(hi, Math.max(lo, v))
+      e[k] = round ? Math.round(c) : c
+    }
+    take('radius', 0.5, 20)
+    take('mobility', 0.01, 4)
+    take('valence', 0, 8, true)
+    take('bondStrength', 0, 8)
+    take('bondCost', 0, 10)
+    take('decay', 0, 0.5)
+    if (Object.keys(e).length > 0) {
+      out[t] = e
+      any = true
+    }
+  })
+  return any ? out : undefined
+}
+
 export function parseConfig(text: string): { init: Init; perf?: Perf } {
   const raw = JSON.parse(text) as Partial<ConfigFile> & Record<string, unknown>
   const src = (raw.init ?? raw) as Partial<Init> & Record<string, unknown>
@@ -162,6 +200,7 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     ...base,
     A,
     laws: lawOverrides(src.laws),
+    elements: elementTable(src.elements),
     quantized: bool(src.quantized, base.quantized),
     substeps: Math.round(num(src.substeps, base.substeps, 1, 64)),
     T: num(src.T, base.T, 0, 1e4),

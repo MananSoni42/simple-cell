@@ -9,7 +9,7 @@ import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, ONLINE_
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
 import { BRAIN_IN, BRAIN_OUT, FOOD_NEAR_SCALE, N_BRAIN_IN, N_BRAIN_OUT, randomBrain, randomLimb } from './neurons'
-import { type Init, type Laws, LAWS, applyQuantization, widenMatrix, bondRange, regimeMultiplier } from './params'
+import { type Element, type Init, type Laws, LAWS, applyQuantization, elementsOf, widenMatrix, regimeMultiplier } from './params'
 import { Rng } from './rng'
 import { BRAIN, FOOD, FOOD_ROW, MATRIX_INDEX, N_MATRIX, WALL } from './types'
 
@@ -282,6 +282,14 @@ export class World {
    * draws its shuffled nulls from its own random stream, so having it switched on moves nothing.
    */
   readonly cognition: Cognition
+  /** Per-type properties, and the flat tables the hot loops read them from. */
+  readonly elements: Element[]
+  readonly eRadius: Float64Array
+  readonly eMobility: Float64Array
+  readonly eValence: Int32Array
+  readonly eBondStrength: Float64Array
+  readonly eBondCost: Float64Array
+  readonly eDecay: Float64Array
   readonly parentJoined: Uint8Array
   /**
    * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
@@ -480,7 +488,24 @@ export class World {
     this.isSpore = new Uint8Array(n)
     this.repCool = new Int16Array(n)
     this.brainSig = new Float64Array(n * 4)
-    this.bonds = new Bonds(n, this.L.max_bonds)
+    /*
+     * The element table, flattened to typed arrays indexed by particle type.
+     *
+     * Flat rather than an array of objects because `radius` is read in the innermost pair loop of
+     * the force kernel — the hottest code in the program — and a seven-entry Float64Array stays in
+     * cache where an array of objects would chase pointers.
+     */
+    const els = elementsOf(init.elements, this.L)
+    this.elements = els
+    this.eRadius = Float64Array.from(els, (e) => e.radius)
+    this.eMobility = Float64Array.from(els, (e) => e.mobility)
+    this.eValence = Int32Array.from(els, (e) => Math.max(0, Math.round(e.valence)))
+    this.eBondStrength = Float64Array.from(els, (e) => e.bondStrength)
+    this.eBondCost = Float64Array.from(els, (e) => e.bondCost)
+    this.eDecay = Float64Array.from(els, (e) => e.decay)
+    // the bond table is sized by the most any type may hold; per-particle limits are enforced
+    // against `eValence`, so a low-valence type simply never fills its allocation
+    this.bonds = new Bonds(n, Math.max(1, ...Array.from(this.eValence)))
     this.flowOut = new Float64Array(n)
     this.flowIn = new Float64Array(n)
     this.flowE = new Float64Array(n)
@@ -549,6 +574,7 @@ export class World {
       A_brain: L.A_brain, r_brain_push: L.r_brain_push,
       r_wall: L.r_wall, K_wall: L.K_wall,
       nc: g.nc, skipFood: !init.foodMoves,
+      radius: this.eRadius,
     }
     this.field = new Float64Array(L.fieldN * L.fieldN)
     this.fieldTmp = new Float64Array(L.fieldN * L.fieldN)
@@ -960,9 +986,25 @@ export class World {
    * Bond springs, and the breaking test. Tension above F_break snaps the bond: that is the
    * hysteresis, since forming only needed the pair to touch with F_form of pull behind it.
    */
-  /** Distance beyond which a bond's spring would need more than F_break to hold it. */
-  private get bondBreakAt(): number {
-    return this.L.r_bond + this.L.F_break / this.L.k_bond
+  /**
+   * A bond takes the **weaker** of its two partners' bond strengths.
+   *
+   * The minimum rather than a mean, so a fragile type cannot be made structural by what it happens
+   * to attach to — which is what "fragile" has to mean for the property to be worth having.
+   */
+  private pairStrength(ti: number, tj: number): number {
+    return Math.min(this.eBondStrength[ti], this.eBondStrength[tj])
+  }
+
+  /** Squared distance within which a pair of these types can form a bond at all. */
+  private formRange2(ti: number, tj: number): number {
+    const r = this.L.r_bond + (this.L.F_form * this.pairStrength(ti, tj)) / this.L.k_bond
+    return r * r
+  }
+
+  /** Distance beyond which a bond's spring would need more than this pair's F_break to hold it. */
+  private breakAt(ti: number, tj: number): number {
+    return this.L.r_bond + (this.L.F_break * this.pairStrength(ti, tj)) / this.L.k_bond
   }
 
   /**
@@ -971,11 +1013,11 @@ export class World {
    * visible, over-long, until the next tick noticed.
    */
   private pruneBonds(): void {
-    const { x, y, bonds, L } = this
-    const limit = this.bondBreakAt
+    const { x, y, bonds, L, type } = this
     bonds.forEach((i, j) => {
       const dead = !this.alive[i] || !this.alive[j]
-      if (!dead && Math.hypot(this.minImage(x[j] - x[i]), this.minImage(y[j] - y[i])) <= limit) return
+      // per pair, from the weaker partner: a bond between two fragile types snaps sooner
+      if (!dead && Math.hypot(this.minImage(x[j] - x[i]), this.minImage(y[j] - y[i])) <= this.breakAt(type[i], type[j])) return
       bonds.remove(i, j)
       if (!dead) {
         this.bondCool[i] = L.bond_cooldown
@@ -1096,7 +1138,7 @@ export class World {
       const r = Math.hypot(dx, dy)
       if (r < 1e-9) return
       const f = bondForce(r, L)
-      if (r > this.bondBreakAt) {
+      if (r > this.breakAt(this.type[i], this.type[j])) {
         bonds.remove(i, j)
         this.bondCool[i] = L.bond_cooldown
         this.bondCool[j] = L.bond_cooldown
@@ -1126,29 +1168,38 @@ export class World {
    */
   private formBonds(): void {
     const { L, x, y, grid, bonds, type } = this
-    const r2max = bondRange(L).form ** 2
     for (let i = 0; i < this.nMatter; i++) {
-      if (!this.alive[i] || this.bondCool[i] > 0 || bonds.slots(i) === 0) continue
+      if (!this.alive[i] || this.bondCool[i] > 0) continue
       if (this.isSpore[i]) continue // carrying a genome; not available for structural chemistry
-      const mi = MATRIX_INDEX[type[i]]
+      const ti = type[i]
+      if (bonds.slots(i, this.eValence[ti]) === 0) continue
+      const mi = MATRIX_INDEX[ti]
       if (mi < 0) continue
       const n = grid.near(x[i], y[i])
       for (let k = 0; k < n; k++) {
         const j = grid.buf[k]
         if (j <= i || j >= this.nMatter || !this.alive[j] || this.bondCool[j] > 0 || this.isSpore[j]) continue
+        const tj = type[j]
+        // Brains do not bond to each other, as a rule rather than as an accident of two radii.
+        // It held only because `separateBrains` keeps brains 16 apart and a bond needs about 12 —
+        // so it would have quietly stopped holding the moment that exclusion became a dial.
+        if (ti === BRAIN && tj === BRAIN) continue
         if (this.owner[i] >= 0 && this.owner[i] === this.owner[j]) continue // siblings are already joined by rods
-        if (bonds.has(i, j) || bonds.slots(j) === 0) continue
-        const mj = MATRIX_INDEX[type[j]]
+        if (bonds.has(i, j) || bonds.slots(j, this.eValence[tj]) === 0) continue
+        const mj = MATRIX_INDEX[tj]
         if (mj < 0 || this.A[mi * N_MATRIX + mj] < L.A_form) continue
         const dx = this.minImage(x[j] - x[i])
         const dy = this.minImage(y[j] - y[i])
         const r2 = dx * dx + dy * dy
-        if (r2 > r2max) continue // slack enough that F_form can hold it
-        if (this.energy[i] < L.E_bond || this.energy[j] < L.E_bond) continue
+        // the pair's forming range, from the weaker partner's bond strength
+        if (r2 > this.formRange2(ti, tj)) continue // slack enough that F_form can hold it
+        const ci = this.eBondCost[ti]
+        const cj = this.eBondCost[tj]
+        if (this.energy[i] < ci || this.energy[j] < cj) continue
         if (!bonds.add(i, j)) break
-        this.pay(i, L.E_bond)
-        this.pay(j, L.E_bond)
-        if (bonds.slots(i) === 0) break
+        this.pay(i, ci)
+        this.pay(j, cj)
+        if (bonds.slots(i, this.eValence[ti]) === 0) break
       }
     }
   }
@@ -1176,19 +1227,27 @@ export class World {
     const { L, x, y, fx, fy, owner, alive, theta } = this
 
     const foodMoves = this.init.foodMoves
-    // Food is heavy (R2.4). The drift scales with mobility and the thermal part with its square
-    // root, because a Brownian step goes as sqrt(mu T) — so food responds to chemistry weakly and
-    // wanders slowly, and a swimmer can gain on it. Both kicks are still drawn either way, so the
-    // random stream is identical to a world where food is light: the two are comparable at a seed.
-    const muFood = mu * L.mu_food
-    const snFood = sn * Math.sqrt(L.mu_food)
+    /*
+     * Mobility is per type (R2.2b), which is mass.
+     *
+     * The drift scales with mobility and the thermal part with its **square root**, because a
+     * Brownian step goes as `sqrt(μT)`. Both kicks are still drawn whatever the mobility, so the
+     * random stream is identical across mobility settings and two such worlds are comparable at a
+     * seed.
+     *
+     * Food's entry is what `mu_food` used to be, and the measurement behind it stands: at mobility
+     * 1 a crumb of food drifts exactly as fast as a limb swims, and **you cannot catch what
+     * diffuses as fast as you move**. It is now one mechanism instead of a global law plus a
+     * special case for food.
+     */
     for (let i = 0; i < this.cap; i++) {
       if (!alive[i] || owner[i] !== -1) continue
       const t = this.type[i]
       if (t === WALL) continue // terrain does not move
       if (!foodMoves && t === FOOD) continue
-      const m = t === FOOD ? muFood : mu
-      const s = t === FOOD ? snFood : sn
+      const mob = this.eMobility[t]
+      const m = mu * mob
+      const s = sn * Math.sqrt(mob)
       const [sx, sy] = this.clampStep(m * fx[i] + s * this.kick(), m * fy[i] + s * this.kick())
       x[i] = this.wrap(x[i] + sx)
       y[i] = this.wrap(y[i] + sy)
@@ -1530,12 +1589,24 @@ export class World {
   }
 
   private decayFree(): void {
-    const k = this.init.decay_free
-    if (k <= 0) return
+    /*
+     * Per-type decay, with the world's `decay_free` as the floor under all of them.
+     *
+     * An element's own `decay` adds to the world's rate rather than replacing it, so turning the
+     * global dial still does what it always did and a type can additionally be made perishable.
+     * A type that decays faster than it is replicated simply dies out, which is how abundance
+     * becomes an outcome rather than a setting.
+     */
+    const base = this.init.decay_free
+    let any = base > 0
+    for (let t = 0; t < this.eDecay.length && !any; t++) if (this.eDecay[t] > 0) any = true
+    if (!any) return
     for (let i = 0; i < this.nMatter; i++) {
       if (!this.alive[i] || this.owner[i] !== -1) continue
       const e = this.energy[i]
       if (e <= 0) continue
+      const k = base + this.eDecay[this.type[i]]
+      if (k <= 0) continue
       let d = e * k
       if (e - d < 0.01) d = e // snap the tail to zero so particles actually run dry
       this.energy[i] = e - d

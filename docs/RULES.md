@@ -110,6 +110,32 @@ x ← x + μ·F·dt + sqrt(2·μ·T·dt)·N(0,1)    then wrap into [0, SIZE)
 
 Bound limbs are not integrated independently; see R3.3–R3.4.
 
+**R2.1c — Particles are elements, not just chemistries.** Each particle *type* carries its own
+size, mobility, valence, bond strength, bond cost and decay rate — the properties a chemical
+element has. Before this the chemistry matrix was the only thing distinguishing P1 from P2, and
+four types differing in one dimension are barely four types.
+
+```
+radius        hard core; a pair parts at the SUM of their two radii, so size means size
+mobility      mass, as a fraction of mu. Food's entry is what mu_food used to be
+valence       how many bonds one particle may hold
+bondStrength  multiplies F_form and F_break; a bond takes the WEAKER of its two partners
+bondCost      what forming a bond costs this particle
+decay         per-tick loss while loose, added to the world's decay_free
+```
+
+**Every global dial is now the default for its per-type field**, so `max_bonds`, `E_bond`,
+`mu_food` and `beta` all still set every type at once and the element table is the finer
+instrument. A world that says nothing about elements behaves exactly as it did.
+
+Three things worth knowing from measuring them. A bond takes the **minimum** of its partners'
+strengths, not a mean, because otherwise a fragile type could be made structural by whatever it
+attached to. The pair exclusion is the **sum of radii** rather than a per-pair constant, so a big
+particle holds a small one off at the distance their surfaces meet. And a **heavy type ends up
+*more* bonded, not less** — 2.35 bonds per particle at mobility 0.1 against 0.72 at default,
+because a slow particle is not dragged out of its bonds by the jostling that breaks everything
+else's. Slow matter is structural matter, which is a mechanism this world did not previously have.
+
 **R2.2b — Food is heavier than life.** Food moves with mobility `μ · mu_food` (0.15) and takes a
 thermal kick scaled by `sqrt(mu_food)`, because a Brownian step goes as `sqrt(μT)`. So its drift
 is damped about seven-fold and its jitter about two and a half.

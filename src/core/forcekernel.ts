@@ -26,7 +26,15 @@ export interface KernelParams {
   SIZE: number
   r_c: number
   K_core: number
-  r_0: number // exclusion radius for ordinary pairs
+  /**
+   * Exclusion radius for an ordinary pair, used only when no per-type radii are supplied.
+   *
+   * With `radius` present the exclusion becomes the **sum of the two particles' radii**, which is
+   * what makes size a real property rather than a per-pair fudge: a big particle holds a small one
+   * off at the distance their surfaces meet. The default radii are `r_0 / 2`, so the uniform case
+   * reproduces this number exactly.
+   */
+  r_0: number
   r_brain_core: number // ... when one of the pair is a brain
   r_brain: number // ... when both are
   K_brain: number
@@ -37,6 +45,8 @@ export interface KernelParams {
   nc: number
   /** Skip food as a target: its force is never used while food is static. */
   skipFood: boolean
+  /** Per-type hard-core radii, indexed by particle type. */
+  radius: Float64Array
 }
 
 const MIDX = Int8Array.from(MATRIX_INDEX)
@@ -49,7 +59,7 @@ const MIDX = Int8Array.from(MATRIX_INDEX)
  */
 export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: KernelParams): void {
   const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, ffx, ffy, A } = a
-  const { SIZE: S, r_c: rc, K_core: K, r_0, r_brain_core, r_brain, K_brain, A_brain, r_brain_push, r_wall, K_wall, nc, skipFood } = p
+  const { SIZE: S, r_c: rc, K_core: K, r_brain_core, r_brain, K_brain, A_brain, r_brain_push, r_wall, K_wall, nc, skipFood, radius } = p
   const rc2 = rc * rc
   const half = S / 2
   for (let k0 = lo; k0 < hi; k0++) {
@@ -89,8 +99,9 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
           const r2 = ax + ddy * ddy
           if (r2 >= rc2 || r2 < 1e-18) continue
           const r = Math.sqrt(r2)
-          // brains carry a body radius, so organisms can only ever touch through their limbs
-          let core = r_0
+          // the pair's exclusion distance: their two radii added, so size means size. Brains and
+          // walls keep their own fixed radii, which are about bodies rather than about chemistry
+          let core = radius[ti] + radius[tj]
           let kcore = K
           if (tj === WALL) {
             core = r_wall

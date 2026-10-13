@@ -19,10 +19,22 @@ export class Bonds {
     this.partner = new Int32Array(cap * max).fill(-1)
   }
 
-  slots(i: number): number {
+  /** How many bonds particle i currently holds. */
+  held(i: number): number {
     let n = 0
     for (let k = 0; k < this.max; k++) if (this.partner[i * this.max + k] >= 0) n++
-    return this.max - n
+    return n
+  }
+
+  /**
+   * Free bond slots for particle i, against its own **valence** rather than the table's width.
+   *
+   * The table is allocated at the widest valence any type has, so a low-valence type would
+   * otherwise be free to fill an allocation that was never meant for it. `limit` defaults to the
+   * table width, which is the old behaviour for any caller that has no opinion.
+   */
+  slots(i: number, limit = this.max): number {
+    return Math.max(0, Math.min(limit, this.max) - this.held(i))
   }
 
   has(i: number, j: number): boolean {

@@ -22,7 +22,7 @@ export const LAWS = {
    */
   mu_food: 0.15,
   r_c: 40, // interaction cutoff
-  beta: 0.25, // hard-core fraction -> r_0 = beta * r_c = 10
+  beta: 0.25, // hard-core fraction -> r_0 = beta * r_c = 10; per-type radii override it
   K_core: 3,
   L_rod: 16,
   gap: 0.12, // angular gap between quadrants (rad)
@@ -198,6 +198,14 @@ export interface Init {
    * `WorldOpts.laws` still wins over this, so an experiment can override a world's own physics.
    */
   laws?: Partial<Laws>
+  /**
+   * Per-type properties: size, mobility, valence, bond strength and cost, decay.
+   *
+   * Sparse and optional — a missing type or a missing field falls back to `ELEMENTS`, which
+   * reproduces the old global constants exactly. So an `Init` that says nothing about elements is
+   * the world as it was.
+   */
+  elements?: (Partial<Element> | undefined)[]
   A: number[][] // N_MATRIX x N_MATRIX, symmetric, Food-Food = 0
   quantized: boolean // snap the non-food 4x4 to QUANTA
   substeps: number // integration sub-steps per tick; >1 lets a hotter world stay stable
@@ -305,6 +313,73 @@ export interface Init {
 }
 
 /** Snaps the non-food block of a matrix to QUANTA, in place, keeping it symmetric. */
+/**
+ * What makes P1 not P2: the properties that differ between kinds of matter.
+ *
+ * Until now the chemistry matrix was the *only* thing distinguishing the four matter types. Every
+ * other property — how big a particle is, how readily it moves, how many neighbours it can hold,
+ * how hard its bonds are to break, how fast it runs down — was a single global constant shared by
+ * everything in the world. Four types that differ in one dimension are barely four types.
+ *
+ * These are deliberately the properties a chemical **element** has. All of them are per *type* and
+ * therefore set by the search, not by the world's own evolution — the one property that becomes
+ * individual and heritable is the affinity row, which is a separate change.
+ *
+ * Every default below reproduces the old global constant exactly, so a world that does not mention
+ * elements behaves precisely as it did.
+ */
+export interface Element {
+  /**
+   * Hard-core **radius**, in world units. The pair exclusion distance is the sum of the two radii,
+   * which is what makes this a size rather than a per-pair fudge: a big particle excludes a small
+   * one at the distance their surfaces meet. Default 5, since `beta · r_c / 2 = 5` gave the old
+   * universal `r_0` of 10 for any pair.
+   */
+  radius: number
+  /** Mobility, as a fraction of the global `mu`. Food's entry is what `mu_food` used to be. */
+  mobility: number
+  /** How many bonds one particle of this type may hold — a chemical valence. */
+  valence: number
+  /**
+   * Multiplier on `F_form` and `F_break`. A bond takes the **weaker** of its two partners, so a
+   * fragile type cannot be made structural by what it attaches to.
+   */
+  bondStrength: number
+  /** What forming a bond costs this particle. */
+  bondCost: number
+  /** Per-tick fractional loss of reserve while loose, replacing the single global `decay_free`. */
+  decay: number
+}
+
+/**
+ * The element table for a world, with **every default taken from that world's own laws**.
+ *
+ * This is the part that keeps the existing dials honest. `max_bonds`, `E_bond`, `mu_food` and
+ * `beta` were global constants and they still are: each one is now the *default* for its per-type
+ * field, so setting the law still sets every type, and the element table is the finer instrument
+ * that overrides individual ones. Nothing that worked before works differently.
+ *
+ * Read down a column and you have one kind of matter; read across and you have one property for
+ * every kind. Food's mobility is the one non-uniform default and it comes from `mu_food`, which is
+ * the measured value: at 1 a crumb of food drifts exactly as fast as a limb swims, and nothing can
+ * be caught.
+ */
+export function elementsOf(given: (Partial<Element> | undefined)[] | undefined, L: Laws): Element[] {
+  return [0, 1, 2, 3, 4, 5, 6].map((t) => ({
+    // half the old universal exclusion, so two default particles still part at exactly r_0
+    radius: (L.beta * L.r_c) / 2,
+    mobility: t === FOOD_TYPE ? L.mu_food : 1,
+    valence: L.max_bonds,
+    bondStrength: 1,
+    bondCost: L.E_bond,
+    decay: 0,
+    ...(given?.[t] ?? {}),
+  }))
+}
+
+/** Food's type tag. Spelled out here because params must not import from types for this alone. */
+const FOOD_TYPE = 5
+
 /**
  * Pads a matrix up to the current width, leaving the new rows and columns at zero.
  *

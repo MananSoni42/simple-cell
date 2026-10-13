@@ -1,4 +1,4 @@
-import { type FoodLevel, type FoodMode, type FoodRegime, type Init, LAWS, type Laws, applyFoodLevel, applyQuantization, initFromSeed, quantize, substepsFor } from './params'
+import { type Element, type FoodLevel, type FoodMode, type FoodRegime, type Init, LAWS, type Laws, applyFoodLevel, applyQuantization, initFromSeed, quantize, substepsFor } from './params'
 import { LEARN_DEFAULTS, type LearnAlgo } from './learning'
 import { FOOD_ROW, N_MATRIX } from './types'
 import { specFromKeys } from './fitness'
@@ -89,6 +89,18 @@ export interface WorldSpec {
   /** What a parent invests in a spore, and how much food a spore needs to germinate (R7.10). */
   eSpore?: number
   sporeFood?: number
+  /**
+   * Per-type properties: size, mobility, valence, bond strength and cost, decay.
+   *
+   * Carried in full, like the chemistry matrix, rather than as a handful of summary dials — a
+   * found world has to be reproducible and hand-editable. The *sampler* draws it from a structured
+   * prior controlled by `elementSpread`, which is what the factor analysis reports on, so the
+   * search has one interpretable question ("does differentiating the types help?") while the spec
+   * keeps the whole answer.
+   */
+  elements?: (Partial<Element> | undefined)[]
+  /** How differentiated the element table is: 0 uniform, 1 strongly varied. Analysis handle. */
+  elementSpread?: number
 }
 
 /** The reproduction modes a world may allow. Budding is always available; these add to it. */
@@ -117,6 +129,9 @@ export const TRI: [number, number][] = (() => {
  * zeros, which is a world that runs and is not the world that was asked for.
  */
 export const N_TRI = TRI.length
+
+/** Element fields in a fixed order, so a spec's hash cannot depend on key order. */
+export const ELEMENT_FIELDS: (keyof Element)[] = ['radius', 'mobility', 'valence', 'bondStrength', 'bondCost', 'decay']
 
 export function matrixOf(a: number[]): number[][] {
   const A = Array.from({ length: N_MATRIX }, () => new Array<number>(N_MATRIX).fill(0))
@@ -159,6 +174,7 @@ export function specInit(spec: WorldSpec): Init {
   init.wallPositions = []
   init.learn = { ...LEARN_DEFAULTS, algo: spec.learn ?? 'none', fitness: specFromKeys(['offspring']) }
   if (spec.reproMut !== undefined) init.repro_mut = spec.reproMut
+  if (spec.elements) init.elements = spec.elements
   const mode = spec.reproMode ?? 'bud'
   init.conjugation = mode === 'conjugation' || mode === 'conjugation+spore'
   init.spore = mode === 'spore' || mode === 'conjugation+spore'
@@ -224,6 +240,11 @@ export function specId(spec: WorldSpec): string {
   const laws = [
     spec.muFood, spec.fMax, spec.kBond, spec.fBreak, spec.maxBonds, spec.rEat, spec.eBirth, spec.eRepro, spec.reproMut,
     spec.reproMode, spec.eSpore, spec.sporeFood,
+    // the element table, canonicalised: field order fixed by `ELEMENT_FIELDS` so two equal tables
+    // written in different key orders cannot hash differently
+    spec.elements
+      ? spec.elements.map((e) => (e ? ELEMENT_FIELDS.map((f) => e[f] ?? '').join('/') : '')).join(';')
+      : undefined,
   ]
   if (laws.some((v) => v !== undefined)) canon.push(laws.map((v) => (v === undefined ? '' : String(v))).join(','))
   const text = canon.join('|')

@@ -1,4 +1,5 @@
 import { N_TRI, REPRO_MODES, TRI, type WorldSpec } from './catalog'
+import type { Element } from './params'
 import { QUANTA, type FoodLevel, type FoodMode, type FoodRegime } from './params'
 import { Rng } from './rng'
 import { BRAIN_ROW, FOOD_ROW } from './types'
@@ -89,7 +90,48 @@ const DIALS = {
   reproMode: REPRO_MODES,
   eSpore: [15, 30, 60],
   sporeFood: [1, 3, 8],
+  /**
+   * How differentiated the four kinds of matter are from each other.
+   *
+   * Zero is the world as it was: four types that differ in their chemistry and in nothing else,
+   * which is barely four types. Above zero they differ in size, mass, valence, bond strength and
+   * perishability too — so a world can have a heavy structural element and a light mobile one
+   * rather than four interchangeable ones.
+   *
+   * One dial for the whole table because the factor analysis needs an interpretable question. The
+   * per-type values it produces travel in the spec in full, so a world that works can be inspected
+   * and tuned entry by entry; this only decides how varied the draw is.
+   */
+  elementSpread: [0, 0.3, 0.6, 1],
 } as const
+
+/**
+ * Draws a per-type element table at a given spread.
+ *
+ * Multiplicative around each default, and **log-symmetric** — `exp(±s)` rather than `1 ± s` — so
+ * "twice as heavy" and "half as heavy" are equally likely draws. A linear spread would make heavy
+ * particles common and light ones impossible, biasing every world in one direction without ever
+ * saying so.
+ *
+ * Only the four matter types vary. Brain and Food keep their defaults: a brain's radius is about
+ * body geometry rather than chemistry, and food's mobility is already its own searchable dial.
+ */
+function drawElements(rng: Rng, spread: number): (Partial<Element> | undefined)[] | undefined {
+  if (spread <= 0) return undefined
+  const jitter = (base: number): number => base * Math.exp(spread * (rng.next() * 2 - 1))
+  const out: (Partial<Element> | undefined)[] = []
+  for (let t = 0; t < 4; t++) {
+    out[t] = {
+      radius: Math.round(jitter(5) * 10) / 10,
+      mobility: Math.round(jitter(1) * 100) / 100,
+      // valence is a count, so it steps rather than scales; 1 admits only pairs, 6 admits a sheet
+      valence: Math.max(1, Math.min(8, Math.round(4 * jitter(1)))),
+      bondStrength: Math.round(jitter(1) * 100) / 100,
+      decay: rng.next() < spread / 2 ? Math.round(jitter(0.004) * 10000) / 10000 : 0,
+    }
+  }
+  return out
+}
 
 /**
  * What kind of coupling each triangle entry is, so the constrained draw can treat them differently.
@@ -164,6 +206,7 @@ function dials(rng: Rng, spec: Partial<WorldSpec> = {}): Omit<WorldSpec, 'seed' 
     reproMode: spec.reproMode ?? pick(rng, DIALS.reproMode),
     eSpore: spec.eSpore ?? pick(rng, DIALS.eSpore),
     sporeFood: spec.sporeFood ?? pick(rng, DIALS.sporeFood),
+    elementSpread: spec.elementSpread ?? pick(rng, DIALS.elementSpread),
   }
 }
 
@@ -175,11 +218,13 @@ export interface SampleShape {
 
 /** One fresh candidate. `source` is recorded so the prior can be scored against the control. */
 export function draw(rng: Rng, shape: SampleShape, source: Source): WorldSpec {
+  const d = dials(rng)
   return {
     seed: rng.int(1e9),
     A: source === 'constrained' ? constrainedMatrix(rng) : uniformMatrix(rng),
     ...shape,
-    ...dials(rng),
+    ...d,
+    elements: drawElements(rng, d.elementSpread ?? 0),
   }
 }
 
@@ -200,9 +245,13 @@ export function mutate(rng: Rng, parent: WorldSpec): WorldSpec {
     A[i] = QUANTA[Math.min(QUANTA.length - 1, Math.max(0, at + step))]
   }
   const spec: WorldSpec = { ...parent, A, seed: rng.int(1e9) }
+  // the element table is re-drawn only when the spread itself is re-rolled, below; otherwise a
+  // mutant keeps its parent's elements, so a lineage of mutants explores chemistry at fixed physics
   // one dial re-rolled as well, so a lineage of mutants can drift off its parent's settings
   const which = pick(rng, Object.keys(DIALS) as (keyof typeof DIALS)[])
-  return { ...spec, ...dials(rng, { ...spec, [which]: undefined }) }
+  const rolled = dials(rng, { ...spec, [which]: undefined })
+  const elements = which === 'elementSpread' ? drawElements(rng, rolled.elementSpread ?? 0) : spec.elements
+  return { ...spec, ...rolled, elements }
 }
 
 /** The mix a phase draws from: shares that sum to one, with `mutant` ignored when there are none. */
