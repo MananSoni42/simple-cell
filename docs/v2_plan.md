@@ -55,6 +55,14 @@ for. That is what v2 fixes first.
 | Reproduction failures counted by cause | R7.7a | four diagnoses had one symptom |
 | Nine physics and economics constants became searchable dials | — | see §3 |
 | Ablation seam for brain inputs (`WorldOpts.blind`) | — | so each sense is a measurable claim |
+| **Conjugation** — two bonded parents, recombined child | R7.9 | before this, nothing in the world recombined |
+| **Spores** — a genome that drifts and wakes where there is food | R7.10 | cut cap-blocked reproductions 41,244 → 853 |
+| **MAP-Elites** — best genome per kind of behaviour | — | the goal is "slowly more complex", not one number |
+| **TD(λ) actor–critic** — learns inside a life | — | the first learner that does not wait for a death |
+| **Reward-modulated Hebbian** — three-factor plasticity | — | the cheap control against TD(λ) |
+| ES repaired: Adam, weight decay, lr cut tenfold | — | at the old rate it moved *away* from a known target |
+| Lamarckian / Darwinian inheritance as a dial | — | left implicit it was Lamarckian by accident |
+| UI for all of the above | — | Forces card, reproduction toggles, online-learner controls |
 
 Brain shape 29 → 41 inputs. Saved organisms from before are refused loudly, which is the existing
 rule and correct.
@@ -100,7 +108,8 @@ credited — which is why the ablation seam exists.
 
 | | Experiment | Question | Prediction |
 |---|---|---|---|
-| E1 | `scripts/senses.ts` — **running now**, 20k × 5 seeds | Does each new sense pay, and which? | food count and heavy food matter together, neither alone; `Seeks` stays near zero without a payoff for moving |
+| E1 | `scripts/senses.ts` — **partial result in, and it does not support the change**; see [structural_misses.md](structural_misses.md) | Does each new sense pay, and which? | food count and heavy food matter together, neither alone; `Seeks` stays near zero without a payoff for moving |
+| E1b | `scripts/learners.ts` — running | Which learners beat keeping-the-best-of-random, and which should be discarded? | the offline four are indistinguishable without mortality; TD(λ) is the only one that can move `Seeks` |
 | E2 | Force ratio sweep: `F_max` × `F_break` | Can an organism out-pull a bond, and does it then move a structure? | the strongest single effect on `Holds`/`Moves together` |
 | E3 | Mutation rate sweep, `reproMut` 0 … 0.15 | Is evolution doing anything, or is every world decided at init? | 0 should be clearly worse; if it is not, nothing is evolving and that is the headline |
 | E4 | Angular rigidity sweep (after W1) | Does a preferred shape produce persistent structure? | large on `heldFrac`, small on lifespan |
@@ -206,14 +215,38 @@ Pre-registered predictions, written before the search so they can be wrong:
   is evolving, and that is the most important finding available.
 - **P5** Nothing reaches level 3 without W1 (angular rigidity).
 
+## 6b. What the first measurements already changed
+
+Three things were learned by measuring rather than by designing, and each one altered the plan:
+
+1. **Five seeds is not enough to see anything in this world.** E1's ablations are individually
+   harmful and jointly helpful, which is impossible as an effect and is the signature of seed noise.
+   The v1 search used thirty worlds as its reporting minimum; experiments need to respect the same
+   bar, which makes **B0 (the parallel sweep runner) a prerequisite rather than a convenience.**
+2. **The population cap is the binding constraint on everything.** Blocked-reproduction counting
+   put a number on it for the first time: 41,244 blocked for want of a brain slot against 230
+   successful buds, over 6,000 ticks. It is also why every offline learner is rate-limited by
+   mortality, and why spores had such a large effect.
+3. **Two of my own additions were wrong on first measurement** — Adam at the inherited learning
+   rate, and TD(λ) without clipping, which drove a population extinct in 500 ticks. Both are now
+   regression tests. The pattern is consistent enough to be a rule: anything added here is wrong
+   until a test has disagreed with it once.
+
 ## 7. Order of work
 
-1. **Metrics** (M1, M2, M3) — a search against a broken rung is wasted compute.
-2. **E1 results** (running) and **E2, E3** — cheap, and they decide how much of W1–W6 is worth building.
-3. **W1** (angular rigidity) with its stability re-derivation, then **W3** (moving comet food).
-4. **U1, U2** so the new world is playable and inspectable.
-5. **v2 phase 0** at full dial coverage.
-6. **W4–W6** as the data argues for them, not before.
+1. **B0 — the parallel sweep runner.** Promoted to first. Every experiment below needs thirty
+   seeds rather than five, E1 has already shown why, and serially that is hours per question.
+2. **Metrics** (M1, M2, M3) — a search against a broken rung is wasted compute, and `rEat` is now a
+   searchable dial, so leaving M1 broken would let the search optimise the metric's artefact
+   directly. Strictly worse than v1, where `rEat` was fixed.
+3. **Re-run E1 and E1b at thirty seeds**, then **E2** (force ratio) and **E3** (mutation rate).
+   These decide how much of W1–W6 is worth building, and E3 decides whether anything is evolving.
+4. **W1** (angular rigidity) with its stability budget re-derived, then **W3** (moving comet food).
+5. **v2 pilot** at 2% budget, against the three gates in §6.
+6. **v2 phase 0** at full dial coverage.
+7. **W4–W6** as the data argues for them, not before.
+
+U1/U2 are done — the new world is already playable and inspectable.
 
 The thing to avoid is the v1 mistake in a new form: building more world, searching it hard, and
 discovering afterwards that the metric was measuring the search.

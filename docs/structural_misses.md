@@ -127,29 +127,35 @@ food whether or not it is heavy, so a seed is comparable across the change.
 
 ## Results
 
-Smoke test only so far — 2,000 ticks × 2 seeds, which is an anecdote and is recorded as one:
+**Partial, and the partial result does not support the change.** Five of eight conditions at
+20,000 ticks × 5 seeds:
 
-```
-condition                    fed           lasts (coasts)  seeks          order        score
-everything on                0.17±0.06     0.63±0.03       0.000±0.000    58.5±0.5     9.4±0.7
-− food count                 0.17±0.03     0.54±0.02       0.000±0.000    38.5±5.5     8.7±0.1
-− own motion                 0.18±0.02     0.66±0.07       0.000±0.000    35.0±4.0     9.6±0.7
-− own body                   0.22±0.00     0.64±0.01       0.000±0.000    37.5±2.5     9.3±0.7
-− all new senses             0.18±0.01     0.55±0.00       0.000±0.000    68.0±14.0    9.1±1.0
-drifting food, heavy         0.13±0.03     0.52±0.00       0.012±0.012    38.5±32.5    9.7±0.5
-drifting food, light         0.09±0.02     0.41±0.05       0.000±0.000    43.5±5.5     8.5±0.6
-drifting food, light, blind  0.08±0.01     0.57±0.05       0.040±0.025    30.5±5.5     10.3±0.2
-```
+| condition | fed | lasts (coasts) | seeks | order |
+|---|---|---|---|---|
+| everything on | 2.08±0.39 | 6.39±0.61 | 0.046±0.046 | 75.8±9.6 |
+| − food count | 1.31±0.22 | 4.55±0.50 | 0.039±0.018 | 51.6±11.0 |
+| − own motion | 1.16±0.23 | 4.76±0.40 | 0.085±0.026 | 61.8±16.0 |
+| − own body | 1.57±0.29 | 5.05±0.77 | 0.037±0.030 | 60.6±10.1 |
+| **− all new senses** | **2.47±0.52** | **7.24±0.60** | 0.076±0.039 | 67.8±18.7 |
 
-Everything except `lasts` is inside noise at this size, and the highest score belongs to the
-condition with *no* new senses and light food — which at two seeds means nothing, and is left in
-to make that clear. `Seeks` is ~0 almost everywhere, as it has been throughout: **adding the
-senses did not by itself produce food-seeking**, which is consistent with the prediction above
-that perception without a payoff for moving changes nothing.
+Read it carefully, because the obvious reading is the wrong one. Removing *each* sense on its own
+looks harmful, and removing *all* of them looks beneficial. Those two cannot both be effects of the
+senses: ablations that are individually harmful and jointly helpful are not additive in any
+direction, which is the signature of **seed-level noise dominating the comparison**. The largest
+gap here is about one standard error.
 
-The 20,000-tick × 5-seed run is pending; this section is to be replaced by it, not appended to.
+So the honest statement is: **at five seeds the new senses have not demonstrated a benefit, and
+the point estimate for having all of them is worse than for having none.** Not "the senses are
+useless" — a world where nothing is selecting on an input has no reason to use it, and the whole
+reason `Seeks` sits near zero is that movement costs five times upkeep. But the claim that these
+inputs help is unsupported by the only measurement taken of it.
 
-One figure worth noting against v1: lifetime harvest `fed` is 0.17 here against a v1 search
-median of 0.067. That is a comparison between one hand-picked chemistry and the median of a
-quarter-million random ones, so it says nothing about the change — it is the same error I made
-once before and it is noted here so it is not made again.
+What that implies for the order of work: a learner has to be in the loop before perception can pay,
+and `seeks` is the one column where anything moves at all. It is also a reminder that this world's
+outcomes are heavy-tailed enough that five seeds buys very little — the v1 search used thirty as
+its minimum for a reason.
+
+One figure worth noting against v1: lifetime harvest `fed` is around 2.1 here against a v1 search
+median of 0.067. That compares one hand-picked chemistry to the median of a quarter-million random
+ones, so it says nothing about the change — the same error made once before in this project, noted
+here so it is not made a third time.
