@@ -89,7 +89,7 @@ export class StatsPanel {
 
     // How far this world has got, against absolute thresholds calibrated to what the world used
     // to manage. It is the one number that answers "is this going anywhere", which is otherwise
-    // spread across six blocks.
+    // spread across the tiers.
     const L = st.ladder
     const done = L.reached + 1
     // the level is the headline: it says what *kind* of thing exists, where the rung count says

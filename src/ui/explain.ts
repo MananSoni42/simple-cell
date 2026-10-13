@@ -93,40 +93,67 @@ export function explainHTML(): string {
 
       <section>
         <h2>The ladder</h2>
-        <p>The point of all this is organisms that live longer and slowly become more complex, and
-        the hard part is knowing whether that is happening. A single number cannot say: a world
-        full of long-lived adults and a flood of newborns reads as <i>short</i>-lived if you
-        average the dead. So progress is tracked as thirteen milestones in <b>six levels of
-        organisation</b>, shown live in the world's left rail.</p>
-        <p>The levels follow the shape of the major transitions in life's own history, and each
-        level's units become the next level's <i>parts</i> — which is what makes this a hierarchy
-        of complexity rather than a list sorted by difficulty.</p>
+        <p>The point of all this is organisms that slowly get <b>smarter</b>, and the hard part is
+        knowing whether that is happening. So progress is tracked as nine milestones in
+        <b>seven tiers of intelligence</b>, shown live in the world's left rail.</p>
+        <p>The ladder used to measure levels of biological <i>organisation</i> — matter, metabolism,
+        heredity, association, collective structure — and that was the wrong axis. A bacterial mat
+        has heredity, association and collective structure, and knows nothing. Measured, a
+        <b>blind</b> world whose organisms had random weights and no learner at all met <b>nine of
+        the thirteen</b> rungs of that ladder, including <i>"a held structure travelling three times
+        what drift gives"</i>. It was describing the world rather than the organisms in it.</p>
+        <p>Every rung now asks one question in increasingly demanding forms: <b>does behaviour
+        exploit a particular kind of information, in a way that a null destroying exactly that
+        information does not reproduce?</b></p>
         <ol class="ladder-doc">
-          <li><b>Matter</b> — <i>Persists</i>: anything alive, and staying that way.</li>
-          <li><b>Metabolism</b> — <i>Feeds</i>: the typical life ate more than it was given.
-            <i>Lasts</i>: long lives, measured against what coasting on the birth endowment alone
-            would allow.</li>
-          <li><b>Agency</b> — <i>Seeks</i>: movement aligned with food beyond what chance explains.
-            <i>Keeps its body</i>: limbs held rather than lost, the first sign of repair.</li>
-          <li><b>Heredity</b> — <i>Breeds true</i>: grandchildren, so the chain works rather than
-            one lucky bud. <i>Lineage outlives</i>: a living line many lifetimes old, so the
-            lineage is now the thing that persists.</li>
-          <li><b>Association</b> — <i>Joins</i>: organisms bonded into one object.
-            <i>Holds</i>: one of those lasting half a lifetime. <i>Renews</i>: it has replaced as
-            many members as it has and is still there — a clump of the originals is a clump, this
-            is the first rung worth calling alive.</li>
-          <li><b>Collective</b> — <i>Moves together</i>: a held structure travelling further than
-            drift explains. <i>Transmits joining</i>: children of joiners join more often than
-            others, so organisation is inherited rather than rediscovered. <i>Grows from
-            within</i>: a birth inside a structure that then persists — the structure reproducing.</li>
+          <li><b>Viable</b> — not intelligence, but the precondition for showing any of it.
+            <i>Persists</i>: anything alive, and staying that way. <i>Feeds</i>: the typical life
+            ate more than it was given. <i>Lasts</i>: long lives, both in ticks and against what
+            coasting on the birth endowment alone would allow.</li>
+          <li><b>Reactive</b> — acts on what it senses now. <i>Taxis</i>: steers toward food,
+            beyond the same gradients shuffled in time.</li>
+          <li><b>Discriminative</b> — behaves differently in different situations.
+            <i>Lingers</i>: turns more where food is dense and presses on where it is not —
+            area-restricted search, the oldest foraging trick there is.</li>
+          <li><b>Adaptive</b> — gets better inside one lifetime. <i>Improves</i>: converts
+            encounters into meals better late in life than early.</li>
+          <li><b>Cumulative</b> — later lives are better than earlier ones. <i>Lineage
+            improves</i>: among organisms alive <i>at the same moment</i>, the later generations
+            forage better.</li>
+          <li><b>Social</b> — uses information that came from another organism. <i>Follows
+            signal</i>: steers by the signal field, beyond what the food gradient already said.</li>
+          <li><b>Collective</b> — the structure, not the organism, is the thing acting.
+            <i>Moves together</i>: a held structure of three or more covering ground faster than a
+            solitary organism manages.</li>
         </ol>
-        <p><b>Every threshold is a comparison against a null, in the world's own units</b>, and that
-        is the part that took longest to get right. An earlier version asked for "a life of 1,000
-        ticks", which the metabolism dial could simply buy — make living cheaper and the rung falls
-        without anything having improved. Lifespan is now counted in <b>coasting times</b>: how
-        long a newborn survives doing nothing at all. Seeking is a z-score against a random walk. A
-        structure's age is a fraction of its members' lifespan, and its travel is compared against
-        the diffusion of a clump its size. No dial changes what a rung means.</p>
+        <p>Three rules keep the rungs honest, and <b>each one comes from a trivial organism that
+        defeated an earlier version</b>:</p>
+        <ul>
+          <li><b>Commanded motion, never realised motion.</b> A crowded food patch physically
+          jostles whatever is inside it, and a well-fed organism can afford to move more. Both show
+          up as "behaviour correlated with food" in realised movement. A brain's <i>command</i>
+          cannot be jostled and does not depend on what it can afford.</li>
+          <li><b>Time-shuffled conditioners, never rotation.</b> Rotating the food direction by 90°
+          looks like a perfect null — same magnitudes, no information — and it is beaten by "always
+          swim north" in a world whose food is to the north. That organism uses no information at
+          all. Pairing this tick's command with a gradient the same organism saw at a random
+          <i>earlier</i> time gives it nothing, because its performance never depended on the
+          pairing.</li>
+          <li><b>Efficiency, never throughput.</b> An organism that merely <i>grows</i> gains limbs,
+          so it harvests more with nothing learned; one that drifts into a patch harvests more
+          because of where it is. Both buy more <i>encounters</i>. Only skill improves the
+          <i>conversion</i> of encounters into meals.</li>
+        </ul>
+        <p>Getting that null right cuts both ways. A first version drew its shuffle from only the
+        last sixteen ticks — and every conditioner here is autocorrelated over much longer, so the
+        "shuffled" gradient was nearly the same gradient, the null scored almost as well as the
+        real thing, and a synthetic organism following the gradient <i>perfectly</i> scored 0.155
+        where it should have scored near 1. A null that fails to destroy the information it is
+        meant to destroy does not make a rung lenient — it makes it unreachable.</p>
+        <p>Every claim needs <b>both significance and an effect size</b>. The first seeking rung
+        reported <i>z = 133</i> for an alignment of about 0.3: pooled over hundreds of lives, any
+        consistent bias clears a z-test, which establishes that an effect is not exactly zero and
+        says nothing about whether it is worth having.</p>
         <p>Each statistic is <b>windowed</b> over the recent dead or the recent samples, so a rung
         describes a sustained condition rather than one lucky tick, and each has <b>hysteresis</b> —
         on at the threshold, off only well below it — so the readout does not flicker while a number

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { LEVELS } from '../src/core/ladder'
 import { TRI, type WorldSpec, best, matrixOf, parseCatalog, rank, specId, specInit, triOf } from '../src/core/catalog'
 import { evaluate, evaluateSeeds } from '../src/core/evaluate'
 import { chemistryShape, summarise } from '../src/core/analyse'
@@ -74,7 +75,11 @@ describe('evaluating a candidate', () => {
   it('scores a world and reports why it stopped', () => {
     const r = evaluate(spec(), { ticks: 1200, maxExtend: 1, plateauFrac: 0 })
     expect(r.ticks).toBeLessThanOrEqual(1200)
-    expect(r.ratios.length).toBeGreaterThan(10)
+    // one ratio per rung. The count is not pinned to a number here on purpose: the ladder went
+    // from 13 rungs to 9 when it moved from measuring organisation to measuring intelligence, and
+    // a test that fails on *that* is a test of a magic number rather than of the evaluator.
+    expect(r.ratios.length).toBeGreaterThanOrEqual(LEVELS.length)
+    expect(r.ratios.every((x) => Number.isFinite(x) && x >= 0)).toBe(true)
     expect(r.score).toBeGreaterThanOrEqual(0)
     expect(['done', 'extinct', 'plateau', 'extended']).toContain(r.stop)
   })

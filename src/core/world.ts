@@ -4,6 +4,7 @@ import { AggregateTracker } from './aggregates'
 import { Bonds, bondForce } from './bonds'
 import { type FitnessSpec, describeSpec } from './fitness'
 import { LadderTracker } from './ladder'
+import { Cognition } from './cognition'
 import { LEARN_DEFAULTS, type LearnConfig, type Learner, type LifeStats, ONLINE_ALGOS, makeLearner } from './learning'
 import { LifeTracker, RollingMean } from './lifestats'
 import { OrderTracker } from './orders'
@@ -274,6 +275,13 @@ export class World {
    */
   readonly spawnX: Float64Array
   readonly spawnY: Float64Array
+  /**
+   * What each organism does with what it knows — the measurements the intelligence rungs read.
+   *
+   * Separate from the world's own state because it is an *instrument*: it reads, accumulates, and
+   * draws its shuffled nulls from its own random stream, so having it switched on moves nothing.
+   */
+  readonly cognition: Cognition
   readonly parentJoined: Uint8Array
   /**
    * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
@@ -493,6 +501,7 @@ export class World {
     this.hasJoined = new Uint8Array(n)
     this.spawnX = new Float64Array(n)
     this.spawnY = new Float64Array(n)
+    this.cognition = new Cognition(n, init.seed)
     this.parentJoined = new Uint8Array(n)
     this.learnId = new Int32Array(n)
     this.island = new Int8Array(n)
@@ -755,6 +764,21 @@ export class World {
   private minImage(d: number): number {
     const S = this.L.SIZE
     return d - S * Math.round(d / S)
+  }
+
+  /**
+   * The signal field's gradient at a point, by central difference on the field grid.
+   *
+   * Wrapped in both axes, because the field lives on the same torus the world does and a brain
+   * sitting on the seam would otherwise read a cliff where there is none.
+   */
+  fieldGradient(x: number, y: number): [number, number] {
+    const N = this.L.fieldN
+    const f = this.field
+    const cx = Math.min(N - 1, Math.floor((x / this.L.SIZE) * N))
+    const cy = Math.min(N - 1, Math.floor((y / this.L.SIZE) * N))
+    const at = (ax: number, ay: number): number => f[((ay + N) % N) * N + ((ax + N) % N)]
+    return [(at(cx + 1, cy) - at(cx - 1, cy)) / 2, (at(cx, cy + 1) - at(cx, cy - 1)) / 2]
   }
 
   private fieldIndex(x: number, y: number): number {
@@ -1389,6 +1413,28 @@ export class World {
       this.mvx[b] = L.F_max * Math.tanh(yout[BRAIN_OUT.FX])
       this.mvy[b] = L.F_max * Math.tanh(yout[BRAIN_OUT.FY])
 
+      /*
+       * The cognition instrument sees the **command**, not the motion.
+       *
+       * Taken here, after any online learner has had its say and before the world has had any:
+       * `mvx/mvy` is what this brain asked for. The realised step is that plus every force acting
+       * on the body, and a crowded food patch jostles whatever is in it — so realised motion
+       * correlates with food for reasons that have nothing to do with the organism.
+       */
+      const [sgx, sgy] = this.fieldGradient(this.x[b], this.y[b])
+      this.cognition.observe({
+        b,
+        mx: this.mvx[b],
+        my: this.mvy[b],
+        gx,
+        gy,
+        food: near,
+        sx: sgx,
+        sy: sgy,
+        age: this.tick - this.bornAt[b],
+        meals: this.meals[b],
+      })
+
       // Did it move toward what it could tell about food? Scored here, where both the perception
       // and the choice made from it are in hand, and only on ticks where there was something to
       // perceive — so an organism that never moves never scores rather than scoring zero.
@@ -1957,6 +2003,7 @@ export class World {
     this.hasJoined[b] = 0
     this.spawnX[b] = this.x[b]
     this.spawnY[b] = this.y[b]
+    this.cognition.reset(b) // a new life in this slot inherits none of the last one's record
     this.parentJoined[b] = spec.parent !== undefined && spec.parent >= 0 ? this.hasJoined[spec.parent] : 0
   }
 

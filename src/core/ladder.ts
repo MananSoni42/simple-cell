@@ -1,35 +1,60 @@
 import { census } from './metrics'
+import type { Paired } from './cognition'
 import type { World } from './world'
 
 /**
- * How far a world has got, as a ladder of milestones in six levels of organisation.
+ * How far a world has got, as a ladder of **intelligence**.
  *
- * The levels follow the shape of the major transitions: matter persists → it feeds itself → it
- * behaves → it breeds true → organisms become parts of structures → a structure becomes an
- * individual in its own right. Each level's units are the next level's *parts*, which is what
- * makes this a hierarchy of complexity rather than a list sorted by difficulty. A level is reached
- * only when every rung at and below it holds, so the ladder is only ever as high as its lowest gap.
+ * The axis changed, and that is the most important thing about this file. It used to measure levels
+ * of biological *organisation* — matter, metabolism, agency, heredity, association, collective —
+ * and most of those are not intelligence at all: a bacterial mat has heredity, association and
+ * collective structure, and knows nothing. Measured, a **blind** world whose organisms had random
+ * weights and no learner met **nine of thirteen** rungs, including "a held structure travelling
+ * three times what drift gives". The ladder was describing the world rather than the organisms in
+ * it.
  *
- * Three rules keep the rungs honest, and they are the point of this file:
+ * So the rungs now ask one question in seven increasingly demanding forms: **does behaviour exploit
+ * a particular kind of information, in a way that a null destroying exactly that information does
+ * not reproduce?** Current input, then context-dependence, then adaptation within a life, then
+ * accumulation across lives, then other organisms' information, then acting as a collective. Each
+ * tier needs strictly more than the one below it.
  *
- * 1. **Every threshold is a comparison against a null, in the world's own units.** Lifespan is
- *    measured in *coasting times* — how long a newborn survives doing nothing — so slowing the
- *    metabolism cannot buy the rung, which the old absolute "1,000 ticks" quietly did. Seeking is
- *    a z-score against a random walk. A structure's age is a fraction of its members' lifespan,
- *    and its travel is measured against the diffusion of a clump its size. No dial changes what a
- *    rung means, which also means a search cannot game one.
- * 2. **Every statistic is windowed**: completed lives over a ring of the recent dead, presence
- *    measures over a ring of recent samples. A rung describes a sustained condition, never one
- *    lucky tick.
- * 3. **Hysteresis**: a rung turns on at its threshold and off only below 70% of it, so a live
- *    readout cannot flicker while a statistic sits on the line.
+ * Three rules keep the rungs honest, and every one of them comes from a trivial organism that
+ * defeated an earlier version. They are stated in full in `cognition.ts`; in short:
  *
- * The ladder also yields a **continuous score** — each rung's progress toward its threshold,
- * capped at one and summed — because a search needs a gradient and a rung number is a cliff. Two
- * worlds stuck at the same level still rank by how close the next rung is.
+ * 1. **Commanded motion, never realised motion**, because a crowded patch jostles whatever is in
+ *    it and a well-fed organism can afford to move more.
+ * 2. **Time-shuffled conditioners, never rotation.** Rotating the food direction is defeated by
+ *    "always swim north" in a world whose food is north — that organism scores a large
+ *    aligned-minus-rotated difference while using no information whatever.
+ * 3. **Efficiency, never throughput.** An organism that merely *grows* harvests more because it has
+ *    more limbs; one that drifts into a patch harvests more because of where it is. Both get more
+ *    *encounters*. Only skill improves the *conversion* of encounters into meals.
+ *
+ * Two further rules carried over from the previous design and still earning their place:
+ *
+ * - **Every statistic is windowed** — completed lives over a ring of the recent dead, presence over
+ *   a ring of recent samples. A rung describes a sustained condition, never one lucky tick.
+ * - **Hysteresis**: a rung turns on at its threshold and off only below 70% of it, so a live
+ *   readout cannot flicker while a statistic sits on the line.
+ *
+ * And **every claim needs both significance and an effect size.** The first version of the seeking
+ * rung reported *z = 133* for an alignment of about 0.3: pooled over hundreds of lives, any
+ * consistent bias clears a z-test, which says the effect is not zero and nothing about whether it
+ * matters. Each rung below takes the minimum of the two.
+ *
+ * The ladder also yields a **continuous score** — each rung's progress toward its threshold, capped
+ * at one and summed — because a search needs a gradient and a rung number is a cliff.
  */
 
-export const LEVELS = ['Matter', 'Metabolism', 'Agency', 'Heredity', 'Association', 'Collective'] as const
+/**
+ * The tiers, by what an organism has to be able to do.
+ *
+ * `Viable` is not intelligence and is not pretending to be: it is the precondition, because
+ * nothing that cannot stay alive and feed itself can demonstrate anything else. Everything above
+ * it is a claim about information.
+ */
+export const LEVELS = ['Viable', 'Reactive', 'Discriminative', 'Adaptive', 'Cumulative', 'Social', 'Collective'] as const
 
 /**
  * How much faster than a lone organism a structure has to travel to count as moving together.
@@ -171,7 +196,6 @@ export class LadderTracker {
     const c = census(w)
     const struct = w.orders.stats(w).oldest
     const lives = this.lives
-    const n = lives.length
 
     const frac = (a: number[]): number => (a.length ? a.reduce((p, q) => p + q, 0) / a.length : 0)
     const quantile = (xs: number[], q: number): number => {
@@ -184,31 +208,17 @@ export class LadderTracker {
     const fedMedian = quantile(lives.map((l) => l.fed), 0.5)
     const coastsP90 = quantile(lives.map((l) => l.coasts), 0.9)
 
-    // agency: pooled z against the random-walk null. The cosine of a random heading has mean 0 and
-    // variance 1/2, so a sum over N decided ticks has standard deviation sqrt(N/2)
-    let seekSum = 0
-    let seekN = 0
-    for (const l of lives) {
-      seekSum += l.seekSum
-      seekN += l.seekN
-    }
-    const seekZ = seekN > 0 ? seekSum / Math.sqrt(seekN / 2) : 0
     /*
-     * The mean alignment, and why significance alone will not do.
+     * What was here, and why it is gone.
      *
-     * Pooled over a few hundred lives the decided-tick count reaches six figures, and a z-score
-     * grows with sqrt(N): an alignment of 0.01 — indistinguishable from a random walk to any eye —
-     * clears z ≥ 3 easily, and the first run of this rung reported **z = 133**. The z-score is the
-     * right guard against noise and the wrong statement of the claim. So the rung needs both: the
-     * effect must be real (z) *and* worth having (mean), and the rung reports the mean, because
-     * that is the number with a meaning — the cosine between where a body went and where food was.
+     * A pooled z-score of movement–food alignment against a random-walk null, the oldest-lineage
+     * age, and a transmission ratio for whether children of joiners join more. All three were
+     * measurements of organisation rather than of intelligence, and two of them were defeated by
+     * trivial organisms: the alignment z reported 133 for an effect of 0.3 because pooling over
+     * hundreds of lives makes any consistent bias significant, and the geometry of `r_eat` moved
+     * it with no learner present at all. Their replacements live in `cognition.ts`, where the null
+     * is a time-shuffle of the organism's own conditioners rather than a theoretical distribution.
      */
-    const seekMean = seekN > 0 ? seekSum / seekN : 0
-
-    // heredity: the lineage, rather than the organism, as the thing that persists
-    const meanLife = n ? lives.reduce((a, l) => a + l.age, 0) / n : 0
-    let oldestLineage = 0
-    for (const [, t0] of this.founded) oldestLineage = Math.max(oldestLineage, w.tick - t0)
 
     /*
      * Collective: did the structure go further than its members would have gone alone?
@@ -228,23 +238,21 @@ export class LadderTracker {
      * a centroid that hardly moves however much its parts do.
      */
     let travelRatio = 0
+    /*
+     * `null` where there is nothing solitary to compare against, rather than a number.
+     *
+     * The ratio already guarded this and reported 0, but the *readout* divided by a 1e-9 floor and
+     * printed "2° at 141957922.73× solo" next to a rung showing 0% — a screen contradicting
+     * itself, which is worse than a blank. If every organism has joined something there is no
+     * baseline, and the honest display says so.
+     */
+    let soloMultiple: number | null = null
     if (struct && struct.age > 0) {
       const solo = w.soloSpeed()
-      // with nothing solitary to compare against, the rung reports nothing rather than guessing
-      if (solo > 1e-9) travelRatio = struct.travel / struct.age / (TRAVEL_OVER_SOLO * solo)
-    }
-
-    // transmission: do children of joiners join more? Laplace-smoothed, and silent below eight of
-    // each, because a ratio of two small counts is noise with an opinion
-    let transmit = 0
-    let transmitAt = 'too few lives to tell'
-    const pj = lives.filter((l) => l.parentJoined)
-    const ps = lives.filter((l) => !l.parentJoined)
-    if (pj.length >= 8 && ps.length >= 8) {
-      const rJ = (pj.filter((l) => l.joined).length + 1) / (pj.length + 2)
-      const rS = (ps.filter((l) => l.joined).length + 1) / (ps.length + 2)
-      transmit = rJ / rS / 2 // met at twice the solitary rate
-      transmitAt = `${(rJ / rS).toFixed(2)}× the solitary rate`
+      if (solo > 1e-9) {
+        soloMultiple = struct.travel / struct.age / solo
+        travelRatio = soloMultiple / TRAVEL_OVER_SOLO
+      }
     }
 
     const rungs: Rung[] = []
@@ -257,70 +265,138 @@ export class LadderTracker {
       rungs.push({ n: i, level, name, needs, met, at, ratio: r })
     }
 
+    /*
+     * The cognition instrument, over the organisms alive right now.
+     *
+     * Living organisms rather than the recent dead, because every tier above `Viable` is a claim
+     * about *behaviour*, and behaviour is a property of something doing it. A dead organism's
+     * accumulated record is still in there, but its slot has been reset for the next occupant.
+     */
+    const members: { b: number; gen: number; age: number }[] = []
+    for (let b = w.nIntr; b < w.nMatter; b++) {
+      if (w.isBrain(b) && w.alive[b]) members.push({ b, gen: w.gen[b], age: w.tick - w.bornAt[b] })
+    }
+    const cog = w.cognition.stats(members)
+
+    /**
+     * Both halves of a claim, or neither.
+     *
+     * Significance without an effect size is how the old seeking rung came to report *z = 133* for
+     * an alignment of 0.3: pooled over hundreds of lives any consistent bias clears a z-test,
+     * which establishes that the effect is not exactly zero and says nothing about whether it is
+     * worth having. The minimum of the two is the only honest summary.
+     */
+    const both = (p: Paired, minEffect: number): number => Math.min(p.z / 3, p.effect / minEffect)
+
+    // ---- tier 0: viable. Not intelligence — the precondition for showing any ----------------
     add(0, 'Persists', 'anything alive, and staying that way', c.organisms > 0 ? frac(this.sAlive) : 0, `${c.organisms} alive`)
-    add(1, 'Feeds', 'the typical life ate more than it was given', fedMedian, `ate ${fedMedian.toFixed(2)}× its endowment`)
+    add(0, 'Feeds', 'the typical life ate more than it was given', fedMedian, `ate ${fedMedian.toFixed(2)}× its endowment`)
     /*
      * Two conditions, because either alone is buyable by the metabolism dial.
      *
      * Coasting time alone rewarded *expensive* living: the yardstick shrinks with upkeep faster
-     * than lifespan does, so the shortest-lived organisms scored the highest. An absolute floor
-     * alone rewards *cheap* living, where everything simply happens more slowly. Requiring both —
-     * a life long in ticks, and longer than a free ride on the endowment would give — is the only
-     * version neither direction of the dial can game.
+     * than lifespan does, so the shortest-lived organisms scored highest. An absolute floor alone
+     * rewards *cheap* living, where everything merely happens more slowly. Requiring both — a life
+     * long in ticks, and longer than a free ride on the endowment gives — is the only version
+     * neither direction of the dial can game.
      */
     const lifeP90 = quantile(lives.map((l) => l.age), 0.9)
     add(
-      1,
+      0,
       'Lasts',
       'long lives: 2,000 ticks, and twice what coasting on the endowment allows',
       Math.min(coastsP90 / 2, lifeP90 / 2000),
       `p90 ${Math.round(lifeP90)}t, ${coastsP90.toFixed(2)} coasts`,
     )
+
+    // ---- tier 1: reactive. Acts on what it senses now ---------------------------------------
+    add(
+      1,
+      'Taxis',
+      'steers toward food, beyond the same gradients shuffled in time',
+      both(cog.taxis, 0.1),
+      `${cog.taxis.effect.toFixed(3)} over shuffled, z ${cog.taxis.z.toFixed(1)}`,
+    )
+
+    // ---- tier 2: discriminative. Behaves differently in different situations ------------------
+    /*
+     * Area-restricted search: turn more where food is dense, press on where it is not. The
+     * classic foraging behaviour, and the cheapest possible evidence of context-dependence.
+     *
+     * Measured on **commanded turning**, and that choice is doing the work. Speed conditioned on
+     * food fails twice: a well-fed organism can afford more movement, and a dense patch physically
+     * deflects whatever is inside it. Neither makes a brain *turn*, and a command cannot be
+     * deflected. The sign matters too — turning *up* where food is dense is the behaviour; the
+     * reverse is a different strategy and not this rung.
+     */
     add(
       2,
-      'Seeks',
-      'movement aligned with food: real (z ≥ 3) and worth having (mean ≥ 0.25)',
-      Math.min(seekZ / 3, seekMean / 0.25),
-      `alignment ${seekMean.toFixed(3)} (z ${seekZ.toFixed(0)})`,
+      // "Lingers" rather than "Area-restricted search": the same behaviour, in a name that fits
+      // the rail and says what it looks like from outside
+      'Lingers',
+      'turns more where food is dense, beyond the same counts shuffled in time',
+      both(cog.search, 0.05),
+      `${cog.search.effect.toFixed(3)} over shuffled, z ${cog.search.z.toFixed(1)}`,
     )
-    add(2, 'Keeps its body', 'three and a half limbs each, held', frac(this.sLimbs) / 3.5, `${frac(this.sLimbs).toFixed(2)} limbs`)
-    add(3, 'Breeds true', 'grandchildren: generation three alive', c.maxGen / 3, `gen ${c.maxGen}`)
+
+    // ---- tier 3: adaptive. Gets better within one life ---------------------------------------
+    /*
+     * Conversion, not harvest. An organism that merely grows has more limbs and so more mouths; one
+     * that drifts into a patch and stays has more food around it. Both raise the harvest rate over
+     * a life with nothing learned, and both were passing an earlier version of this rung. Meals per
+     * unit of food *exposure* separates skill from growth and from luck, because growth and luck
+     * buy encounters and only skill improves what is done with them.
+     *
+     * A sign test over organisms, because the ratio is heavy-tailed at small counts and one lucky
+     * streak would otherwise carry the statistic. Under the null — the organism's own time order
+     * carrying no trend — improving is a coin flip.
+     */
     add(
       3,
-      'Lineage outlives',
-      'a living lineage five lifetimes old',
-      meanLife > 0 ? oldestLineage / (5 * meanLife) : 0,
-      `${Math.round(oldestLineage)}t vs life ${Math.round(meanLife)}t`,
+      'Improves',
+      'organisms convert encounters into meals a quarter better late in life than early',
+      both(cog.improves, Math.log(1.25)),
+      cog.improves.n > 0 ? `${Math.round(100 * (Math.exp(cog.improves.effect) - 1))}% better late, z ${cog.improves.z.toFixed(1)}` : 'none old enough',
     )
-    add(4, 'Joins', 'order-2 or more present half the time', frac(this.sJoined) / 0.5, `joined in ${Math.round(100 * frac(this.sJoined))}% of samples`)
+
+    // ---- tier 4: cumulative. Later lives are better than earlier ones ------------------------
+    /*
+     * Among **contemporaries**, not in sequence. Generation number otherwise counts elapsed time,
+     * so any world-wide improving trend — food accumulating, a population settling — would pass
+     * this rung without a single thing being inherited. Comparing organisms alive at the same
+     * moment holds the world fixed and leaves only what descent contributed.
+     */
     add(
       4,
-      'Holds',
-      'order 3+, holding half a lifetime',
-      struct ? Math.min(struct.order / 3, struct.heldFrac / 0.5) : 0,
-      struct ? `${struct.order}° at ${Math.round(100 * struct.heldFrac)}% of a life` : 'none',
+      'Lineage improves',
+      'among organisms alive together, later generations forage better',
+      Math.min(cog.lineage.z / 3, cog.lineage.r / 0.2),
+      cog.lineage.n > 0 ? `r ${cog.lineage.r.toFixed(2)} with gen, z ${cog.lineage.z.toFixed(1)}` : 'too few',
     )
-    add(
-      4,
-      'Renews',
-      'held, with as many members replaced as it has',
-      struct ? Math.min(struct.heldFrac / 0.5, struct.replacements / Math.max(1, struct.order)) : 0,
-      struct ? `${struct.replacements} replaced of ${struct.order}` : 'none',
-    )
+
+    // ---- tier 5: social. Uses information that came from another organism --------------------
+    /*
+     * Only the part of the signal gradient **orthogonal to the food gradient** counts. Organisms
+     * cluster where food is and their limbs deposit the field, so the raw signal gradient points
+     * roughly where food does — and this rung would be passed by anything that merely follows
+     * food, which is tier 1. The orthogonal component is the only part that carries information
+     * the food gradient did not already have.
+     */
     add(
       5,
+      'Follows signal',
+      "steers by other organisms' signals, beyond what the food gradient already says",
+      both(cog.social, 0.1),
+      `${cog.social.effect.toFixed(3)} over shuffled, z ${cog.social.z.toFixed(1)}`,
+    )
+
+    // ---- tier 6: collective. The structure, not the organism, is the thing acting ------------
+    add(
+      6,
       'Moves together',
-      `a held structure covering ground ${TRAVEL_OVER_SOLO}× faster than a solitary organism manages`,
-      struct ? Math.min(struct.heldFrac / 0.25, travelRatio) : 0,
-      struct ? `${(struct.travel / Math.max(1, struct.age) / Math.max(1e-9, w.soloSpeed())).toFixed(2)}× solo speed` : 'none',
-    )
-    add(5, 'Transmits joining', 'children of joiners join twice as often as others', transmit, transmitAt)
-    add(
-      5,
-      'Grows from within',
-      'a held structure with a birth inside it',
-      struct && struct.births > 0 ? Math.min(1, struct.heldFrac / 0.5) : 0,
-      struct ? `${struct.births} births inside` : 'none',
+      `a held structure of order 3+ covering ground ${TRAVEL_OVER_SOLO}× faster than a solitary organism manages`,
+      struct && struct.order >= 3 ? Math.min(struct.heldFrac / 0.25, travelRatio) : 0,
+      !struct ? 'none' : soloMultiple === null ? `${struct.order}°, nothing solitary to compare` : `${struct.order}° at ${soloMultiple.toFixed(2)}× solo`,
     )
 
     let reached = -1
