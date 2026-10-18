@@ -1,4 +1,4 @@
-import { type Element, type FoodLevel, type FoodMode, type FoodRegime, type Init, LAWS, type Laws, applyFoodLevel, applyQuantization, initFromSeed, quantize, substepsFor } from './params'
+import { type Element, type FoodLevel, type FoodMode, type FoodRegime, type Init, type SourceMotion, type SourceRelation, LAWS, type Laws, applyFoodLevel, applyQuantization, initFromSeed, quantize, substepsFor } from './params'
 import { LEARN_DEFAULTS, type LearnAlgo } from './learning'
 import { FOOD_ROW, N_MATRIX } from './types'
 import { specFromKeys } from './fitness'
@@ -37,6 +37,22 @@ export interface WorldSpec {
   foodLevel: FoodLevel
   foodRegime: FoodRegime
   patches: number
+  /**
+   * How the source count scales with the world: `0` fixed, `1` with the world's width, `2` with its
+   * area. `patches` is the count at scale 1 and this is the exponent on `scale`.
+   *
+   * A dial rather than a decision, because the two ends are both defensible and the answer is not
+   * obvious. At 16× the world is 4,800 units across: `0` leaves `patches` sources as needles in it,
+   * `2` blankets it so uniformly that there is no gradient left to follow and food stops being a
+   * thing you navigate towards. Which regime a population can actually live in is a result, not a
+   * constant, so the search picks it.
+   */
+  sourceDensity?: number
+  /** How each source moves, and how the sources relate. Absent keeps `foodMode`'s legacy motion. */
+  sourceMotion?: SourceMotion
+  sourceRelation?: SourceRelation
+  /** Source speed as a fraction of a solitary organism's. Only read when a source axis is set. */
+  sourceSpeed?: number
   radius: number
   foodLife: number
   fission: boolean
@@ -200,7 +216,24 @@ export function specInit(spec: WorldSpec): Init {
   init.foodMode = spec.foodMode
   init.foodLevel = spec.foodLevel
   init.foodRegime = spec.foodRegime
-  init.n_patch = spec.patches
+  /*
+   * Default exponent 0, which is the legacy meaning: `patches` was taken as an absolute count
+   * regardless of scale. Defaulting to anything else would silently re-scale the source count of
+   * every spec in the existing catalog with `scale > 1` — the catalog would still resolve by id to
+   * worlds that no longer match the numbers recorded beside them.
+   *
+   * Note this is *inconsistent with `initFromSeed`*, which has always scaled its own count with
+   * area. That inconsistency is the reason this dial exists; it is now explicit instead of implied.
+   */
+  init.n_patch = Math.max(1, Math.round(spec.patches * spec.scale ** (spec.sourceDensity ?? 0)))
+  /*
+   * The new axes are only plumbed through when the spec asks for them. Absent, `stepPatches` takes
+   * its legacy branch and every saved world keeps the trajectory it had — which is the only reason
+   * this factorisation could land without re-pinning a golden.
+   */
+  if (spec.sourceMotion !== undefined) init.sourceMotion = spec.sourceMotion
+  if (spec.sourceRelation !== undefined) init.sourceRelation = spec.sourceRelation
+  if (spec.sourceSpeed !== undefined) init.sourceSpeed = spec.sourceSpeed
   init.r_patch = spec.radius
   init.food_life = spec.foodLife
   init.n_brain = spec.slots
@@ -293,6 +326,14 @@ export function specId(spec: WorldSpec): string {
     spec.scale,
     spec.learn ?? 'none',
   ]
+  /*
+   * The food-source axes, on the same terms as the law dials below: appended only when the spec
+   * sets one, so a spec that predates them hashes exactly as it did and a resumed search does not
+   * re-run the whole catalog.
+   */
+  if (spec.sourceDensity !== undefined || spec.sourceMotion !== undefined || spec.sourceRelation !== undefined || spec.sourceSpeed !== undefined) {
+    canon.push(`src:${spec.sourceDensity ?? '-'}:${spec.sourceMotion ?? '-'}:${spec.sourceRelation ?? '-'}:${spec.sourceSpeed ?? '-'}`)
+  }
   /*
    * The law dials are appended only when at least one is set, and that is deliberate.
    *

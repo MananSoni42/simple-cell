@@ -16,6 +16,18 @@ import { BRAIN, FOOD, FOOD_ROW, MATRIX_INDEX, N_MATRIX, WALL } from './types'
 
 const HALF_PI = Math.PI / 2
 const TAU = Math.PI * 2
+
+/**
+ * How often the source speed is re-measured against the population, in ticks.
+ *
+ * Not every tick: `soloBaseline` walks every organism. Not rarely either — the measurement is the
+ * difficulty setting, and a source running at last millennium's population speed is the absolute-units
+ * bug back again in slower form.
+ */
+const SRC_V_EVERY = 100
+
+/** Solitary organisms needed before their median speed is worth setting a source's speed from. */
+const SRC_MIN_SOLO = 5
 const N_IN = N_BRAIN_IN
 const N_OUT = N_BRAIN_OUT
 
@@ -434,8 +446,18 @@ export class World {
   private readonly flowIn: Float64Array
   private readonly flowE: Float64Array
   private freeFood: number[] = []
+  /**
+   * How fast a food source currently moves, in units per tick.
+   *
+   * Derived rather than configured: `sourceSpeed` is a *fraction* of how fast a solitary organism
+   * travels, so this is that fraction times a measurement of the population. Cached and refreshed
+   * on a cadence because `soloBaseline` walks every organism, and carried in the snapshot because
+   * otherwise a restore would run on a stale value for up to `SRC_V_EVERY` ticks and diverge.
+   */
+  srcV = 0
+
   /** Food patches. `ox, oy` is where a patch started, which converging colonies travel from. */
-  readonly patches: { x: number; y: number; h: number; ox: number; oy: number }[] = []
+  readonly patches: { x: number; y: number; h: number; ox: number; oy: number; dx: number; dy: number }[] = []
   /** Fractional food owed by the sun, so any arrival rate works, including less than one a tick. */
   /** Fractional food the sun still owes; part of the state, so a snapshot must carry it. */
   foodOwed = 0
@@ -637,7 +659,7 @@ export class World {
       const a = (p / Math.max(1, nPatch)) * TAU
       const x = given ? this.wrap(given[0]) : even ? this.wrap(L.SIZE / 2 + L.SIZE * 0.33 * Math.cos(a)) : this.rng.next() * L.SIZE
       const y = given ? this.wrap(given[1]) : even ? this.wrap(L.SIZE / 2 + L.SIZE * 0.33 * Math.sin(a)) : this.rng.next() * L.SIZE
-      this.patches.push({ x, y, h: this.rng.next() * TAU, ox: x, oy: y })
+      this.patches.push({ x, y, h: this.rng.next() * TAU, ox: x, oy: y, dx: 0, dy: 0 })
     }
     this.spring = [this.rng.next() * L.SIZE, this.rng.next() * L.SIZE]
 
@@ -2063,7 +2085,177 @@ export class World {
     field.set(tmp)
   }
 
+  /**
+   * Moves the food sources.
+   *
+   * Two code paths, deliberately. A world that sets neither new axis takes the **legacy** branch,
+   * which is the old code unchanged — every saved world, catalog row and golden keeps its exact
+   * trajectory, and `foodAxes` in params.ts records what each legacy `foodMode` meant on the new
+   * axes so the UI and the sampler can speak one language. A world that sets either axis takes the
+   * factored branch below.
+   *
+   * The factored branch composes two independent things, which is the whole point of the split:
+   *
+   * - **motion** moves each source relative to where it started, accumulating into `dx, dy`
+   * - **relation** places the *anchor* each of those offsets is measured from
+   *
+   * Keeping them separate is what makes relation idempotent. The obvious implementation — scale
+   * each source's distance from the middle every tick — compounds, and a converging world collapses
+   * to a point in a few dozen ticks instead of over `converge_ticks`.
+   */
   private stepPatches(): void {
+    const { init, L } = this
+    if (init.sourceMotion === undefined && init.sourceRelation === undefined) return this.stepPatchesLegacy()
+
+    if (this.tick % SRC_V_EVERY === 0) {
+      const base = this.soloBaseline()
+      // Below a handful of solitary organisms the measurement is noise, and a food source whose
+      // speed is set by noise is not a difficulty setting. Hold the last good value instead; at
+      // tick 0 that is zero, so sources sit still until there is a population to outrun.
+      if (base.n >= SRC_MIN_SOLO) this.srcV = (init.sourceSpeed ?? 0.5) * base.speed
+    }
+    const v = this.srcV
+    const motion = init.sourceMotion ?? 'wander'
+    const half = L.SIZE / 2
+
+    // --- motion: each source's offset from its own starting point ---
+    if (motion !== 'static' && v > 0) {
+      // `tide` is a *band*: every source shares one heading, so the whole field sweeps across
+      // rather than each source wandering off on its own. Source zero's heading is the band's.
+      const bandH = this.patches.length > 0 ? this.patches[0].h : 0
+      // `shy` needs the population's centre of mass once, not once per source.
+      let fx = 0
+      let fy = 0
+      if (motion === 'shy') {
+        const c = this.crowdCentre()
+        fx = c.x
+        fy = c.y
+        if (c.n === 0) fx = Number.NaN // nobody to flee: fall through to holding position
+      }
+      for (let i = 0; i < this.patches.length; i++) {
+        const p = this.patches[i]
+        switch (motion) {
+          case 'comet':
+            // straight line, constant heading. No wobble — this is the pure-pursuit control, and a
+            // random walk superimposed on it would make it a slower `wander` instead.
+            p.dx += v * Math.cos(p.h)
+            p.dy += v * Math.sin(p.h)
+            break
+          case 'orbit': {
+            // A circle about the middle, at this source's own starting radius, so a ring of sources
+            // stays a ring. Periodic, therefore it *returns* — the one pattern where remembering
+            // where food was pays off.
+            const rx = this.minImage(p.ox - half)
+            const ry = this.minImage(p.oy - half)
+            const r = Math.hypot(rx, ry)
+            if (r < 1e-6) break // a source at the exact centre has no orbit to run
+            const a0 = Math.atan2(ry, rx)
+            const a = a0 + (v * this.tick) / r // angular speed chosen so the tangential speed is v
+            p.dx = half + r * Math.cos(a) - p.ox
+            p.dy = half + r * Math.sin(a) - p.oy
+            break
+          }
+          case 'wander':
+            p.h += 0.1 * this.rng.gauss()
+            p.dx += v * Math.cos(p.h)
+            p.dy += v * Math.sin(p.h)
+            break
+          case 'tide':
+            p.dx += v * Math.cos(bandH)
+            p.dy += v * Math.sin(bandH)
+            break
+          case 'shy': {
+            if (Number.isNaN(fx)) break
+            // Directly away from the crowd. Adversarial: the better organisms are at finding food,
+            // the harder it is to keep. Most likely of the five to go degenerate, which is why it
+            // is a separate level rather than the default.
+            const ax = this.minImage(p.x - fx)
+            const ay = this.minImage(p.y - fy)
+            const d = Math.hypot(ax, ay)
+            if (d < 1e-6) break
+            p.dx += (v * ax) / d
+            p.dy += (v * ay) / d
+            break
+          }
+        }
+      }
+    }
+
+    // --- relation: where each source's offset is measured from ---
+    const rel = init.sourceRelation ?? 'independent'
+    let f = 0 // 0 = sources where they started, 1 = all at the middle
+    if (rel === 'converging' || rel === 'diverging' || rel === 'cyclical') {
+      // Held worlds wait for the word, exactly as `converging` always has: four populations that
+      // have never met stay apart until something asks them to meet, not until a counter says so.
+      const period = Math.max(1, init.converge_ticks)
+      const since = this.mergeStart === null ? 0 : this.tick - this.mergeStart
+      if (rel === 'converging') {
+        const t = Math.min(1, since / period)
+        f = t * t * (3 - 2 * t) // slow at both ends, so the meeting is gradual
+      } else if (rel === 'cyclical') {
+        f = (1 - Math.cos((TAU * since) / period)) / 2 // apart, merged, apart, for ever
+      } else {
+        // Diverging is converging run backwards: negative f pushes a source further out than it
+        // began. Capped, because past about one extra radius every source is against the same
+        // wrap-around and "spread out" stops meaning anything on a torus.
+        const t = Math.min(1, since / period)
+        f = -(t * t * (3 - 2 * t))
+      }
+    }
+    for (const p of this.patches) {
+      let ax = p.ox
+      let ay = p.oy
+      if (f !== 0) {
+        ax = p.ox + this.minImage(half - p.ox) * f
+        ay = p.oy + this.minImage(half - p.oy) * f
+      }
+      if (rel === 'formation' && this.patches.length > 0) {
+        // One source leads and the rest hold their spacing, so the *pattern* travels. Distinct from
+        // `tide`, where each source accumulates its own offset and rounding slowly shears the band.
+        p.x = this.wrap(ax + this.patches[0].dx)
+        p.y = this.wrap(ay + this.patches[0].dy)
+      } else {
+        p.x = this.wrap(ax + p.dx)
+        p.y = this.wrap(ay + p.dy)
+      }
+    }
+  }
+
+  /**
+   * Where the organisms are massed, as a wrapped centre of mass.
+   *
+   * Wrapped, which is why this is not a plain mean: averaging raw coordinates on a torus puts the
+   * centre of two organisms either side of the seam in the middle of the empty half. Summing unit
+   * vectors of the angular coordinate and taking the argument back is the circular mean, which does
+   * not have that failure.
+   */
+  private crowdCentre(): { x: number; y: number; n: number } {
+    const { L } = this
+    let n = 0
+    let cx = 0
+    let sx = 0
+    let cy = 0
+    let sy = 0
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      if (!this.alive[b] || !this.isBrain(b)) continue
+      const ax = (TAU * this.x[b]) / L.SIZE
+      const ay = (TAU * this.y[b]) / L.SIZE
+      cx += Math.cos(ax)
+      sx += Math.sin(ax)
+      cy += Math.cos(ay)
+      sy += Math.sin(ay)
+      n++
+    }
+    if (n === 0) return { x: 0, y: 0, n: 0 }
+    const wrapBack = (c: number, si: number): number => {
+      const a = Math.atan2(si / n, c / n)
+      return ((a < 0 ? a + TAU : a) * L.SIZE) / TAU
+    }
+    return { x: wrapBack(cx, sx), y: wrapBack(cy, sy), n }
+  }
+
+  /** The pre-factorisation source motion, byte for byte, for every world that predates the axes. */
+  private stepPatchesLegacy(): void {
     const { init, L } = this
     if (init.foodMode === 'converging' || init.foodMode === 'breathing') {
       // How far along the walk to the middle each colony is. Converging goes one way and stays;

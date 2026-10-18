@@ -97,7 +97,13 @@ Note the correction: an earlier claim in these docs that **comet food does not m
 moves, at `max(1.5, v_patch·12)` per tick, which is the real bug. A target that outruns its pursuer
 is not a chase.
 
-### The change
+### The change — **done**
+
+`foodMode` was one enum doing three jobs, which is exactly why "how many sources" and "how they
+relate" had nowhere to live. It is now three axes: **pattern** (where food lands around a source),
+**motion** (how each source moves), **relation** (how the sources relate to each other), plus
+`sourceSpeed` and `sourceDensity`. R4.1c–R4.1e. Worlds that set none of the new axes take a
+byte-identical legacy path and hash to the same id, so the existing catalog still means what it says.
 
 **Speed expressed as a fraction of organism speed, not in absolute units.** A `sourceSpeed` dial at
 0.2 / 0.5 / 0.8 × the measured solitary-organism speed is catchable by construction and stays
@@ -117,6 +123,12 @@ selects for rather than only whether it helps:
 **`comet` / `orbit` / `wander` at matched speed is the experiment**: identical difficulty, differing
 only in predictability, which isolates tracking from anticipating. Anticipation is the one item there
 that bears on intelligence rather than reflexes.
+
+**Two relations beyond the legacy pair.** `diverging` drives apart populations that had met, and
+`formation` moves the whole pattern while preserving spacing — a sweep that does not shear, where
+`tide` accumulates per-source offsets that slowly do. Together with `sourceDensity`, these are what
+make a 16× world a *different* world rather than a scaled-up small one: at exponent 0 four sources
+are needles in 4,800 units, at exponent 2 they blanket it and food stops being navigable.
 
 **One static mode is kept deliberately.** `spring` stays fixed as the control — otherwise "moving
 food improves the rungs" becomes an assumption we can never test. Same discipline as keeping
@@ -268,8 +280,8 @@ alongside.
 2. **M5 and M6** — a defeated statistic that is selectable as a search objective, and a zero-sum
    score that can hide progress. Both can corrupt a search's conclusions rather than merely weaken
    them.
-3. **Food dynamics (§2)** — speed relative to organism speed, then comet/orbit/wander/tide, keeping
-   `spring` static as the control.
+3. ~~**Food dynamics (§2)**~~ — **done**: three axes, speed as a fraction of organism speed,
+   `static` kept as the control, `shy` built but held back until the other five are measured.
 4. **B0 — the parallel sweep runner at thirty seeds**, then re-run `senses`, `learners` and `cap`.
    Every earlier verdict was taken on a metric since shown to be noise above tier 0.
 5. **M1–M4** as the measurements argue for them.

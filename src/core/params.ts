@@ -157,7 +157,87 @@ export const LAWS = {
 export type Laws = { [K in keyof typeof LAWS]: number }
 
 /** Where food lands. */
+/**
+ * Where food lands around a source.
+ *
+ * This used to mean three things at once — where food lands, how a source moves, and how several
+ * sources relate to each other — which is why "number of sources" and "their relation" had nowhere
+ * to live. `converging` and `breathing` were *relations* masquerading as placements; `comet` was a
+ * *motion*. They are kept as names for backward compatibility (every saved world and catalog row
+ * uses them) and are translated into the three axes by `foodAxes` below.
+ */
 export type FoodMode = 'random' | 'patchy' | 'gradient' | 'converging' | 'breathing' | 'spring' | 'comet' | 'ring'
+
+/**
+ * How each food source moves. Speeds are a **fraction of how fast an organism travels**, not
+ * absolute units — see `sourceSpeed`.
+ *
+ * A static source makes the optimal policy a constant: find it once, stop. Nothing to track, nothing
+ * to re-acquire, nothing to improve at. It also underwrites three rung exploits that all need food
+ * at a fixed location. These are chosen to be *contrastive*, so a search can answer what moving food
+ * selects for rather than only whether it helps.
+ */
+export type SourceMotion =
+  /** Fixed. Kept deliberately as the control, so "moving food helps" stays measurable. */
+  | 'static'
+  /** Straight line, constant heading, wrapping. Rewards pure pursuit. */
+  | 'comet'
+  /** Circles the world centre. Periodic and predictable, so it *returns* — rewards anticipation. */
+  | 'orbit'
+  /** Random walk at the same speed as `orbit`. Tracking without anticipation; the control for it. */
+  | 'wander'
+  /** A band sweeping across and wrapping. Rewards positioning rather than chasing. */
+  | 'tide'
+  /** Flees the densest cluster of organisms. Anti-camping, and the one most likely to degenerate. */
+  | 'shy'
+
+export const SOURCE_MOTIONS: readonly SourceMotion[] = ['static', 'comet', 'orbit', 'wander', 'tide', 'shy']
+
+/**
+ * How several sources relate to each other — the axis that matters most in a large world.
+ *
+ * At 16× the world is 4,800 units across and a single source is a needle in it; what decides whether
+ * a population can live is whether the sources are spread, gathering, or scattering, and whether
+ * that changes over time.
+ */
+export type SourceRelation =
+  /** Each source moves on its own. No relationship. */
+  | 'independent'
+  /** All sources close on the world's middle and stay. Isolated populations end up meeting. */
+  | 'converging'
+  /** All sources spread outward from where they began. Populations that met are driven apart. */
+  | 'diverging'
+  /** Converge and diverge for ever, so isolation and contact keep alternating. */
+  | 'cyclical'
+  /** Sources keep their spacing and move as a formation — the whole pattern travels. */
+  | 'formation'
+
+export const SOURCE_RELATIONS: readonly SourceRelation[] = ['independent', 'converging', 'diverging', 'cyclical', 'formation']
+
+/**
+ * The three axes a legacy `foodMode` stands for.
+ *
+ * One place, so the old names keep meaning exactly what they meant while the new axes become the
+ * thing the search and the UI actually vary.
+ */
+export function foodAxes(m: FoodMode): { motion: SourceMotion; relation: SourceRelation; sources: number | null } {
+  switch (m) {
+    case 'comet':
+      return { motion: 'comet', relation: 'independent', sources: 1 }
+    case 'spring':
+      return { motion: 'static', relation: 'independent', sources: 1 }
+    case 'converging':
+      return { motion: 'wander', relation: 'converging', sources: null }
+    case 'breathing':
+      return { motion: 'wander', relation: 'cyclical', sources: null }
+    case 'ring':
+    case 'gradient':
+      return { motion: 'static', relation: 'independent', sources: null }
+    default:
+      // `patchy` and `random` drifted independently at `v_patch`, which is what `wander` is
+      return { motion: 'wander', relation: 'independent', sources: null }
+  }
+}
 export const FOOD_MODES: readonly FoodMode[] = [
   'random',
   'patchy',
@@ -339,6 +419,23 @@ export interface Init {
   T_food: number
   T_spawn: number
   n_patch: number
+  /**
+   * How each source moves, and how the sources relate to each other.
+   *
+   * Absent means "whatever the legacy `foodMode` implied" — see `foodAxes` — so every saved world
+   * and catalog row keeps behaving as it did.
+   */
+  sourceMotion?: SourceMotion
+  sourceRelation?: SourceRelation
+  /**
+   * Source speed as a **fraction of how fast a solitary organism travels**, measured in-world.
+   *
+   * Absolute units were the bug: `comet` moved at 0.363 units a tick against an organism's 0.196, so
+   * the target outran its pursuer — not a chase but an impossibility — while three other modes sat
+   * at exactly zero. A fraction is catchable by construction and stays meaningful when metabolism or
+   * `F_max` changes.
+   */
+  sourceSpeed?: number
   r_patch: number
   v_patch: number
   /**

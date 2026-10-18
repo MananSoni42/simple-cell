@@ -351,6 +351,64 @@ rate(tick) = level × sustenance × regime(tick)        and the pattern decides 
 | `comet` | one fast source crossing the world, so food is a target to be chased rather than a place |
 | `ring` | a closed band around the middle — a circuit rather than a field |
 
+Three of those names are doing a different job from the rest, and R4.1c is the correction.
+`converging` and `breathing` describe how sources **relate to each other**; `comet` describes how a
+source **moves**. Only the other five describe where food lands. They are kept — the catalog is
+large and every row in it means what it said — but they are translated onto the axes below.
+
+**R4.1c — The three source axes.** A source has a *pattern* (above), a *motion*, and a *relation*
+to the other sources. A world that sets none of the last two keeps the legacy motion its `foodMode`
+implied, byte for byte.
+
+**Motion** — how each source moves:
+
+| | |
+|---|---|
+| `static` | fixed. Kept deliberately, as the control: otherwise "moving food helps" is an assumption, not a result |
+| `comet` | straight line, constant heading, wrapping. Pure pursuit |
+| `orbit` | circles the middle at the source's own starting radius. Periodic, so it **returns** — the only motion where remembering pays |
+| `wander` | random walk at the same speed. Tracking *without* anticipation; the control for `orbit` |
+| `tide` | every source shares one heading, so the field sweeps across as a band. Positioning, not chasing |
+| `shy` | moves directly away from the population's centre of mass. Anti-camping, and adversarial |
+
+`comet` / `orbit` / `wander` **at matched speed is the experiment**: identical difficulty, differing
+only in predictability, which is what separates tracking from anticipating.
+
+**Relation** — how the sources relate:
+
+| | |
+|---|---|
+| `independent` | each moves on its own |
+| `converging` | all close on the middle over `converge_ticks` and stay. What legacy `converging` did |
+| `diverging` | all spread outward from where they began. Populations that met are driven apart |
+| `cyclical` | converge and diverge for ever. What legacy `breathing` did |
+| `formation` | sources hold their spacing and the whole pattern travels |
+
+Converging, diverging and cyclical **wait for `mergeStart`**, exactly as legacy `converging` did: a
+held world's colonies stay apart until something asks them to meet, not until a counter says so.
+
+Motion and relation compose through a deliberate split — motion accumulates a per-source offset
+`(dx, dy)` from where that source started, and relation decides the *anchor* that offset is measured
+from. Keeping them separate is what makes relation idempotent. The obvious implementation, scaling
+each source's distance from the middle every tick, compounds: a converging world collapses to a
+point in a few dozen ticks instead of over `converge_ticks`.
+
+**R4.1d — Source speed is a fraction of organism speed.** `sourceSpeed` multiplies a running
+measurement of how fast a *solitary* organism travels (`soloBaseline`, re-measured every 100 ticks
+and carried in the snapshot). Absolute units were the bug: legacy `comet` moved at
+`max(1.5, v_patch·12)`, measured at 0.363 units a tick against an organism's 0.196 — **1.9×, so the
+target outran its pursuer** — while four other modes sat at exactly zero. A fraction is catchable by
+construction and stays meaningful when metabolism or `F_max` change. Below five solitary organisms
+the measurement is noise, so the last good value is held; at tick 0 that is zero.
+
+**R4.1e — Source count scales how the search says.** `n_patch = patches · scale^sourceDensity`,
+with the exponent 0 (fixed), 1 (with the world's width) or 2 (with its area). A dial rather than a
+decision: at 16× the world is 4,800 units across, where exponent 0 leaves four sources as needles in
+it and exponent 2 blankets it so evenly that there is no gradient left to navigate towards. Which
+regime a population can live in is a result. Default 0, which is what `patches` always meant for a
+spec; note `initFromSeed` has always scaled with area instead, and that inconsistency is now
+explicit rather than implied.
+
 **R4.1b — Level: how much.** `scarce` / `average` / `abundant`, as multiples of
 `sustenanceRate` — what the world spends per tick on upkeep and on loose matter bleeding away.
 Expressing it this way means a level means the same thing at any world size.

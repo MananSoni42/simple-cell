@@ -20,7 +20,7 @@ export interface Snapshot {
   wBirthBrain: Float64Array
   /** Four flags per matter slot: live limb, live brain, birth limb, birth brain. */
   wHas: Uint8Array
-  patches: Float64Array // x, y, h, ox, oy per patch
+  patches: Float64Array // x, y, h, ox, oy, dx, dy per patch
   patchCount: number
   rng: [number, number | null]
   field: Float64Array
@@ -81,7 +81,7 @@ export function allocSnapshot(w: World): Snapshot {
   return {
     tick: 0,
     bytes: new ArrayBuffer(total),
-    scalars: new Float64Array(16),
+    scalars: new Float64Array(17),
     // sized by every matter slot, not just the brain slots: a spore carries its genome on an
     // intrinsic particle, and birth weights can exist for any organism
     wLimb: new Float64Array(w.nMatter * N_WLIMB),
@@ -89,7 +89,7 @@ export function allocSnapshot(w: World): Snapshot {
     wBirthLimb: new Float64Array(w.nMatter * N_WLIMB),
     wBirthBrain: new Float64Array(w.nMatter * w.brainWeightCount),
     wHas: new Uint8Array(w.nMatter * 4),
-    patches: new Float64Array(Math.max(1, w.patches.length) * 5),
+    patches: new Float64Array(Math.max(1, w.patches.length) * 7),
     patchCount: 0,
     rng: [0, null],
     field: new Float64Array(w.field.length),
@@ -129,6 +129,7 @@ export function writeSnapshot(w: World, snap: Snapshot): Snapshot {
   snap.scalars[13] = w.nGerminated
   snap.scalars[14] = w.nConjugated
   snap.scalars[15] = w.lightWasted
+  snap.scalars[16] = w.srcV
   /*
    * Weights for **every matter slot**, not just the brain slots.
    *
@@ -160,11 +161,13 @@ export function writeSnapshot(w: World, snap: Snapshot): Snapshot {
   snap.patchCount = w.patches.length
   for (let i = 0; i < w.patches.length; i++) {
     const p = w.patches[i]
-    snap.patches[i * 5] = p.x
-    snap.patches[i * 5 + 1] = p.y
-    snap.patches[i * 5 + 2] = p.h
-    snap.patches[i * 5 + 3] = p.ox
-    snap.patches[i * 5 + 4] = p.oy
+    snap.patches[i * 7] = p.x
+    snap.patches[i * 7 + 1] = p.y
+    snap.patches[i * 7 + 2] = p.h
+    snap.patches[i * 7 + 3] = p.ox
+    snap.patches[i * 7 + 4] = p.oy
+    snap.patches[i * 7 + 5] = p.dx
+    snap.patches[i * 7 + 6] = p.dy
   }
   snap.rng = w.rng.state()
   snap.field.set(w.field)
@@ -209,6 +212,7 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   w.nGerminated = snap.scalars[13]
   w.nConjugated = snap.scalars[14]
   w.lightWasted = snap.scalars[15]
+  w.srcV = snap.scalars[16]
   const nb = w.brainWeightCount
   for (let b = 0; b < w.nMatter; b++) {
     w.wLimb[b] = snap.wHas[b * 4] ? snap.wLimb.slice(b * N_WLIMB, (b + 1) * N_WLIMB) : undefined
@@ -219,8 +223,9 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   w.patches.length = 0
   for (let i = 0; i < snap.patchCount; i++) {
     w.patches.push({
-      x: snap.patches[i * 5], y: snap.patches[i * 5 + 1], h: snap.patches[i * 5 + 2],
-      ox: snap.patches[i * 5 + 3], oy: snap.patches[i * 5 + 4],
+      x: snap.patches[i * 7], y: snap.patches[i * 7 + 1], h: snap.patches[i * 7 + 2],
+      ox: snap.patches[i * 7 + 3], oy: snap.patches[i * 7 + 4],
+      dx: snap.patches[i * 7 + 5], dy: snap.patches[i * 7 + 6],
     })
   }
   w.rng.setState(snap.rng)

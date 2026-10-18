@@ -1,6 +1,6 @@
 import { N_TRI, REPRO_MODES, TRI, type WorldSpec } from './catalog'
 import type { Element } from './params'
-import { LAWS, QUANTA, type FoodLevel, type FoodMode, type FoodRegime } from './params'
+import { LAWS, QUANTA, SOURCE_MOTIONS, SOURCE_RELATIONS, type FoodLevel, type FoodMode, type FoodRegime } from './params'
 import { Rng } from './rng'
 import { BRAIN_ROW, FOOD_ROW } from './types'
 
@@ -45,6 +45,20 @@ const DIALS = {
   foodLevel: ['scarce', 'average', 'abundant'] as FoodLevel[],
   foodRegime: ['steady', 'cycle', 'bloom', 'noisy'] as FoodRegime[],
   patches: [1, 2, 3, 4],
+  /*
+   * Fixed / with the width / with the area. Three levels rather than a continuum because this is
+   * read as an exponent, and the question it settles is categorical: is a big world a big version
+   * of a small one, or a sparser one?
+   */
+  sourceDensity: [0, 1, 2],
+  sourceMotion: SOURCE_MOTIONS,
+  sourceRelation: SOURCE_RELATIONS,
+  /*
+   * As a fraction of how fast a solitary organism travels. 0.8 is a chase that can be won by a good
+   * swimmer and lost by a mediocre one; 1.2 is included on purpose as the uncatchable control, so
+   * "the source outran its pursuer" stays a level we can point at rather than a bug we shipped.
+   */
+  sourceSpeed: [0.2, 0.5, 0.8, 1.2],
   radius: [30, 50, 70],
   foodLife: [0, 150, 250, 600],
   fission: [true, false],
@@ -212,6 +226,10 @@ function dials(rng: Rng, spec: Partial<WorldSpec> = {}): Omit<WorldSpec, 'seed' 
     foodLevel: spec.foodLevel ?? pick(rng, DIALS.foodLevel),
     foodRegime: spec.foodRegime ?? pick(rng, DIALS.foodRegime),
     patches: spec.patches ?? pick(rng, DIALS.patches),
+    sourceDensity: spec.sourceDensity ?? pick(rng, DIALS.sourceDensity),
+    sourceMotion: spec.sourceMotion ?? pick(rng, DIALS.sourceMotion),
+    sourceRelation: spec.sourceRelation ?? pick(rng, DIALS.sourceRelation),
+    sourceSpeed: spec.sourceSpeed ?? pick(rng, DIALS.sourceSpeed),
     radius: spec.radius ?? pick(rng, DIALS.radius),
     foodLife: spec.foodLife ?? pick(rng, DIALS.foodLife),
     fission: spec.fission ?? pick(rng, DIALS.fission),

@@ -95,11 +95,12 @@ const Q_CRIT: readonly number[] = [0, 0, 2.77, 3.31, 3.63, 3.86, 4.03, 4.17, 4.2
 /**
  * How many factors a full report contains, for the family-wide correction.
  *
- * Counted rather than guessed: ~26 dials, 20 couplings, 4 shapes and a source. Hardcoding it is
+ * Counted rather than guessed: ~30 dials (four of them the food-source axes), 20 couplings, 4 shapes
+ * and a source. Hardcoding it is
  * the weak part of this — add a factor and the constant should move — so it is deliberately an
  * over-estimate, which errs toward calling fewer things real.
  */
-const FAMILY = 55
+const FAMILY = 60
 
 /**
  * Normal quantile, Acklam's rational approximation. Accurate to about 1e-9 over (0,1), which is
@@ -171,6 +172,10 @@ export function dialFactors(rows: CatalogEntry[]): Factor[] {
   const bucket = (v: number, step: number): string => (Math.round(v / step) * step).toFixed(2)
   return [
     factor('food pattern', group(rows, (e) => e.spec.foodMode)),
+    factor('source motion', group(rows, (e) => e.spec.sourceMotion ?? 'legacy')),
+    factor('source relation', group(rows, (e) => e.spec.sourceRelation ?? 'legacy')),
+    factor('source speed', group(rows, (e) => String(e.spec.sourceSpeed ?? '-'))),
+    factor('source density', group(rows, (e) => String(e.spec.sourceDensity ?? 0))),
     factor('food level', group(rows, (e) => e.spec.foodLevel)),
     factor('food over time', group(rows, (e) => e.spec.foodRegime)),
     factor('metabolism', group(rows, (e) => bucket(e.spec.metabolism, 0.25))),
