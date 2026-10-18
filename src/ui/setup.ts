@@ -273,7 +273,7 @@ export function mountSetup(
         value: init.T,
         curve: 'log',
         hint: (v) => {
-          const s = stability({ ...init, T: v })
+          const s = stability({ ...init, T: v }, { ...LAWS, ...init.laws })
           if (!s.ok) return 'too hot for this step size — sub-steps will be raised to suit'
           if (v < 1) return 'very cold: whatever forms will freeze in place'
           if (v < 4) return 'cold: structures hold together'
@@ -378,13 +378,15 @@ export function mountSetup(
   const paintStability = (): void => {
     const el = root.querySelector<HTMLElement>('#s-stab')
     if (!el) return
-    const s = stability(init)
+    const s = stability(init, { ...LAWS, ...init.laws })
     el.hidden = s.ok
     if (s.ok) return
-    const need = substepsFor(init)
+    const need = substepsFor(init, { ...LAWS, ...init.laws })
     el.innerHTML =
+      // the ratio is against the **smallest pair exclusion in this world**, since exclusion is the
+      // sum of two radii and the element table can make that much smaller than the old constant
       `<b class="warn">steps too long</b> — a particle moves ${s.sigma.toFixed(2)} per sub-step, ` +
-      `${Math.round(s.sigmaRatio * 100)}% of its own radius, so it can pass straight through things.` +
+      `${Math.round(s.sigmaRatio * 100)}% of the closest two particles' own exclusion, so it can pass straight through them.` +
       (need > 1 ? ` Needs ${need} sub-steps, or less heat.` : ' Lower the temperature.')
   }
 
@@ -498,7 +500,7 @@ export function mountSetup(
       lawSlider('bonds per particle', 'max_bonds', 1, 8, 1, (v) => (v <= 2 ? 'two admits only chains and rings — never a sheet' : `up to ${Math.round(v)} neighbours, so a particle can sit inside a sheet`), true),
       new Toggle({
         label: 'the chemistry evolves',
-        hint: 'a bonded particle with energy to spare copies itself into a slot decay has emptied, mutating its own affinities. Only *bonded* particles can copy, so what gets selected is chemistry that gets itself attached where energy flows — measured, affinity to food rises against the pull of mutation alone',
+        hint: 'a bonded particle with energy to spare copies itself into a slot decay has emptied, mutating its own affinities. Only bonded particles can copy, so what gets selected is chemistry that gets itself attached where energy flows. Measured: affinity to matter falls far below what mutation alone gives, which is the opposite of the obvious prediction — an earlier claim that food affinity rises was an artefact of a bug and is retracted',
         value: init.templating,
         onChange: (v) => {
           init.templating = v
@@ -546,7 +548,18 @@ export function mountSetup(
    * works in both.
    */
   const ELEMENT_COLS: { key: keyof Elem; label: string; min: number; max: number; step: number; dp: number; what: string }[] = [
-    { key: 'radius', label: 'size', min: 1, max: 14, step: 0.5, dp: 1, what: 'hard core; a pair parts at the sum of their two radii' },
+    {
+      key: 'radius',
+      label: 'size',
+      // floored at d_max/2: a pair must exclude each other at a distance one tick's motion cannot
+      // cross, and exclusion is the sum of two radii. `elementsOf` clamps it anyway, so without
+      // this the grid would offer values it silently discards
+      min: LAWS.d_max / 2,
+      max: 14,
+      step: 0.5,
+      dp: 1,
+      what: 'hard core; a pair parts at the sum of their two radii, and cannot part closer than one tick of motion',
+    },
     { key: 'mobility', label: 'mass', min: 0.02, max: 3, step: 0.02, dp: 2, what: 'mobility. A heavy type ends up MORE bonded, not less: it is not dragged out of its bonds' },
     { key: 'valence', label: 'bonds', min: 0, max: 8, step: 1, dp: 0, what: 'how many neighbours it can hold; two admits only chains and rings' },
     { key: 'bondStrength', label: 'strength', min: 0, max: 4, step: 0.05, dp: 2, what: 'multiplies forming and breaking; a bond takes the WEAKER of its partners' },

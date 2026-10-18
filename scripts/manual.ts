@@ -74,7 +74,8 @@ for (const name of HAND_BUILT_NAMES) {
     seeds: 1,
     at: Date.now(),
     source: undefined,
-    why: `manual · ${h.rung === '(none — the control)' ? 'the do-nothing control' : `built for ${h.rung}`} — ${h.describe}`,
+    // the two policies that are not built *for* a rung get named for what they are instead
+    why: `manual · ${h.rung.startsWith('(none') ? h.rung.replace(/^\(none — (.*)\)$/, '$1') : `built for ${h.rung}`} — ${h.describe}`,
   })
   console.log(`${name.padEnd(15)} level ${String(r.level).padStart(2)} score ${r.score.toFixed(2).padStart(6)} · ${passed} rungs met · ${h.rung}`)
 }
