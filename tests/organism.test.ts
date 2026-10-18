@@ -3,13 +3,13 @@ import { IncompatibleOrganism, exportOrganism, parseOrganism } from '../src/core
 import { applyWallStamp, initFromSeed } from '../src/core/params'
 import { WALL } from '../src/core/types'
 import { World } from '../src/core/world'
+import { noBootstrap, placeOne } from './helpers'
 
 describe('organism export and import', () => {
   it('round-trips an organism, weights intact, and places a working copy', () => {
-    const w = new World(initFromSeed(5))
-    for (let t = 0; t < 600; t++) w.step()
-    const b = [...Array(w.nMatter).keys()].find((i) => i >= w.nIntr && w.alive[i] && w.isBrain(i))!
-    const file = exportOrganism(w, b)!
+    // placed, not found: this is about the file format, not about whether a world grows a body
+    const w = new World(noBootstrap({ ...initFromSeed(5), n_start: 0 }))
+    const file = exportOrganism(w, placeOne(w, 3))!
     expect(file.limbs.length).toBeGreaterThan(0)
     expect(file.wBrain.length).toBe(w.brainWeightCount)
 
@@ -65,7 +65,13 @@ describe('terrain', () => {
         k += 2
       }
       expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 6)
-      expect(w.nFood).toBeGreaterThan(0) // food still works around the walls
+      /*
+       * That food *arrived*, not that it is sitting uneaten. Standing food is now routinely zero:
+       * every loose particle can eat and there are two hundred of them, so the sun's output is
+       * consumed rather than accumulating. `nFood > 0` was measuring how much food was going to
+       * waste, which is not what "food still works around the walls" means.
+       */
+      expect(w.injected, walls).toBeGreaterThan(0)
     }
   })
 

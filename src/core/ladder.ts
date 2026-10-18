@@ -57,28 +57,28 @@ import type { World } from './world'
 export const LEVELS = ['Viable', 'Reactive', 'Discriminative', 'Adaptive', 'Cumulative', 'Social', 'Collective'] as const
 
 /**
- * How fast a structure must travel relative to a lone organism to count as moving together.
+ * How much better than its world a structure's members must agree, to count as moving together.
  *
- * **0.8, not above 1, and the reason is physics rather than generosity.** This was 1.5 on the
- * argument that merely equalling a solitary organism shows only that joining did not *cost*
- * mobility — which read well and is unreachable. The dynamics are overdamped, so velocity goes as
- * force over drag, and in a structure of N members *both* scale with N: a perfectly coherent
- * structure moves at exactly solo speed and no faster. Requiring 1.5 asked for a structure that
- * outruns its own parts, which nothing can do, so the rung could never be passed by anything.
+ * **1.0 is the null itself**, which is the cleanest calibration available and is why this is not a
+ * tuned number. The statistic is the structure's command agreement above chance divided by the same
+ * figure over every organism alive, so it is 1.0 exactly when a structure agrees no better than the
+ * world it sits in — whether that world is incoherent or swept by a common current.
  *
- * Equalling solo speed is the right claim after all, because the alternative is what actually
- * happens: members pulling in different directions cancel, and an incoherent structure's centroid
- * crawls. So the measure discriminates between about 1.0 for a coherent structure and far below it
- * for a clump of independent swimmers — and 0.8 sits in that gap with margin on both sides.
+ * The previous value, 0.8, became actively wrong when the statistic changed: dividing by it meant
+ * passing structures that agreed *less* than their world. It dated from a measure of centroid speed
+ * against a solitary baseline, and all four versions of that baseline failed — see `agreement` in
+ * orders.ts and tests/coordination.test.ts for which, and what each one read.
+ *
+ * Measured margins either side: an unaided world reads 0.37, and a synthetic structure agreeing
+ * genuinely better than its world reads 1.2 under a strong global current and above 3 under a weak
+ * one. The gap is real in both directions.
  */
-const TRAVEL_OVER_SOLO = 0.8
+const AGREE_OVER_WORLD = 1.0
 
 /** A structure has to be this big, and this old in ticks, before either collective rung reports. */
 const STRUCT_MIN_ORDER = 3
 const STRUCT_MIN_AGE = 500
 
-/** How many solitary organisms the travel baseline needs before it is a baseline at all. */
-const SOLO_MIN_N = 5
 
 /**
  * How fast the solitary population must itself be moving for a comparison against it to mean
@@ -89,7 +89,6 @@ const SOLO_MIN_N = 5
  * structure drifting slightly faster than a near-zero denominator gives an enormous ratio. You
  * cannot measure "keeps up with a solitary organism" against a population that is standing still.
  */
-const SOLO_MIN_SPEED = 0.02
 
 /** Coasting times a structure must outlast to count as holding together. */
 const HOLD_COASTS = 3
@@ -247,9 +246,26 @@ export class LadderTracker {
     let travelMult = 0
     let holdCoasts = 0
     if (st && st.order >= STRUCT_MIN_ORDER) {
-      const solo = w.soloBaseline()
-      if (st.age >= STRUCT_MIN_AGE && solo.speed >= SOLO_MIN_SPEED && solo.n >= SOLO_MIN_N) {
-        travelMult = st.travel / st.age / solo.speed
+      /*
+       * **The structure's own members, before they joined.** A within-organism null, because every
+       * between-group baseline tried here failed for a different reason and each failure looked
+       * like the rung working — see `preJoinSpeed` in world.ts for the three and what each read.
+       *
+       * Size, anchoring and whereabouts are all held constant by construction, because it is the
+       * same organism on both sides of the comparison. The floors are unchanged in spirit: enough
+       * members contributing a baseline, and a baseline that is actually moving, since a ratio
+       * against something stationary is a division by noise.
+       */
+      /*
+       * Against chance, not against other organisms. `align` is how well the members' commanded
+       * forces point the same way, and random commands align at `1 / sqrt(N)` — so the ratio below
+       * is 1.0 for a structure whose members are pulling no better than at random, and above 1 only
+       * if something is coordinating them. See `align` in orders.ts for why no population baseline
+       * can do this job in a world that bonds this readily.
+       */
+      if (st.age >= STRUCT_MIN_AGE && st.alignN >= STRUCT_MIN_ORDER && st.alignPop > 1e-6) {
+        // the structure's agreement above chance, against the world's: 1.0 when they agree alike
+        travelMult = st.align / st.alignPop
       }
       const coast = this.medianCoast()
       if (coast > 1e-9) holdCoasts = st.age / coast
@@ -362,7 +378,7 @@ export class LadderTracker {
       return xs.length === 0 ? 0 : xs[xs.length >> 1]
     }
     const soloMultiple = medianOfQualifying(this.sTravel)
-    const travelRatio = soloMultiple / TRAVEL_OVER_SOLO
+    const travelRatio = soloMultiple / AGREE_OVER_WORLD
     /*
      * Hold keeps the **maximum**, and the asymmetry is deliberate: its denominator is a coasting
      * time, which is stable and positive, so there is no small-denominator hazard — and "a
@@ -509,10 +525,10 @@ export class LadderTracker {
     add(
       6,
       'Moves together',
-      `a structure of order ${STRUCT_MIN_ORDER}+ keeping up with a solitary organism (${TRAVEL_OVER_SOLO}×), rather than cancelling itself out`,
+      `a structure of order ${STRUCT_MIN_ORDER}+ whose members pull together better than the world does`,
       travelRatio,
       soloMultiple > 0
-        ? `${soloMultiple.toFixed(2)}× solo at best`
+        ? `${soloMultiple.toFixed(2)}× the world's own agreement`
         : !struct
           ? 'none'
           : struct.order < STRUCT_MIN_ORDER

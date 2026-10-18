@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { pairForce, pairPotential } from '../src/core/forces'
 import { LifeTracker, RollingMean, summarize } from '../src/core/lifestats'
-import { census, clusterStats, lifeStats, meanClusterSize, massByType, potentialEnergy, stateHash } from '../src/core/metrics'
+import { census, clusterStats, lifeStats, meanClusterSize, massTotals, potentialEnergy, stateHash } from '../src/core/metrics'
 import { type Init, LAWS, type Laws, QUANTA, initFromSeed, stability, substepsFor } from '../src/core/params'
 import { Rng } from '../src/core/rng'
 import { serialBackend } from '../src/core/backend'
@@ -81,11 +81,11 @@ describe('invariants', () => {
   it('conserves matter, closes the energy ledger, and keeps rods geometric', () => {
     const init = smallInit({ T_spawn: 20, T_food: 1, T: 1 })
     const w = new World(init, SMALL)
-    const mass0 = massByType(w)
+    const mass0 = massTotals(w)
     for (let t = 0; t < 1500; t++) {
       w.step()
       if (t % 50 === 0) {
-        expect(massByType(w)).toEqual(mass0)
+        expect(massTotals(w)).toEqual(mass0)
         expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 6)
         for (let i = 0; i < w.cap; i++) {
           if (!w.alive[i]) continue

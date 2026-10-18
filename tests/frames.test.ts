@@ -5,7 +5,13 @@ import { allocFrame, frameState, layoutOf, worldState, writeFrame } from '../src
 
 describe('published frames', () => {
   it('reproduce what the renderer reads from a live world', () => {
-    const w = new World({ ...initFromSeed(3, 2), inflow: true })
+    /*
+     * `n_start` seeds the population outright. This is a test of frame fidelity — that what the
+     * renderer reads matches the live world — so it needs a populated world, not a world that
+     * proves it can populate itself. A body now has to eat its way over an activation barrier, so
+     * 300 ticks of a fresh world yields about four organisms where this once assumed a dozen.
+     */
+    const w = new World({ ...initFromSeed(3, 2), inflow: true, n_start: 24 })
     for (let t = 0; t < 300; t++) w.step()
     const layout = layoutOf(w)
     const f = allocFrame(layout)

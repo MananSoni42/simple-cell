@@ -33,6 +33,14 @@ export interface OrderStats {
    * is still there is the first thing in this world worth calling alive.
    */
   oldest: {
+    /** Mean limbs per member, for a size-matched travel baseline. */
+    meanLimbs: number
+    /** Members' command agreement above chance, in [0,1]: the travel rung's physical counterfactual. */
+    align: number
+    /** How many members contributed to `align`. */
+    alignN: number
+    /** The same agreement over every organism alive: the shared-environment control. */
+    alignPop: number
     /** The order it has **now** — what a gate asking "is this a structure" must use. */
     order: number
     /** The largest order it ever held, which is what its lifetime score is built on. */
@@ -77,6 +85,27 @@ interface Group {
   key: string
   size: number
   since: number
+}
+
+
+/**
+ * How much better than chance a set of commands agree, in [0, 1].
+ *
+ * `|Σv| / Σ|v|` is the alignment the physics asks for, but it is **not comparable across group
+ * sizes**: its chance level is `1 / √n` and its ceiling is 1, so neither end is fixed. Scaling by
+ * `√n` pins the chance end at 1.0 and leaves the ceiling at `√n` — which is why dividing a
+ * six-member figure by a forty-member one under a shared current gave 0.40 instead of 1.0, exactly
+ * `√6 / √40`.
+ *
+ * Rescaling to the span between chance and perfect fixes both ends at once: 0 means "no better than
+ * independent", 1 means "pulling exactly together", for any n. Two of these can then be divided.
+ */
+export function agreement(sx: number, sy: number, mag: number, n: number): number {
+  if (n < 2 || mag < 1e-9) return 0
+  const a = Math.hypot(sx, sy) / mag
+  const chance = 1 / Math.sqrt(n)
+  if (chance >= 1 - 1e-9) return 0
+  return Math.max(0, (a - chance) / (1 - chance))
 }
 
 /**
@@ -134,6 +163,28 @@ export class OrderTracker {
   /** Connected groups of organisms, joined where a bond links two of their particles. */
   groupsNow(w: World): number[][] {
     return this.currentGroups(w)
+  }
+
+  /**
+   * The brains that are currently part of a multi-organism structure.
+   *
+   * Exposed because `soloBaseline` needs exactly this and had been approximating it with "holds any
+   * bond at all", which stopped meaning the same thing. Once bodies assemble themselves out of
+   * loose matter, a brain in a matter-rich region almost always holds *some* bond, so that test
+   * excluded nearly every working organism and left a baseline made of brains sitting in empty
+   * space — slow, often limbless, and not what "alone" is supposed to mean. Measured: `Moves
+   * together` read 3.81x against that baseline in an unaided world, tripping a null that is meant
+   * to be untrippable.
+   *
+   * This is the rung's own definition instead: joined to another organism, by the same union over
+   * limb-to-limb bonds that decides a structure's order.
+   */
+  compoundMembers(w: World): Set<number> {
+    const out = new Set<number>()
+    for (const members of this.currentGroups(w)) {
+      if (members.length > 1) for (const b of members) out.add(b)
+    }
+    return out
   }
 
   private currentGroups(w: World): number[][] {
@@ -323,6 +374,95 @@ export class OrderTracker {
            */
           order: st.members.size,
           peak: st.peak,
+          /*
+           * Mean limbs per member, carried so the travel rung can match its baseline on body size.
+           * Computed here because this is where the membership is known; the ladder only ever sees
+           * this summary.
+           */
+          meanLimbs: (() => {
+            let sum = 0
+            let n = 0
+            for (const m of st.members) {
+              if (!w.alive[m] || !w.isBrain(m)) continue
+              sum += w.limbCount(m)
+              n++
+            }
+            return n > 0 ? sum / n : 0
+          })(),
+          /*
+           * The median speed its own members had **before they joined** — the rung's null, taken
+           * from the same organisms rather than from a different set of them. Median because one
+           * member that happened to get a clear run across the world should not set the bar.
+           */
+          /*
+           * **Alignment of the members' commanded forces** — the counterfactual computed from the
+           * physics rather than measured on a different set of organisms.
+           *
+           * This world is overdamped, so velocity is force over drag. N bodies moving independently
+           * each go at `|F_i| / g`; bonded into one structure of N times the drag they go at
+           * `|sum F_i| / (N g)`. The ratio of what the structure achieves to what its members would
+           * achieve alone is therefore exactly `|sum F_i| / sum |F_i|` — the alignment of their
+           * commands. No population baseline appears anywhere in it.
+           *
+           * Which matters because every population baseline tried here failed, and the last one
+           * failed for a reason that cannot be patched: a within-organism null needs a solitary
+           * phase to measure, and in a world that bonds readily there isn't one. Measured in the
+           * world built to pass this rung: **median join age 19 ticks, 93% joining before age 100,
+           * and zero of 60 organisms with a usable pre-join baseline.**
+           *
+           * Bounded in [0, 1] by construction, with a null that is known rather than estimated:
+           * random commands align at `1 / sqrt(N)`. The rung divides by that, so passing means
+           * pulling together better than chance — which is what "moves together" says.
+           */
+          align: (() => {
+            let sx = 0
+            let sy = 0
+            let mag = 0
+            let n = 0
+            for (const m of st.members) {
+              if (!w.alive[m] || !w.isBrain(m)) continue
+              const vx = w.mvx[m]
+              const vy = w.mvy[m]
+              sx += vx
+              sy += vy
+              mag += Math.hypot(vx, vy)
+              n++
+            }
+            return agreement(sx, sy, mag, n)
+          })(),
+          alignN: (() => {
+            let n = 0
+            for (const m of st.members) if (w.alive[m] && w.isBrain(m)) n++
+            return n
+          })(),
+          /*
+           * The same statistic over the **whole population**, as the control for shared
+           * environment — the confound that made the raw alignment trip the null at 1.38 in a world
+           * where nothing was coordinating anything.
+           *
+           * Members of a structure sit in one neighbourhood and read one food gradient, so their
+           * commands point the same way for a reason that has nothing to do with each other. Every
+           * organism in the world reading its own local gradient produces the same effect at
+           * population scale, so dividing one normalised alignment by the other cancels it: both
+           * are 1.0 under chance, both rise together when there is a common current, and the ratio
+           * exceeds 1 only if the structure's members agree *more than the world does*.
+           */
+          alignPop: (() => {
+            let sx = 0
+            let sy = 0
+            let mag = 0
+            let n = 0
+            for (let b = w.nIntr; b < w.nMatter; b++) {
+              if (!w.alive[b] || !w.isBrain(b)) continue
+              const vx = w.mvx[b]
+              const vy = w.mvy[b]
+              sx += vx
+              sy += vy
+              mag += Math.hypot(vx, vy)
+              n++
+            }
+            return agreement(sx, sy, mag, n)
+          })(),
           age,
           replacements: st.replacements,
           heldFrac,

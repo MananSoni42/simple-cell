@@ -77,7 +77,13 @@ describe('islands', () => {
 })
 
 describe('the merge', () => {
-  const run = (ticks = 700) => {
+  /*
+   * 3,000 ticks rather than 700. Each island has to produce survivors to merge, and a world now
+   * grows its organisms rather than being handed them: at 700 ticks one island of four regularly
+   * had none, so the merged world had three populations and the test read that as a bug in the
+   * merge.
+   */
+  const run = (ticks = 3000) => {
     const p = plan(ticks)
     const results = islandSpecs(p).map(runIsland)
     return { p, results, merged: mergeIslands(p, results, 2) }

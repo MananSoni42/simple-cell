@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { type WorldSpec, specInit } from '../src/core/catalog'
-import { massByType } from '../src/core/metrics'
+import { massTotals } from '../src/core/metrics'
 import { FOOD_ROW, N_MATRIX } from '../src/core/types'
 import { QUANTA } from '../src/core/params'
 import { World } from '../src/core/world'
@@ -76,12 +76,33 @@ describe('a particle has its own chemistry', () => {
 describe('the chemistry evolves, and only when asked to', () => {
   it('does nothing at all with templating off', () => {
     const w = world()
-    const before = meanRow(w)
-    const mass0 = massByType(w)
+    const mass0 = massTotals(w)
     for (let t = 0; t < 3000; t++) w.step()
     expect(w.nTemplated).toBe(0)
-    expect(meanRow(w)).toEqual(before)
-    expect(massByType(w)).toEqual(mass0) // matter is still immortal, and still type-by-type fixed
+    /*
+     * **Every particle's row equals its own kind's ancestral row, exactly.**
+     *
+     * Stronger than the mean row this replaced, and the replacement was necessary rather than a
+     * tidy-up: a particle returning to the loose pool has its kind drawn again, which resets its
+     * row to the *new* kind's. So the mean row across the population moves as the composition
+     * moves, while no individual row has mutated at all — the old assertion failed on a world
+     * doing precisely nothing.
+     *
+     * Checking it per particle says what the test means: with templating off, a row is a property
+     * of a kind and nothing ever edits one.
+     */
+    const canon = new Map<number, number[]>()
+    for (let i = 0; i < w.nMatter; i++) {
+      if (!w.alive[i]) continue
+      const t = w.type[i]
+      const row = Array.from(w.rows.subarray(i * N_MATRIX, (i + 1) * N_MATRIX))
+      const seen = canon.get(t)
+      if (!seen) canon.set(t, row)
+      // compared against another live particle of the same kind rather than against the matrix,
+      // because the matrix is pre-scaled for the food column and a row is not
+      else expect(row, `particle ${i} of kind ${t} differs from its kind`).toEqual(seen)
+    }
+    expect(massTotals(w)).toEqual(mass0) // matter is still conserved, as a total rather than kind by kind
   })
 
   it('replicates, drifts, and stays quantized', () => {
@@ -192,7 +213,8 @@ describe('the chemistry evolves, and only when asked to', () => {
     let aliveMatter = 0
     for (let i = 0; i < w.nIntr; i++) if (w.alive[i]) aliveMatter++
     expect(aliveMatter).toBeLessThanOrEqual(w.nIntr)
-    expect(massByType(w).reduce((a, x) => a + x, 0)).toBeLessThanOrEqual(w.nMatter)
+    const tot = massTotals(w)
+    expect(tot.matter + tot.brains).toBeLessThanOrEqual(w.nMatter)
   })
 
   it('never copies an unbonded particle, however rich it is', () => {

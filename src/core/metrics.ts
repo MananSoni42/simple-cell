@@ -33,6 +33,30 @@ export function massByType(w: World): number[] {
   return m
 }
 
+/**
+ * Matter conserved, as **matter** rather than as a breakdown by kind.
+ *
+ * `massByType` was used as the conservation check, and that stopped being the right question once a
+ * particle returning to the loose pool has its kind drawn again: the per-kind counts drift while
+ * the total is exactly fixed, so a kind-wise comparison fails on a world that is conserving matter
+ * perfectly. Measured, over 4,000 ticks: `[57,57,40,46,40]` became `[60,43,40,57,40]` — the matter
+ * kinds redistributing, brains unchanged at 40, and the total unchanged at 240.
+ *
+ * Split in two because the two halves are conserved by different rules and conflating them hid
+ * that: the brain population is a fixed set of slots cycling between loose and active, while matter
+ * slots cycle among the four kinds.
+ */
+export function massTotals(w: World): { matter: number; brains: number } {
+  let matter = 0
+  let brains = 0
+  for (let i = 0; i < w.nMatter; i++) {
+    if (!w.alive[i]) continue
+    if (i < w.nIntr) matter++
+    else brains++
+  }
+  return { matter, brains }
+}
+
 /** Total pair potential, O(n^2). For small test worlds only; skips own brain-limb pairs. */
 export function potentialEnergy(w: World): number {
   const { L } = w

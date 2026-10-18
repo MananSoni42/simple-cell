@@ -3,13 +3,19 @@ import { N_BRAIN_IN, N_BRAIN_OUT, N_WLIMB } from '../src/core/neurons'
 import { BRAIN_SHAPE, type OrganismFile, exportOrganism } from '../src/core/organism'
 import { initFromSeed } from '../src/core/params'
 import { World } from '../src/core/world'
+import { noBootstrap, placeOne } from './helpers'
 import { bodyDiagram, reserveBars, weightMap } from '../src/ui/portrait'
 
+/*
+ * Placed rather than found. This used to run a small world for 800 ticks and pick the first live
+ * brain, which worked only while bodies arrived pre-assembled at tick 0. A body now has to eat its
+ * way over an activation barrier and recruit its own limbs, so a small world run briefly often
+ * contains nothing — and these tests are about *drawing* a body, not about whether a world can
+ * sustain one.
+ */
 function anOrganism(): OrganismFile {
-  const w = new World({ ...initFromSeed(101), n_start: 6, n_intrinsic: 150, n_brain: 10 })
-  for (let t = 0; t < 800; t++) w.step()
-  const b = [...Array(w.nMatter).keys()].find((i) => i >= w.nIntr && w.alive[i] && w.isBrain(i))!
-  return exportOrganism(w, b)!
+  const w = new World(noBootstrap({ ...initFromSeed(101), n_start: 0, n_intrinsic: 150, n_brain: 10 }))
+  return exportOrganism(w, placeOne(w, 2))!
 }
 
 describe('organism portrait', () => {

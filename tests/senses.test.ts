@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { type Init, LAWS, initFromSeed, substepsFor } from '../src/core/params'
-import { massByType } from '../src/core/metrics'
+import { massTotals } from '../src/core/metrics'
 import { BRAIN_IN, BRAIN_OUT, N_BRAIN_IN } from '../src/core/neurons'
 import { FOOD } from '../src/core/types'
 
@@ -238,11 +238,16 @@ const viable = (mode: ReproMode, over: Partial<WorldSpec> = {}): World =>
 
 /** Runs a world, checking the ledger and the matter count as it goes rather than only at the end. */
 function runChecked(w: World, ticks: number): void {
-  const mass0 = massByType(w)
+  /*
+   * Totals, not a breakdown by kind. A particle returning to the loose pool has its kind drawn
+   * again, so the per-kind counts drift while matter is conserved exactly — checking the breakdown
+   * failed on worlds that were conserving matter perfectly.
+   */
+  const mass0 = massTotals(w)
   for (let t = 0; t < ticks; t++) {
     w.step()
     if (t % 200 === 0) {
-      expect(massByType(w)).toEqual(mass0)
+      expect(massTotals(w)).toEqual(mass0)
       expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 6)
     }
   }
@@ -271,7 +276,21 @@ describe('conjugation: two bonded parents, one recombined child', () => {
     // No chemistry at all, so nothing can bond. Conjugation must then be *impossible* rather than
     // merely rare, because being bonded is the whole reason this mode fits the world — and the
     // organisms are force-fed so that a failure cannot be blamed on poverty.
-    const w = new World(specInit({ ...VIABLE, reproMode: 'conjugation', A: new Array(14).fill(0) }), {})
+    /*
+     * The spontaneous bootstrap is switched off here, and it has to be or the test passes vacuously.
+     *
+     * Every brain is topped up every tick below, so nothing dies and no slot is ever freed — while
+     * a loose brain that can eat activates on its own. The slots therefore fill with activated
+     * brains and a *child* has nowhere to go: measured 40 of 40 at the original size and 120 of 120
+     * with headroom, with zero buds either way. At that point no reproduction of any kind can
+     * happen, so "conjugation did not occur" would be true for a reason that has nothing to do with
+     * bonds, which is the one thing this test is about.
+     *
+     * An unreachable barrier leaves every organism in the world a descendant of the four placed at
+     * the start, which is exactly the population the claim needs.
+     */
+    const base = specInit({ ...VIABLE, reproMode: 'conjugation', A: new Array(14).fill(0) })
+    const w = new World({ ...base, laws: { ...base.laws, E_activate: 1e9 } }, {})
     for (let t = 0; t < 3000; t++) {
       for (let b = w.nIntr; b < w.nMatter; b++) if (w.alive[b] && w.isBrain(b)) w.energy[b] = 90
       w.step()
@@ -307,7 +326,14 @@ describe('spores: a genome that drifts', () => {
   })
 
   it('germinates only where there is food, using the same count the brain reads', () => {
-    const w = new World(specInit({ ...VIABLE, reproMode: 'spore', T: 0 }), { autoSpawn: false })
+    /*
+     * Bootstrap off, for the same reason as the conjugation control: germinating needs a free brain
+     * slot, and a loose brain that can eat takes one by activating. With the patch food in reach
+     * the slots fill and the spore has nowhere to wake into, so the test fails on a mechanism it is
+     * not about.
+     */
+    const base = specInit({ ...VIABLE, reproMode: 'spore', T: 0 })
+    const w = new World({ ...base, laws: { ...base.laws, E_activate: 1e9 } }, { autoSpawn: false })
     const b = w.nIntr
     w.placeOrganism({ brain: b, x: 40, y: 40, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
     w.energy[b] = 100

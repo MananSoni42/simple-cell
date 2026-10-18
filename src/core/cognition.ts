@@ -441,19 +441,41 @@ export class Cognition {
       if (ratio > 0) logs.push(Math.log(ratio))
     }
 
-    // lineage: generation against efficiency, among organisms alive right now
+    /*
+     * Lineage: generation against efficiency among organisms alive right now, **with age
+     * partialled out of both**.
+     *
+     * The confound this removes is severe and was recorded as owed (M4) before it started tripping
+     * the rung. Among contemporaries, generation correlates with *youth* — a later generation was
+     * necessarily born later, measured at about r = -0.5 — so any age-dependence of efficiency
+     * reads as a generation effect. An organism that is simply older has had longer to find food
+     * and amortise its birth cost, so efficiency rises with age for reasons that have nothing to do
+     * with descent. The rung then passes on a world where nothing is inherited at all, which is
+     * exactly what it did: 1.03 on an unaided world.
+     *
+     * The fix is a partial correlation: regress both generation and efficiency on age, keep the
+     * residuals, and correlate those. What survives is the part of the generation-efficiency
+     * relationship that age cannot explain, which is what the rung claims to measure.
+     *
+     * Note what this does *not* fix. The sample is co-living clones in one world sharing one food
+     * field, so Fisher's z here is pseudo-replication — the effective independent sample is one
+     * world, and the z below overstates confidence accordingly. That is a reason to read this rung
+     * across seeds rather than within a run, and it is still owed.
+     */
     const gens: number[] = []
     const effs: number[] = []
+    const ages: number[] = []
     for (const { b, gen, age } of members) {
       if (age < EARLY_TICKS) continue
       const e = this.efficiency(b)
       if (e <= 0) continue
       gens.push(gen)
       effs.push(e)
+      ages.push(age)
     }
-    const r = pearson(gens, effs)
-    // Fisher's z for a correlation, which is what makes a small sample's r honest
-    const lineageZ = gens.length >= 8 && Number.isFinite(r) ? Math.atanh(Math.min(0.999, Math.max(-0.999, r))) * Math.sqrt(gens.length - 3) : 0
+    const r = partial(gens, effs, ages)
+    // Fisher's z for a correlation, with one more degree of freedom spent on the control
+    const lineageZ = gens.length >= 9 && Number.isFinite(r) ? Math.atanh(Math.min(0.999, Math.max(-0.999, r))) * Math.sqrt(gens.length - 4) : 0
 
     return {
       taxis: paired(this.taxR, this.taxS, this.taxN, 200),
@@ -507,3 +529,25 @@ function pearson(xs: number[], ys: number[]): number {
   }
   return corr(n, sx, sy, sxy, sx2, sy2)
 }
+
+/**
+ * Correlation between `x` and `y` with `z` partialled out of both.
+ *
+ * The standard identity, `(rxy - rxz·ryz) / sqrt((1 - rxz²)(1 - ryz²))`, which is the same thing as
+ * correlating the residuals of each against `z` but needs no regression fitted explicitly.
+ *
+ * Returns 0 when the control explains almost all of either variable: the denominator goes to zero
+ * there and the partial correlation is undefined rather than large, which is a distinction worth
+ * keeping — an undefined statistic must not read as a strong one.
+ */
+function partial(x: number[], y: number[], z: number[]): number {
+  if (x.length < 4) return 0
+  const rxy = pearson(x, y)
+  const rxz = pearson(x, z)
+  const ryz = pearson(y, z)
+  if (!Number.isFinite(rxy) || !Number.isFinite(rxz) || !Number.isFinite(ryz)) return 0
+  const denom = Math.sqrt(Math.max(0, 1 - rxz * rxz) * Math.max(0, 1 - ryz * ryz))
+  if (denom < 1e-6) return 0
+  return (rxy - rxz * ryz) / denom
+}
+

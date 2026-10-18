@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { type WorldSpec, specId, specInit } from '../src/core/catalog'
 import { type Element, LAWS, elementsOf } from '../src/core/params'
 import { configText, parseConfig } from '../src/ui/config'
-import { massByType } from '../src/core/metrics'
+import { massTotals } from '../src/core/metrics'
 import { P1, P2 } from '../src/core/types'
 import { World } from '../src/core/world'
 
@@ -27,13 +27,23 @@ const VIABLE: WorldSpec = {
 }
 
 /** Runs a world and reports bonds held per particle of each matter type, plus the ledger. */
-function run(els?: (Partial<Element> | undefined)[], ticks = 3000): { held: number[]; bonds: number; closed: boolean; w: World } {
-  const init = specInit(VIABLE)
+function run(els?: (Partial<Element> | undefined)[], ticks = 9000): { held: number[]; bonds: number; closed: boolean; w: World } {
+  /*
+   * `redraw_kind: 0` — the composition a world starts with is the composition it keeps.
+   *
+   * Every test here asks a question *about a kind*: does a low valence cap its bonds, does a big
+   * radius push its neighbours away. By default a particle returning to the loose pool has its kind
+   * drawn again, so a world set up with a known mix drifts toward an even one and the per-kind
+   * averages regress toward each other — which is the dial working, and fatal to the measurement.
+   * Measured with the drift on: a valence-2 type held 0.318 bonds against a valence-6 type's 0.280,
+   * i.e. the wrong way round, because by then the two kinds were the same population.
+   */
+  const init = { ...specInit(VIABLE), laws: { ...specInit(VIABLE).laws, redraw_kind: 0 } }
   if (els) init.elements = els
   const w = new World(init, {})
-  const mass0 = massByType(w)
+  const mass0 = massTotals(w)
   for (let t = 0; t < ticks; t++) w.step()
-  expect(massByType(w)).toEqual(mass0) // per-type counts still fixed: nothing replicates yet
+  expect(massTotals(w)).toEqual(mass0) // totals, since a released particle has its kind drawn again
   const sum = new Array(7).fill(0)
   const n = new Array(7).fill(0)
   for (let i = 0; i < w.nMatter; i++) {
@@ -111,10 +121,16 @@ describe('each property does something, in the direction it should', () => {
     /*
      * Worth pinning because it is the opposite of the naive guess. A low-mobility particle is not
      * dragged out of its bonds by the jostling that breaks everything else's, so it accumulates
-     * them: measured 2.35 bonds per particle against 0.72 at default mobility. Slow matter is
-     * structural matter, which is a mechanism this world did not previously have.
+     * them. Slow matter is structural matter, which is a mechanism this world did not previously
+     * have.
+     *
+     * The *direction* is the claim; the margin is not. It was 2.35 against 0.72 — a factor of 3.3 —
+     * when bodies arrived pre-assembled and endowed with energy. Now that a brain has to eat its
+     * way over an activation barrier and pay to recruit each limb, there are fewer bonds in the
+     * world to redistribute, and the same effect measures 0.77 against 0.60. Asserting the old
+     * factor would be asserting the old world.
      */
-    expect(run([{ mobility: 0.1 }]).held[P1]).toBeGreaterThan(base.held[P1] * 1.5)
+    expect(run([{ mobility: 0.1 }]).held[P1]).toBeGreaterThan(base.held[P1] * 1.15)
   })
 })
 

@@ -99,6 +99,37 @@ export const LAWS = {
   E_template: 25,
   template_cooldown: 200,
   E_viable: 1,
+  /**
+   * What a loose BRAIN-typed particle must hold before it activates into an organism.
+   *
+   * **This replaces organism spawning, and the reason is an energy bug.** A spawn built a whole
+   * four-limbed body and endowed every particle of it out of nothing — measured at 41% and 67% of
+   * all energy entering two sample worlds. The books balanced, because the creation was *booked* as
+   * injection, which is exactly why it went unnoticed; but energy input was not a function of food,
+   * inefficient organisms got an unconditional subsidy proportional to how long the run was, and
+   * plausibly some of the thrift attractor every learner falls into was an artefact of a free drip
+   * arriving whatever anybody did.
+   *
+   * An **activation energy** is the elegant replacement, and it is the same shape as the thing
+   * `F_form`/`F_break` hysteresis already resembles. A loose brain particle is inert matter: it eats
+   * like any matter can, and its reserve bleeds at `decay_free`, so it only accumulates if feeding
+   * beats decay. When it clears the barrier it pays this and becomes a bare organism — with no
+   * grace period and no exemption, because it activated precisely *because* it could afford to.
+   *
+   * A rate competition rather than a subsidy. Nothing is exempt from decay, and nothing is created.
+   */
+  E_activate: 25,
+  /**
+   * Chance that a particle returning to the loose pool has its kind drawn again.
+   *
+   * A dial rather than a rule, for two reasons. It is the only "creation" in a world where matter
+   * is conserved — it creates *identity*, not matter — so how fast identity turns over is a
+   * property of the world worth searching rather than deciding. And at zero the composition a world
+   * starts with is the composition it keeps, which is what an experiment needs when it is asking
+   * about one kind: several tests set up a world with a known mix and were failing because the mix
+   * drifted underneath them, which is the dial working rather than a bug.
+   */
+  redraw_kind: 1,
   corpse_frac: 0.5,
   r_wall: 10, // a wall's exclusion radius
   // Spare terrain slots kept in every world so it can be painted. Not free: every slot is one
@@ -910,19 +941,39 @@ function seedWorld(seed: number, scale = 1): Init {
 /**
  * Food a world needs each tick simply to break even, in food particles.
  *
- * Two sinks: the upkeep of a full population (a brain and four limbs each), and the slow bleed
- * of loose matter. Measured at the defaults, the second dominates the first by about 7 to 1 —
- * most of a world's energy budget goes on matter that never joined a body. `E_init` stands in for
- * the average reserve of a loose particle, which is rough but the right order.
+ * **Three** sinks now, and the third is the one that was missing. Upkeep of a full population (a
+ * brain and four limbs each), the slow bleed of loose matter, and — new — the cost of *bringing
+ * bodies into existence at all*.
+ *
+ * That third term used to be free. A spawn created a four-limbed body and endowed every particle of
+ * it out of nothing, which was measured at 41% and 67% of all energy entering two sample worlds.
+ * Now a loose brain has to eat its way over an activation barrier and pay to recruit each limb, so
+ * the energy a population needs to keep replacing its dead is a real demand on the sun, and leaving
+ * it out of the budget made every food level mean less than it claimed.
+ *
+ * How much it is: each body that comes into existence costs `E_activate` to start plus four bond
+ * fees, and bodies have to be replaced at the rate they die. `recordAge` is not available here —
+ * this is called before a world runs — so the replacement rate is taken as one full turnover of the
+ * population per `T_LIFE` ticks, which is the order of magnitude a run actually shows.
+ *
+ * Measured consequence of getting this wrong: populations survived but barely, and peaked at about
+ * **ten times** the old `average` level. Island worlds calibrated under the subsidy produced zero
+ * survivors over 3,000 ticks.
  */
+/** Ticks over which a population is assumed to replace itself once, for the budget above. */
+const T_LIFE = 1200
+
 export function sustenanceRate(init: Init, L: Laws = LAWS): number {
   // the metabolism dial has to appear here too: food levels are calibrated as multiples of what a
   // world costs to run, so a world that costs half as much must be fed half as much to mean the
   // same thing by "average"
   const m = init.metabolism ?? 1
-  const bodies = 5 * (L.c_up * m) * init.n_brain * (init.inflow ? 3 : 1)
+  const slots = init.n_brain * (init.inflow ? 3 : 1)
+  const bodies = 5 * (L.c_up * m) * slots
   const loose = init.n_intrinsic * L.E_init * init.decay_free
-  return (bodies + loose) / L.E_food
+  // starting a body, and the four bonds that make it one, charged over a population's lifetime
+  const renewal = (slots * (L.E_activate + 4 * L.E_bond)) / T_LIFE
+  return (bodies + loose + renewal) / L.E_food
 }
 
 /**

@@ -28,6 +28,15 @@ const SRC_V_EVERY = 100
 
 /** Solitary organisms needed before their median speed is worth setting a source's speed from. */
 const SRC_MIN_SOLO = 5
+
+/**
+ * Solitary organisms of a given body size needed before a size-matched baseline is used.
+ *
+ * Below this the match is abandoned for the pooled median: a matched baseline drawn from two
+ * organisms is noisier than an unmatched one drawn from eleven, and a rung beating noise is not
+ * evidence of anything.
+ */
+const SOLO_MATCH_MIN = 4
 const N_IN = N_BRAIN_IN
 const N_OUT = N_BRAIN_OUT
 
@@ -458,6 +467,28 @@ export class World {
 
   /** Food patches. `ox, oy` is where a patch started, which converging colonies travel from. */
   readonly patches: { x: number; y: number; h: number; ox: number; oy: number; dx: number; dy: number }[] = []
+  /**
+   * How fast a brain was travelling **before it first joined a compound**, as net displacement per
+   * tick. Zero until it joins, and frozen from then on.
+   *
+   * This is the travel rung's null, and it is a *within-organism* one, which is the only kind that
+   * survives this world. Every between-group baseline tried here failed for a different reason and
+   * each failure looked like the rung working:
+   *
+   * - "organisms that never joined" is sticky, so in a world that bonds well the baseline empties
+   *   and the rung silently reports zero — a structure of order 41 travelling at 0.77 scored 0.
+   * - "organisms holding no bond" was fine only while bodies arrived pre-assembled; once a brain
+   *   builds its body from loose matter it nearly always holds a bond, so the baseline collapsed to
+   *   brains in empty space and `Moves together` read 3.81x on an unaided world.
+   * - "organisms not in a compound, size-matched" fixed the size confound and still read 2.77x,
+   *   because a solo brain is typically bonded to *inert matter it drags* while a compound member's
+   *   partners are organisms that push. Anchoring, not coordination.
+   *
+   * Comparing an organism against its own earlier self cancels all three at once — size, anchoring
+   * and whereabouts are held constant because it is the same organism.
+   */
+  readonly preJoinSpeed: Float64Array
+
   /** Fractional food owed by the sun, so any arrival rate works, including less than one a tick. */
   /** Fractional food the sun still owes; part of the state, so a snapshot must carry it. */
   foodOwed = 0
@@ -574,6 +605,7 @@ export class World {
     this.hasJoined = new Uint8Array(n)
     this.spawnX = new Float64Array(n)
     this.spawnY = new Float64Array(n)
+    this.preJoinSpeed = new Float64Array(n)
     this.cognition = new Cognition(n, init.seed)
     /*
      * Each particle's own affinity row.
@@ -945,7 +977,7 @@ export class World {
     this.creditOrders()
     this.tick++
     this.shine()
-    if (this.tick % this.init.T_spawn === 0) for (let k = 0; k < this.init.spawn_batch; k++) this.spawnRandom()
+    this.activateBrains()
     this.learner.review(this.tick)
     if (this.tick % this.orders.sampleEvery === 0) this.ladderT.observe(this)
     for (let i = 0; i < this.nMatter; i++) {
@@ -1030,24 +1062,55 @@ export class World {
    * and a structure beating noise is not evidence of anything — which is how an unaided world came
    * to pass "moves together" once this measure stopped excluding anything that had ever joined.
    */
-  soloBaseline(): { speed: number; n: number } {
+  /**
+   * The solitary baseline, optionally **matched on body size**.
+   *
+   * Size matching is not a refinement, it is the difference between the rung measuring what it
+   * claims and measuring something else. Organisms that end up in a compound are the ones that
+   * successfully recruited, so they are mostly four-limb bodies; organisms still alone skew
+   * smaller. Measured in an unaided world: 13 of 27 compound members had four limbs against a solo
+   * distribution of 4/2/3/4 across one to four. Comparing a structure of full bodies against a
+   * baseline of partial ones credits the structure for its members' size, and `Moves together`
+   * read 2.77x on a world where nothing was coordinating anything.
+   *
+   * `limbs` asks for the baseline among organisms of that body size. Falls back to the pooled
+   * median when that bucket is too small to mean anything, because a matched baseline drawn from
+   * two organisms is worse than an unmatched one drawn from eleven.
+   */
+  soloBaseline(limbs?: number): { speed: number; n: number } {
+    const compound = this.orders.compoundMembers(this)
     const speeds: number[] = []
+    const matched: number[] = []
     for (let b = this.nIntr; b < this.nMatter; b++) {
-      // **not currently bonded**, rather than never having been.
-      //
-      // `hasJoined` is sticky for life, so in a world that bonds well every organism is excluded
-      // from the baseline forever and `soloSpeed` returns zero — at which point "moves together"
-      // silently reports nothing. Measured: a structure of order 41 travelling at 0.77 scored zero,
-      // because all sixty organisms had joined something at some point. The better the world is at
-      // the thing the rung is about, the less measurable the rung became.
-      if (!this.isBrain(b) || !this.alive[b] || this.bonds.held(b) > 0) continue
+      /*
+       * **Not currently in a compound**, rather than never having been, and rather than holding any
+       * bond at all. Both of the rejected versions were measured failures.
+       *
+       * `hasJoined` is sticky for life, so in a world that bonds well every organism is excluded
+       * forever and `soloSpeed` returns zero — a structure of order 41 travelling at 0.77 scored
+       * zero, because all sixty organisms had joined something at some point. The better the world
+       * was at the thing the rung is about, the less measurable the rung became.
+       *
+       * "Holds any bond" replaced it and was fine only while bodies arrived pre-assembled. Once a
+       * brain *builds* its body out of loose matter it lives where matter is, so it nearly always
+       * holds some bond, and the baseline collapsed to brains sitting in empty space: slow, often
+       * limbless, and not what "alone" means. Measured: `Moves together` read 3.81x against that
+       * baseline in an unaided world, which is a null failing.
+       *
+       * So the baseline is the rung's own definition of alone — not joined to another organism —
+       * taken from the same union over limb-to-limb bonds that decides a structure's order.
+       */
+      if (!this.isBrain(b) || !this.alive[b] || compound.has(b)) continue
       const age = this.tick - this.bornAt[b]
       if (age < 100) continue // too young for a displacement to mean anything
-      speeds.push(Math.hypot(this.minImage(this.x[b] - this.spawnX[b]), this.minImage(this.y[b] - this.spawnY[b])) / age)
+      const v = Math.hypot(this.minImage(this.x[b] - this.spawnX[b]), this.minImage(this.y[b] - this.spawnY[b])) / age
+      speeds.push(v)
+      if (limbs !== undefined && this.limbCount(b) === limbs) matched.push(v)
     }
-    if (speeds.length === 0) return { speed: 0, n: 0 }
-    speeds.sort((a, b) => a - b)
-    return { speed: speeds[speeds.length >> 1], n: speeds.length }
+    const pick = matched.length >= SOLO_MATCH_MIN ? matched : speeds
+    if (pick.length === 0) return { speed: 0, n: 0 }
+    pick.sort((a, b) => a - b)
+    return { speed: pick[pick.length >> 1], n: pick.length }
   }
 
   private creditOrders(): void {
@@ -1982,12 +2045,40 @@ export class World {
     }
   }
 
+  /**
+   * A particle returning to the loose pool, re-drawn as a random kind.
+   *
+   * This is the only "creation" in the world, and it creates *identity* rather than matter: the
+   * slot pool is fixed for all time, so a particle is never made or destroyed, it is recycled. What
+   * a recycled particle *is* gets drawn again, which is what keeps the mix of kinds from freezing
+   * into whatever the first few hundred ticks happened to assemble.
+   *
+   * **Only among the four matter kinds**, and that is a correction rather than a simplification. A
+   * brain is identified by its *index* — every loop that looks for one runs `nIntr..nMatter`, and
+   * `isBrain` asks whether a particle owns itself — so an intrinsic slot re-drawn as a brain would
+   * be a particle that looks like a brain, is attracted like a brain, and can never activate,
+   * because nothing that activates brains would ever examine it.
+   *
+   * So the two pools cycle separately. Brain slots are a fixed population that moves between loose
+   * and active: a dissolved brain returns to the pool with nothing, and has to eat its way back
+   * over the activation barrier like any other. Matter slots cycle among the four kinds.
+   */
+  private redrawKind(i: number): void {
+    if (i >= this.nIntr) return
+    const p = this.L.redraw_kind
+    if (p <= 0) return
+    if (p < 1 && this.rng.next() >= p) return
+    this.setType(i, this.rng.int(4))
+  }
+
   private unbind(l: number): void {
     const b = this.owner[l]
     const s = this.socket[l]
     this.limbs[b * 4 + s] = -1
     this.owner[l] = -1
     this.socket[l] = -1
+    // back in the pool, and what it *is* is drawn again
+    this.redrawKind(l)
     this.cool[l] = this.L.cooldown
     this.sig[l] = 0 // otherwise the next socket to capture it deposits this, unpaid for
     this.msg[l] = 0
@@ -2007,6 +2098,13 @@ export class World {
       if (l >= 0) this.unbind(l)
     }
     this.owner[b] = -1
+    /*
+     * A cooldown, so a brain cannot dissolve and restart on the same tick. The activation rate
+     * makes that nearly impossible anyway — a dissolved brain holds nothing, and the barrier at
+     * that deficit is `exp(-25/T)`, about four in a million at T = 2 — but "nearly impossible"
+     * is not a rule, and this is.
+     */
+    this.cool[b] = this.L.cooldown
     if (this.continuous) this.kill(b)
     this.nDeaths++
     const age = this.tick - this.bornAt[b]
@@ -2086,7 +2184,7 @@ export class World {
         let bestAngle = 0
         for (let k = 0; k < n; k++) {
           const j = grid.buf[k]
-          if (j >= this.nIntr || type[j] === FOOD || owner[j] !== -1 || energy[j] < L.E_viable || cool[j] > 0) continue
+          if (j >= this.nIntr || type[j] === FOOD || owner[j] !== -1 || cool[j] > 0) continue
           if (this.isSpore[j]) continue // carrying a genome; not available as spare matter
           const dx = this.minImage(x[j] - x[b])
           const dy = this.minImage(y[j] - y[b])
@@ -2101,6 +2199,18 @@ export class World {
           bestAngle = phi
         }
         if (best < 0) continue
+        /*
+         * **The brain pays to recruit.** It used to be the other way round: a limb had to hold
+         * `E_viable` itself, so an exhausted particle was unrecruitable however much a rich brain
+         * wanted it — which is backwards, since the thing with a reserve and an interest in growing
+         * is the brain. A body that cannot afford another limb simply does not get one, and
+         * assembling a body becomes an *investment* out of throughput, which is exactly the
+         * quantity T1's rung measures.
+         */
+        const fee = this.eBondCost[type[best]]
+        if (energy[b] < fee) continue
+        energy[b] -= fee
+        this.burned += fee
         owner[best] = b
         this.socket[best] = s
         this.theta[best] = Math.min(this.quadHi(s), Math.max(this.quadLo(s), bestAngle))
@@ -2153,6 +2263,25 @@ export class World {
    * each source's distance from the middle every tick — compounds, and a converging world collapses
    * to a point in a few dozen ticks instead of over `converge_ticks`.
    */
+  /**
+   * The temperature at a point.
+   *
+   * Scalar today — it returns the world's `T` wherever you ask — and that is the point of its
+   * existing at all. Every rule that should care about local temperature asks *here*, so turning
+   * `T` into a field `T(x, y)` is a change to this one function rather than a hunt through the
+   * model for every place a global constant was read.
+   *
+   * What the field buys, once it exists: cold regions are where structures survive and hot regions
+   * tear them apart, so **habitats** appear without a habitat feature and spatial structure gets a
+   * cause that is not food. It adds a second navigable gradient with a clear payoff, which matters
+   * because food is the only one now. And it makes `stability()` need the *maximum local* T rather
+   * than a scalar — that function was fixed for exactly this class of blindness, so the lesson is
+   * fresh and the trap is known.
+   */
+  temperatureAt(_px: number, _py: number): number {
+    return this.init.T
+  }
+
   private stepPatches(): void {
     const { init, L } = this
     if (init.sourceMotion === undefined && init.sourceRelation === undefined) return this.stepPatchesLegacy()
@@ -3007,7 +3136,7 @@ export class World {
     return (this.quadLo(s) + this.quadHi(s)) / 2
   }
 
-  private limbCount(b: number): number {
+  limbCount(b: number): number {
     let n = 0
     for (let s = 0; s < 4; s++) if (this.limbs[b * 4 + s] >= 0) n++
     return n
@@ -3178,6 +3307,91 @@ export class World {
       island,
     })
     return brain
+  }
+
+  /**
+   * Loose brain particles that have eaten enough become organisms.
+   *
+   * This is the whole of how a body comes into existence now, and it creates nothing. A BRAIN-typed
+   * particle sitting in the loose pool is inert matter: it eats like any matter can, and its
+   * reserve bleeds at `decay_free`, so it crosses `E_activate` only if feeding beats decay. When it
+   * does, it pays that energy as the cost of starting up — **burned, not moved** — and owns itself,
+   * which is literally what `isBrain` tests and what lets `captures` begin filling its sockets.
+   *
+   * No grace period, no exemption, no endowment. It activated because it could afford to, and from
+   * this tick it pays upkeep like any other body. Compare what this replaced: a spawn created a
+   * body and its energy from nothing every `T_spawn` ticks regardless of whether the world could
+   * support one.
+   *
+   * It arrives with zero limbs on purpose. A brain assembles its own body out of whatever drifts
+   * into the right quadrant at the right radius, which `captures` already did and which keeps the
+   * rod-and-quarter mechanics exactly as they were.
+   */
+  private activateBrains(): void {
+    const { L } = this
+    for (let b = this.nIntr; b < this.nMatter; b++) {
+      if (!this.alive[b] || this.owner[b] !== -1 || this.isSpore[b]) continue
+      if (this.cool[b] > 0) continue
+      /*
+       * **Arrhenius, not a threshold**, and written this way now so that a temperature *field* is a
+       * substitution rather than a rewrite.
+       *
+       * `P(activate) = exp(-(E_activate - held) / T)`: a particle that has banked the whole barrier
+       * starts immediately, one short of it starts at a rate that falls off exponentially with how
+       * short it is, divided by how hot it is. A hard threshold would make this a cliff; a rate
+       * makes temperature the thing that decides how readily life starts, which is the same law
+       * that will decide how readily bonds break.
+       *
+       * Once `T` is a field, warm regions become nurseries where bodies start easily and hold
+       * together badly, and cold regions become refuges where little starts and what exists lasts.
+       * Habitats fall out of one law, and thermotaxis gets a payoff — which matters because food is
+       * currently the only gradient worth following.
+       */
+      const deficit = L.E_activate - this.energy[b]
+      if (deficit > 0) {
+        const T = this.temperatureAt(this.x[b], this.y[b])
+        if (T <= 0) continue
+        if (this.rng.next() >= Math.exp(-deficit / T)) continue
+        // Started below the barrier: thermal help got it over, and it keeps what it had.
+      }
+      /*
+       * **The barrier is a threshold to clear, not a tax to pay.**
+       *
+       * Charging the whole barrier was a bug, and a severe one: a particle that activated on
+       * exactly `E_activate` was left holding nothing, paid upkeep on its next tick and died. So
+       * brains activated at the expected rate and died immediately, populations went extinct, and
+       * **food piled up uneaten** — standing food of 269 to 1,264 particles in worlds with no
+       * organisms left to eat it. The signature was unmistakable once seen, and it is the same one
+       * the user's own saved 4x world showed: food at its cap with 87% of energy burned.
+       *
+       * Arrhenius has the right picture and it is not a tax. A barrier decides *how readily* a
+       * transition happens; it is not consumed by it. Crossing one does cost work — here the work of
+       * forming the body's first internal structure, one bond's worth — and everything above the
+       * barrier is retained as the working capital a new body needs to go and find its next meal.
+       */
+      const paid = Math.min(this.energy[b], L.E_bond)
+      this.burned += paid
+      this.energy[b] -= paid
+      this.owner[b] = b
+      this.socket[b] = -1
+      for (let s = 0; s < 4; s++) this.limbs[b * 4 + s] = -1
+      this.bornAt[b] = this.tick
+      this.mvx[b] = 0
+      this.mvy[b] = 0
+      this.beginLife(b)
+      /*
+       * Fresh random weights, as a spawn had. The one place a learner may act is the weights a new
+       * organism is born with, so it is offered the same choice here.
+       */
+      const randLimb = randomLimb(() => this.rng.gauss())
+      const randBrain = randomBrain(() => this.rng.gauss())
+      const g = this.learner.genomeForSpawn(this.tick)
+      const hand = this.init.handBuilt ? HAND_BUILT[this.init.handBuilt] : undefined
+      this.wLimb[b] = g?.wLimb ?? hand?.limb() ?? randLimb
+      this.wBrain[b] = g?.wBrain ?? hand?.brain() ?? randBrain
+      this.learnId[b] = g?.id ?? 0
+      this.nBirths++
+    }
   }
 
   /** Spawns one organism with 1-4 random limbs, at `at` or anywhere there is room. */
