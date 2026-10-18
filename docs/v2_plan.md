@@ -1,252 +1,295 @@
-# v2: an expressive world, an open search
+# The plan: a world worth searching
+
+*This supersedes the earlier version of this document, which was written before the adversarial
+review and before the food and thermodynamics work was scoped. What carries over is marked; what
+was wrong is marked too.*
 
 ## The goal, stated so it can be falsified
 
-Organisms that **learn, evolve, and slowly get smarter and more complex**, ideally becoming
-stable multi-organism structures. Evolving complex intelligence should be *possible within the
-constraints* — not inevitable, not designed in. And the ladder should be a calibrated path to
-that, with the rungs as real milestones rather than as whatever happened to be measurable.
+Organisms that **learn, evolve, and slowly get smarter**, ideally becoming stable multi-organism
+structures. Evolving complex intelligence should be *possible within the constraints* — not
+inevitable, not designed in. The ladder is the calibrated path, with rungs as real milestones rather
+than whatever happened to be measurable.
 
-Two principles govern every decision below.
+Two principles govern everything below.
 
-**Make the world expressive enough.** Most of the v1 failures were not organisms failing at
-something; they were the world being unable to *represent* the thing being asked for. An organism
-in a food cloud read zero. A brain had no input carrying its own velocity. A bond is four times
-stronger than any force a brain can exert, so "move together" was unreachable by construction.
-None of that is a result about life; it is a result about the model.
+**Make the world expressive enough.** Most failures have not been organisms failing at something;
+they have been the world unable to *represent* the thing being asked for. An organism in a food
+cloud read zero. A brain had no input carrying its own velocity. Area-restricted search turned out
+to need a product of two inputs, which a single linear layer cannot compute. None of that is a
+result about life.
 
-**Be open — discover, do not decide.** Every constant is a decision made before the evidence.
-Two of mine have already been measured wrong by a wide margin (`r_eat` 12 beat 6 in both
-pairings; `F_break` 2.5 cost four fifths of all standing bonds against 4). A search that fixes
-the physics and varies only the chemistry can only find the best world *consistent with my
-guesses*, and will then present my guesses back to me as a finding.
+**Be open — discover, don't decide.** Every constant is a decision made before the evidence. The
+cost of getting this wrong is now measured rather than asserted: `muFood` was a dial with four
+levels across a twentyfold range that produced **bit-identical worlds**, because `specInit` never set
+`foodMoves`. A pre-registered prediction about it was untestable by the search meant to test it.
 
-## Where v1 left things
+## The central problem, named
 
-From [v1_phased_search.md](v1_phased_search.md) — 260,640 worlds, 90 core-hours:
+Every learner and every search in this project has converged on the same strategy: **spend less**.
+Thrift beats everything, because the world rewards not acting. Most of what follows is aimed at that
+one fact, from three directions:
 
-| Solved | At the floor |
+- **make not-acting insufficient** — moving food, so standing still starves (§2)
+- **make acting self-limiting instead of free** — dissipative heating, so thrashing has a physical
+  cost rather than an accounting one (§3)
+- **measure throughput, not thrift** — a rung that sitting still scores zero on by construction (§3)
+
+## 1. Where things stand
+
+### Done and verified
+
+| | |
 |---|---|
-| Heredity (100% of confirmed worlds breed true) | **Agency: 2.5%** — nothing seeks food |
-| Lineage outliving the individual (100%) | **Metabolism: 20%** — organisms live on their inheritance |
-| Association — things join (100%) | **Structural persistence: 15%** |
+| Brain senses: food count, own velocity, limb angles, bond load | 29 → 41 inputs |
+| Food has its own mobility; brains have chemistry and can bond to matter | R2.2b, R2.1 |
+| Particles are elements: size, mass, valence, bond strength, cost, decay | R2.1c |
+| Every particle carries its **own** affinity row; replication mutates it | R2.1b, R7.11 |
+| Conjugation and spores; nine physics/economics constants became dials | R7.9, R7.10 |
+| Four learners added: MAP-Elites, TD(λ), Hebbian, ES repaired | |
+| Ladder rebuilt on **intelligence**: 10 rungs, 7 tiers, every rung with an in-run null | |
+| Hand-built brains prove the ladder is climbable — `taxis` reaches level 1 at 8.5× | |
+| Adversarial review: determinism, tunnelling, false-finding rate, dead dial, −27…45% CPU | |
 
-**Nothing in 260,640 worlds reached level 2.** And the search found a flaw in my metric rather
-than a world: `Lasts` was rewarding short lives, because coasting time scales with the metabolism
-dial.
+### Retracted
 
-The honest reading is that v1 searched a world that could not express what levels 2 and up ask
-for. That is what v2 fixes first.
+**Particle chemistry does not show selection on food affinity.** I reported "+0.140 against the pull
+of mutation" and it was an artefact: replication mutated all six row entries onto the matter lattice,
+which reaches ±1, while a food entry's ceiling is 0.5. With the cap enforced food *falls* by 0.091,
+and the mutation operator alone — no selection — gives −0.10 to −0.18. Indistinguishable.
 
----
+What survives is **matter** affinity falling 0.173 where the null gives +0.03 to +0.09 — a gap of
+about 0.2, and the *opposite* of the obvious prediction, since only a bonded particle can replicate.
+Untested reading: selection favours just enough affinity to hold one bond, because a particle buried
+in a clump pays `E_bond` repeatedly and sits where food cannot reach it.
 
-## 1. World changes
+### The binding constraint
 
-### Done (this commit)
+**Structures do not last.** Order 19 and 41 form readily and travel at 2.2× solo speed when old
+enough to measure, but one that is both order 3+ and 500 ticks old is too rare to sustain a rung, and
+the best hold is a tenth of a coasting time against a required three. Splitting `Moves together` from
+`Holds together` is what made this legible; before, it hid inside a composite threshold.
 
-| Change | Rule | Note |
-|---|---|---|
-| Brain reads a normalised food count over its whole body | R5.4 | the cloud blindness; the signal existed and nothing read it |
-| Brain reads its own net displacement, two ticks lagged | R5.5 | its only memory, and its only feedback from the world |
-| Brain reads each limb's within-quadrant angle | R5.5 | it did not know which way its body pointed |
-| Brain reads bond load, per limb and per body | R5.5 | bonds were never mentioned in any input |
-| Food mobility `μ · mu_food`, kick `sqrt(mu_food)` | R2.2b | you cannot catch what diffuses as fast as you swim |
-| Food capacity 120 → 300 per area, wasted light counted | R4.1 | a capacity that binds is a thermostat |
-| Reproduction failures counted by cause | R7.7a | four diagnoses had one symptom |
-| Nine physics and economics constants became searchable dials | — | see §3 |
-| Ablation seam for brain inputs (`WorldOpts.blind`) | — | so each sense is a measurable claim |
-| **Conjugation** — two bonded parents, recombined child | R7.9 | before this, nothing in the world recombined |
-| **Spores** — a genome that drifts and wakes where there is food | R7.10 | cut cap-blocked reproductions 41,244 → 853 |
-| **MAP-Elites** — best genome per kind of behaviour | — | the goal is "slowly more complex", not one number |
-| **TD(λ) actor–critic** — learns inside a life | — | the first learner that does not wait for a death |
-| **Reward-modulated Hebbian** — three-factor plasticity | — | the cheap control against TD(λ) |
-| ES repaired: Adam, weight decay, lr cut tenfold | — | at the old rate it moved *away* from a known target |
-| Lamarckian / Darwinian inheritance as a dial | — | left implicit it was Lamarckian by accident |
-| UI for all of the above | — | Forces card, reproduction toggles, online-learner controls |
+## 2. Food dynamics: standing still should starve
 
-Brain shape 29 → 41 inputs. Saved organisms from before are refused loudly, which is the existing
-rule and correct.
+### Why, beyond incentives
 
-### Next, in priority order
+A **static** food source makes the optimal policy a *constant*: find it once, stop. No tracking, no
+re-acquisition, nothing to improve at — and a constant policy cannot be selected on. It also explains
+three rung exploits that all require food to have a fixed location: "always swim north" (which
+defeated the rotation null), `Lingers` being passed by chemotaxis because a gradient turns most
+inside a patch, and `Improves` being trippable by drifting into a patch and staying. Moving sources
+attack those at the root rather than needing a null each.
 
-**W1 — Bond angular rigidity.** *(largest expected effect on the stated goal)*
-A bond is a distance spring, so a bonded chain has no preferred shape. "Compound organisms that
-hold a form" may be literally unreachable: a structure can currently be a clump or a floppy
-chain, and nothing else. Add an angular term between two bonds sharing a particle, with the rest
-angle and the stiffness both searchable — including zero, so the search can find that the current
-world was right. **Needs the stability budget re-derived**, since a new force enters `d_max`.
+### What is actually wrong today
 
-**W2 — Make `F_max` vs `F_break` a first-class ratio.** Already searchable as two dials, but the
-prediction deserves naming: at `F_max` 1 and `F_break` 4 no organism can pull itself free of a
-structure or drag one anywhere. If "moves together" turns on anything, this is my first guess.
-Reported as its own factor in `analyse.ts`.
+Source speeds were never calibrated against how fast an organism can travel. Measured, same worlds
+and seed, net displacement per tick:
 
-**W3 — Comet food should move.** The one food pattern whose name implies motion places static
-food. Cheap, and worth more now that food is heavy enough to be chased — it is the cleanest test
-of pursuit the world can offer.
-
-**W4 — Senescence.** With starvation as the only death, a thrifty immortal is a perfect strategy,
-which is what every search keeps finding. An age term makes reproducing *early* worth something.
-Searchable, with "off" among the levels. Note: distinct from bond aging, which was rejected on
-the grounds that particles should loosely represent chemicals — that reasoning does not extend to
-organisms.
-
-**W5 — Anabolism.** Energy becoming matter. This is the real reason reproduction cannot be
-boundless, and it would make growth a decision rather than a lottery over nearby debris. **Breaks
-matter conservation**, a law with tests, so it must be a world *option* with its own ledger, not
-an edit to the default.
-
-**W6 — Addressed signalling.** The field is a scalar everyone reads, so a message cannot have a
-recipient, which blocks division of labour. The brain now knows it *has* bonds; sending anything
-along one is the natural next step.
-
-## 2. Small experiments and ablations
-
-The rule: **one change per measurement, several seeds, standard errors, and a pre-registered
-prediction.** Four complementary changes made at once are four changes none of which can be
-credited — which is why the ablation seam exists.
-
-| | Experiment | Question | Prediction |
+| mode | source | organism | ratio |
 |---|---|---|---|
-| E1 | `scripts/senses.ts` — **partial result in, and it does not support the change**; see [structural_misses.md](structural_misses.md) | Does each new sense pay, and which? | food count and heavy food matter together, neither alone; `Seeks` stays near zero without a payoff for moving |
-| E1b | `scripts/learners.ts` — running | Which learners beat keeping-the-best-of-random, and which should be discarded? | the offline four are indistinguishable without mortality; TD(λ) is the only one that can move `Seeks` |
-| E2 | Force ratio sweep: `F_max` × `F_break` | Can an organism out-pull a bond, and does it then move a structure? | the strongest single effect on `Holds`/`Moves together` |
-| E3 | Mutation rate sweep, `reproMut` 0 … 0.15 | Is evolution doing anything, or is every world decided at init? | 0 should be clearly worse; if it is not, nothing is evolving and that is the headline |
-| E4 | Angular rigidity sweep (after W1) | Does a preferred shape produce persistent structure? | large on `heldFrac`, small on lifespan |
-| E5 | Learner × mortality | The learner is inert in healthy worlds — 788 of 800 attempts failed for want of a free brain slot | learning rate should rise with death rate, which would make the two inseparable |
-| E6 | Clamp regime audit | How many catalogued worlds run with the integrator, not the chemistry, in charge? | already known to matter: at `T` 20 the clamp erases food's mobility entirely |
+| comet | 0.363 | 0.196 | **1.9×** — outruns its pursuer |
+| patchy | 0.073 | 0.085 | 0.9× |
+| converging | 0.022 | 0.136 | 0.2× |
+| spring / ring / gradient | 0.000 | ~0.13 | static |
 
-E1 and E6 are done or running. E3 is the one I most expect to be uncomfortable.
+Note the correction: an earlier claim in these docs that **comet food does not move was wrong** — it
+moves, at `max(1.5, v_patch·12)` per tick, which is the real bug. A target that outruns its pursuer
+is not a chase.
 
-## 3. Parameters: what the search is allowed to vary
+### The change
 
-Now searchable, each as a discrete set so the factor tables have cells with worlds in them:
+**Speed expressed as a fraction of organism speed, not in absolute units.** A `sourceSpeed` dial at
+0.2 / 0.5 / 0.8 × the measured solitary-organism speed is catchable by construction and stays
+meaningful when metabolism or `F_max` changes. Absolute units silently became uncatchable.
 
-| Group | Dials |
-|---|---|
-| **Chemistry** | 14 quantized triangle entries (unchanged) |
-| **Forces** | `muFood` (food vs life mobility), `fMax` (how hard a brain can push), `kBond`, `fBreak`, `maxBonds` |
-| **Economics** | `rEat` (mouth width), `eBirth`, `eRepro`, metabolism |
-| **Evolution** | `reproMut` (mutation rate), `learn` (algorithm) |
-| **World** | temperature, food pattern / level / regime / patches / radius / spoilage, bond flow, fission, slots, matter, scale |
+**Five motion patterns, chosen to be contrastive** so the search can answer *what* moving food
+selects for rather than only whether it helps:
 
-### The cost, stated plainly
-
-This multiplies the space by about 10^5. That sounds fatal and is not: the search has always been
-a **sampler, not an enumerator** — 7^14 chemistries is already 6.8 × 10^11, and 260,640 worlds
-covered 4 × 10^-7 of it. A new dial costs **statistical power per dial**, not coverage. At a
-200,000-world phase every level of every dial still holds tens of thousands of samples, so
-marginal means stay solid.
-
-What genuinely degrades is detecting **interactions** between dials — and §1's prediction (force
-ratio) is exactly an interaction. So E2 is a deliberate sweep rather than something to be read
-off the big search, and the stratifier should cross force ratio in, next to self-repulsion and
-food pattern.
-
-### Still fixed, and why
-
-`SIZE`, `r_c`, `beta`, `K_core`, `L_rod`, the brain exclusion radii, `d_max`, `dth_max`. These
-are the integrator's own scale and the geometry that `substepsFor` derives its budget from.
-Varying them does not explore a different world so much as a differently-broken numerical scheme.
-If any of them should move, it should move as a deliberate re-derivation, not as a search dial.
-
-## 4. Metrics and the ladder
-
-The ladder's job is to be a calibrated path, and v1 proved it is not yet one. Three known
-failures, in order of severity:
-
-**M1 — `Seeks` reads geometry, not behaviour.** It goes 0.000 → 0.107 → 0.000 as `r_eat` goes
-6 → 12 → 20 **with no learner present**. A rung that moves when nothing is learning is measuring
-the world, not the organism. Fix: score alignment against a within-world null — the same organism's
-movement correlated with a *shuffled* food direction — so the geometry cancels.
-
-**M2 — Nothing measures intelligence, only survival.** The stated goal includes "slowly get
-smarter", and no rung distinguishes an organism that responds to what it sees from one with a
-lucky constant policy. Proposed rungs, in increasing order:
-- **Responds** — mutual information between a brain's inputs and its outputs above the null for a
-  frozen policy. Cheap to approximate, and it directly separates "acting" from "twitching".
-- **Discriminates** — behaviour differs measurably between food-rich and food-poor surroundings.
-  The new food count makes this representable for the first time.
-- **Improves within a life** — performance later in a life beats performance earlier, for the
-  same organism. This is the rung that would make the local learning loop visible.
-
-**M3 — Rungs are not calibrated against each other.** They are thresholded against nulls
-individually, which is right, but nothing checks that level 2 is *harder* than level 1. With
-260,640 worlds of data the pass rates are now known, so the levels can be ordered by measured
-difficulty and any rung that is easier than a lower one moved down.
-
-Also: keep the `(r+0.5)/(n+1)` percentile normalisation and the frozen baseline cohort. The
-zero-sum version made CEM look inert, and random search scored +0.002 on it — that calibration
-is why raw units are the headline now.
-
-## 5. UI
-
-| | Change | Why |
+| mode | motion | selects for |
 |---|---|---|
-| U1 | Show the new senses in the inspector: food count, own velocity, bond load, per-limb angle | the brain's inputs are now the interesting part of an organism, and none of them are visible |
-| U2 | Law dials in the builder, grouped as *Forces* and *Economics* | they are searchable now, so they must be playable — and a searched world must be openable as it was scored (already wired through `Init.laws`) |
-| U3 | Surface ceilings: wasted light and blocked births | **done** — in the left pane under Food |
-| U4 | Discoveries: show which dials a world won on, not only its score | a top-ten list says which worlds worked, not why, and the why is what carries to the next search |
-| U5 | A ladder page explaining each rung's null and threshold | the ladder is the project's definition of progress and is currently only legible in code |
+| **comet** (speed fixed) | straight line, constant heading | pure pursuit |
+| **orbit** | circles the world, periodic, returns | **anticipation** — the first pattern that could reward memory |
+| **wander** | random walk at the same speed as orbit | tracking *without* anticipation |
+| **tide** | a band sweeping across and wrapping | positioning rather than chasing — food comes to you |
+| **shy** | flees the densest cluster of organisms | anti-camping; adversarial, and most likely to go degenerate |
 
-## 6. The v2 search
+**`comet` / `orbit` / `wander` at matched speed is the experiment**: identical difficulty, differing
+only in predictability, which isolates tracking from anticipating. Anticipation is the one item there
+that bears on intelligence rather than reflexes.
 
-Same five-phase shape as v1 — it worked, it is resumable, and it is honest about cost — with four
-changes:
+**One static mode is kept deliberately.** `spring` stays fixed as the control — otherwise "moving
+food improves the rungs" becomes an assumption we can never test. Same discipline as keeping
+`thrifty` and `none`.
 
-1. **Dials include physics and economics** (§3). Phase 0 draws from the full set.
-2. **Stratify on force ratio** alongside self-repulsion × food pattern × metabolism. Phase 0 can
-   only see clumping and limb retention, so a plain top-N cut would discard exactly the
-   chemistries the predictions are about. This is the same error that stratification already
-   fixes, applied to the new dials.
-3. **Learners enter at phase 2**, not at the end. v1 ran the whole search with `learn: 'none'`
-   and then asked why nothing learned. Worth pairing each phase-2 survivor with and without a
-   learner, since that is also E5.
-4. **Fix the metrics first** (§4). Searching 200,000 worlds against a rung that reads `r_eat` is
-   200,000 worlds of wasted compute, and v1 already spent a phase learning that lesson once.
+### Two interactions to watch
 
-Pre-registered predictions, written before the search so they can be wrong:
+A moving source **plus** `muFood` near 1 stacks two forms of elusiveness, and food diffusing as fast
+as a limb swims already makes pursuit impossible. And spoilage matters more: a moving source with a
+long `food_life` leaves a trail that re-creates a static distribution behind it. Short life makes the
+trail a gradient worth following; long makes it a map.
 
-- **P1** Self-repulsion wins by phase 2. *(carried over from v1, still untested — phase 2 was
-  never reached with enough worlds)*
+`shy` is held back until the other four are measured.
+
+## 3. Thermodynamics: generalise what is already ad-hoc
+
+The world is **already** a driven dissipative system — energy in from the sun, through structures,
+out to `burned` — and the integrator already implements the Einstein relation (`σ = √(2μT)`, so
+`D = μT`) with per-type mobility scaling as `√μ`, which is equipartition done correctly. What is
+missing is that several hand-written rules are special cases of laws we are not stating.
+
+### T1 — A thermodynamic rung. The one that attacks thrift directly
+
+Schrödinger's framing: a living thing **maintains local order while dissipating energy**. Both halves
+are already measurable here — configurational order over a structure's bonds, and energy throughput
+per tick, which `burned` already tracks per organism.
+
+A rung reading *"maintains a low-entropy configuration against a dissipative flux"* **cannot be
+passed by sitting still**, because sitting still is zero throughput. That is a better answer to the
+thrift attractor than any threshold tried so far, and it needs **no new physics** — only a
+configurational-entropy measure over bonds, which the order tracker nearly has.
+
+Highest value per unit of effort on this list.
+
+### T2 — The detailed-balance test. Cheap, and validates the foundations
+
+Turn the sun off. An energy-conserving system with no driving must satisfy detailed balance, so pair
+separations should follow `exp(−U(r)/T)` for the pair potential we define.
+
+A sharp test: a hidden energy source shows up as the wrong effective temperature. It would have
+caught every ledger bug found so far by inspection, and it is the honest way to validate
+`potentialEnergy`, which the review found no longer matches the actual force field (it reads the
+*ancestral* matrix and a single global core radius, so it is wrong for any world with elements or
+templating).
+
+### T3 — Temperature as a field, `T(x, y)`
+
+One field generalises a surprising amount: cold regions are where structures survive, hot regions
+tear them apart, so **habitats** appear without a habitat feature, and spatial structure gets a cause
+that is not food. It also adds **thermotaxis** — a second navigable gradient with a clear payoff,
+which matters because food is currently the only one.
+
+Cost: `stability()` must track the *maximum local* T rather than a scalar. That function was just
+fixed for exactly this class of blindness, so the lesson is fresh.
+
+### T4 — Dissipated energy becomes heat
+
+`burned` currently vanishes into a global counter. Thermodynamically, dissipated work *is* heat and
+should raise local temperature. One rule generalises three hand-written ones:
+
+- **movement cost becomes self-limiting** — thrash and you cook your own neighbourhood, where today
+  it is a flat `c_mv` penalty
+- **the clumping cap falls out as physics** — dense clumps dissipate, heat, and their bonds break.
+  Today an explicit rule ("only *bonded* particles may replicate") exists purely to stop immortal
+  self-attracting clots
+- **`burned` stops being a bookkeeping sink** and becomes a quantity with a location
+
+And it adds a feedback loop with no current analogue: activity → heat → bonds break → dispersal →
+cooling → re-aggregation. A mechanism for oscillation and patchiness from one rule. Requires T3.
+
+### T5 — Arrhenius bond kinetics
+
+Bonds form on a hard threshold and break on another. The generalisation makes them *rates*:
+`P(break) ∝ exp(−depth / T_local)`. The existing `F_form`/`F_break` hysteresis gap stops being two
+magic numbers and becomes what it already resembles — an **activation energy** — and per-type
+`bondStrength` becomes a well depth.
+
+What it buys: temperature controls structure stability *continuously*, and there is a **critical
+temperature** where structures are marginally stable. Since "structures do not last" is the binding
+constraint, a knob that tunes persistence through a phase transition is aimed straight at it. Only
+interesting once T3 exists.
+
+### Deliberately not doing
+
+**Entropy as a driving law** — maximum entropy production, free-energy minimisation as an organising
+principle. In a system this small it degenerates into hand-waving: one can always define an entropy
+that the dynamics happens to increase. Entropy as a *measurement* (T1) earns its place; entropy as a
+*force* does not.
+
+Stoichiometry and compound formation: over-engineering for now. Active transport along bonds (a
+chemical-potential `bond_flow`) is interesting for division of labour but needs a decision mechanism
+the brain cannot express — see the hidden-layer question below.
+
+## 4. Metrics still owed
+
+**M1 — the brain cannot multiply.** `Lingers` needs `VEL × FOOD_NEAR`, a product of two inputs, and
+the brain is a single linear layer. The best linear attempt reaches 0.86. Either give the brain a
+hidden layer, or reformulate the rung. The one nonlinearity that exists is the `tanh` at each limb,
+reachable through the socket signals — which is how `followsSignal` works and where a serious attempt
+should go.
+
+**M2 — a memory tier needs a recurrent brain.** Identical inputs give identical outputs by
+construction, so memory is not representable. `Lingers` is a partial substitute, getting persistence
+from the velocity *input* rather than internal state.
+
+**M3 — `Follows signal` leaks to self-signalling.** A brain that shouts a constant into the field and
+steers by its own velocity scores 0.57 of the rung, because the field near an organism is partly its
+own deposit. Needs the sender's own recent contribution subtracted.
+
+**M4 — `Lineage improves` is confounded with age.** Among contemporaries, generation correlates with
+youth at r ≈ −0.5, so any age-dependence of efficiency becomes a generation effect. Needs
+residual-on-age or age matching. Its Fisher z is also pseudo-replication: n is co-living clones in one
+world sharing one food field, so the effective independent sample is **one world**.
+
+**M5 — `fitness.ts` still ships the defeated statistic.** `seeking` is the mean cosine of command
+against the food direction with **no null at all** — the exact measure `ladder.ts` documents as
+defeated — and it is selectable as a search objective. A brain reading only its own velocity scores
+0.298 on it. Must be nulled or removed before any search optimises it.
+
+**M6 — the percentile score is zero-sum.** Taken against the trailing 128 deaths, so a uniform
+improvement of the whole population moves no score at all; the median organism scores 0.5 forever.
+A live candidate mechanism for "nothing climbs" coexisting with real progress. Raw means must be read
+alongside.
+
+## 5. Known gaps, recorded not fixed
+
+- **CEM and ES do not restore bit-identically.** Their in-flight samples are not serialised, and
+  losing them changes which genome is handed out next. The only remaining determinism hole; bounded
+  work (~40 lines).
+- **The GPU backend is stale and probably dead.** `N_MATRIX` 5 → 6 left a buffer sized for 25 floats
+  being written 36, and the shader strides by 5 over a 6-wide matrix. It also ignores per-particle
+  rows and per-type radii entirely.
+- **A structure survives total membership replacement.** The >50% share rule lets a 3-member group
+  swap one member per sample and keep its founding date indefinitely; observed 252 replacements on an
+  18-member structure aged 501.
+- **The reservoir null's effective size is 16 forever**, so its error is O(1/√16) regardless of life
+  length — conservative if independent across organisms, biasing if their early-life gradients are
+  correlated, which they are if they spawn near the same patch.
+- **Conditional dials are analysed as unconditional.** `eSpore`/`sporeFood` act on 2 of 4 reproMode
+  levels, `rowMut` on 1 of 2 — so those factor tables are half filled with worlds where the dial did
+  nothing, shrinking any true effect by that factor.
+- **`foodRegime` is partly a proxy for the horizon**: `bloom` is 5.5× food at 500 ticks and 0.84× at
+  100,000, so the same level means different things per phase.
+
+## 6. Order of work
+
+1. **T1 — the thermodynamic rung**, and **T2 — the detailed-balance test**. No new physics, attacks
+   the central failure, validates the foundations before anything is built on them.
+2. **M5 and M6** — a defeated statistic that is selectable as a search objective, and a zero-sum
+   score that can hide progress. Both can corrupt a search's conclusions rather than merely weaken
+   them.
+3. **Food dynamics (§2)** — speed relative to organism speed, then comet/orbit/wander/tide, keeping
+   `spring` static as the control.
+4. **B0 — the parallel sweep runner at thirty seeds**, then re-run `senses`, `learners` and `cap`.
+   Every earlier verdict was taken on a metric since shown to be noise above tier 0.
+5. **M1–M4** as the measurements argue for them.
+6. **v2 pilot at 2% budget** against three gates: every dial level holds n ≥ 30, no rung pinned at 0
+   or 1 across all worlds, stratifier cells populated.
+7. **Full v2 phase 0**, with learners entering at phase 2 rather than after everything.
+8. **T3 → T4 → T5** as a v3 world change, in that order, since each needs the one before.
+
+## 7. Pre-registered predictions
+
+Written before the search so they can be wrong. **P3 is retired** — it concerned `muFood`, which was
+a dead dial, so it was never testable.
+
+- **P1** Self-repulsion wins by phase 2. *(carried from v1, still untested — phase 2 was never
+  reached with enough worlds.)*
 - **P2** `fMax / fBreak` is the strongest single factor on the structural rungs.
-- **P3** `muFood` below 0.4 is necessary for any world to clear `Seeks`.
-- **P4** `reproMut` 0 is clearly worse than any nonzero rate. If it is not, nothing in this model
-  is evolving, and that is the most important finding available.
-- **P5** Nothing reaches level 3 without W1 (angular rigidity).
-
-## 6b. What the first measurements already changed
-
-Three things were learned by measuring rather than by designing, and each one altered the plan:
-
-1. **Five seeds is not enough to see anything in this world.** E1's ablations are individually
-   harmful and jointly helpful, which is impossible as an effect and is the signature of seed noise.
-   The v1 search used thirty worlds as its reporting minimum; experiments need to respect the same
-   bar, which makes **B0 (the parallel sweep runner) a prerequisite rather than a convenience.**
-2. **The population cap is the binding constraint on everything.** Blocked-reproduction counting
-   put a number on it for the first time: 41,244 blocked for want of a brain slot against 230
-   successful buds, over 6,000 ticks. It is also why every offline learner is rate-limited by
-   mortality, and why spores had such a large effect.
-3. **Two of my own additions were wrong on first measurement** — Adam at the inherited learning
-   rate, and TD(λ) without clipping, which drove a population extinct in 500 ticks. Both are now
-   regression tests. The pattern is consistent enough to be a rule: anything added here is wrong
-   until a test has disagreed with it once.
-
-## 7. Order of work
-
-1. **B0 — the parallel sweep runner.** Promoted to first. Every experiment below needs thirty
-   seeds rather than five, E1 has already shown why, and serially that is hours per question.
-2. **Metrics** (M1, M2, M3) — a search against a broken rung is wasted compute, and `rEat` is now a
-   searchable dial, so leaving M1 broken would let the search optimise the metric's artefact
-   directly. Strictly worse than v1, where `rEat` was fixed.
-3. **Re-run E1 and E1b at thirty seeds**, then **E2** (force ratio) and **E3** (mutation rate).
-   These decide how much of W1–W6 is worth building, and E3 decides whether anything is evolving.
-4. **W1** (angular rigidity) with its stability budget re-derived, then **W3** (moving comet food).
-5. **v2 pilot** at 2% budget, against the three gates in §6.
-6. **v2 phase 0** at full dial coverage.
-7. **W4–W6** as the data argues for them, not before.
-
-U1/U2 are done — the new world is already playable and inspectable.
-
-The thing to avoid is the v1 mistake in a new form: building more world, searching it hard, and
-discovering afterwards that the metric was measuring the search.
+- **P4** `reproMut` 0 is clearly worse than any nonzero rate. If it is not, nothing in this model is
+  evolving, and that is the most important finding available.
+- **P5** Nothing reaches a collective tier without bond angular rigidity.
+- **P6** *(new)* A moving food source raises `Taxis` and `Improves` relative to the static control,
+  and `orbit` beats `wander` at matched speed — the difference being anticipation.
+- **P7** *(new)* The thermodynamic rung is passed by worlds that no existing rung distinguishes,
+  because it is the only one thrift cannot satisfy.

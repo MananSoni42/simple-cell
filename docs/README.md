@@ -9,7 +9,7 @@
 | **[SEARCH.md](SEARCH.md)** | The v1 search log, written as it ran |
 | **[feasibility.md](feasibility.md)** | E8: is the ladder climbable? A hand-built brain per rung, and what each outcome means |
 | **[LADDER.md](LADDER.md)** | The ladder of intelligence: every rung, its null, and the trivial organism that defeated the version before it |
-| **[v2_plan.md](v2_plan.md)** | The v2 plan: world changes, ablations, searchable parameters, the ladder's known failures, and pre-registered predictions |
+| **[v2_plan.md](v2_plan.md)** | **The plan.** Where things stand, food dynamics, the thermodynamic programme, metrics still owed, known gaps, order of work, and pre-registered predictions |
 | **[structural_misses.md](structural_misses.md)** | Ten things the world could not express, four of them now fixed, and what each one cost |
 | **[PLAN.md](PLAN.md)** | Backlog, with measurements |
 | **[BENCH.md](BENCH.md)** | Performance baselines |
