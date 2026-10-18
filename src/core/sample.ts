@@ -1,6 +1,6 @@
 import { N_TRI, REPRO_MODES, TRI, type WorldSpec } from './catalog'
 import type { Element } from './params'
-import { QUANTA, type FoodLevel, type FoodMode, type FoodRegime } from './params'
+import { LAWS, QUANTA, type FoodLevel, type FoodMode, type FoodRegime } from './params'
 import { Rng } from './rng'
 import { BRAIN_ROW, FOOD_ROW } from './types'
 
@@ -116,6 +116,11 @@ const DIALS = {
   rowMut: [0.1, 0.25, 0.5],
   /** Decay is what frees a slot, so replication without it stalls once the empty slots are used. */
   decayScale: [0.001, 0.004, 0.012],
+  /**
+   * How often a free organism arrives. 25 was hardcoded and supplied ~80% of a short world's
+   * population; 2000 is close to "none", so a world has to breed its own.
+   */
+  spawnEvery: [25, 150, 600, 2000],
 } as const
 
 /**
@@ -135,7 +140,10 @@ function drawElements(rng: Rng, spread: number): (Partial<Element> | undefined)[
   const out: (Partial<Element> | undefined)[] = []
   for (let t = 0; t < 4; t++) {
     out[t] = {
-      radius: Math.round(jitter(5) * 10) / 10,
+      // floored at `d_max`: a pair must exclude each other at a distance a single tick's motion
+      // cannot cross, and exclusion is the sum of the two radii. `elementsOf` clamps it too, so a
+      // hand-written config cannot evade the rule either — this keeps the drawn value honest.
+      radius: Math.max(LAWS.d_max, Math.round(jitter(5) * 10) / 10),
       mobility: Math.round(jitter(1) * 100) / 100,
       // valence is a count, so it steps rather than scales; 1 admits only pairs, 6 admits a sheet
       valence: Math.max(1, Math.min(8, Math.round(4 * jitter(1)))),
@@ -223,6 +231,7 @@ function dials(rng: Rng, spec: Partial<WorldSpec> = {}): Omit<WorldSpec, 'seed' 
     templating: spec.templating ?? pick(rng, DIALS.templating),
     rowMut: spec.rowMut ?? pick(rng, DIALS.rowMut),
     decayScale: spec.decayScale ?? pick(rng, DIALS.decayScale),
+    spawnEvery: spec.spawnEvery ?? pick(rng, DIALS.spawnEvery),
   }
 }
 

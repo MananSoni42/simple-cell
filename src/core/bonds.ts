@@ -72,6 +72,21 @@ export class Bonds {
     }
   }
 
+  /**
+   * Recomputes `count` from the table, for use after a snapshot restore.
+   *
+   * `partner` is the truth; `count` is a running total maintained by `add`/`remove`, and a restore
+   * replaces the former without the latter. It then drifts and eventually goes negative, because
+   * `remove` decrements unconditionally.
+   */
+  recount(cap: number): void {
+    let n = 0
+    for (let i = 0; i < cap; i++) {
+      for (let k = 0; k < this.max; k++) if (this.partner[i * this.max + k] > i) n++
+    }
+    this.count = n
+  }
+
   /** Every bond once, as (i, j) with i < j. */
   forEach(fn: (i: number, j: number) => void, cap: number): void {
     for (let i = 0; i < cap; i++) {

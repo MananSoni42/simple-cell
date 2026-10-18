@@ -15,6 +15,10 @@ export interface Snapshot {
   /** [limbWeights, brainWeights] per brain slot, flattened; `has` says which existed. */
   wLimb: Float64Array
   wBrain: Float64Array
+  /** The weights an organism was *born* with, when Darwinian inheritance is configured. */
+  wBirthLimb: Float64Array
+  wBirthBrain: Float64Array
+  /** Four flags per matter slot: live limb, live brain, birth limb, birth brain. */
   wHas: Uint8Array
   patches: Float64Array // x, y, h, ox, oy per patch
   patchCount: number
@@ -54,6 +58,8 @@ function views(w: World): (Float64Array | Float32Array | Int32Array | Int16Array
     w.rows,
     w.endowment, w.coastT, w.hasJoined, w.parentJoined, w.wasLive, w.coparent,
     w.spawnX, w.spawnY, w.isSpore, w.lvx, w.lvy,
+    // harvest already paid out as reward, and the replication cooldown: both decide the future
+    w.rewarded, w.tmplCool,
   ]
 }
 
@@ -72,14 +78,17 @@ export function allocSnapshot(w: World): Snapshot {
   const vs = views(w)
   let total = 0
   for (const v of vs) total += v.byteLength
-  const brains = w.nMatter - w.nIntr
   return {
     tick: 0,
     bytes: new ArrayBuffer(total),
-    scalars: new Float64Array(9),
-    wLimb: new Float64Array(brains * N_WLIMB),
-    wBrain: new Float64Array(brains * w.brainWeightCount),
-    wHas: new Uint8Array(brains * 2),
+    scalars: new Float64Array(16),
+    // sized by every matter slot, not just the brain slots: a spore carries its genome on an
+    // intrinsic particle, and birth weights can exist for any organism
+    wLimb: new Float64Array(w.nMatter * N_WLIMB),
+    wBrain: new Float64Array(w.nMatter * w.brainWeightCount),
+    wBirthLimb: new Float64Array(w.nMatter * N_WLIMB),
+    wBirthBrain: new Float64Array(w.nMatter * w.brainWeightCount),
+    wHas: new Uint8Array(w.nMatter * 4),
     patches: new Float64Array(Math.max(1, w.patches.length) * 5),
     patchCount: 0,
     rng: [0, null],
@@ -110,15 +119,43 @@ export function writeSnapshot(w: World, snap: Snapshot): Snapshot {
   snap.scalars[6] = w.nClamped
   snap.scalars[7] = w.nSteps
   snap.scalars[8] = w.foodOwed
+  // a scan position and a merge clock are state: without them a rewound world replicates into
+  // different slots, and a merged archipelago re-freezes its colonies because the constructor
+  // resets `mergeStart` from `merge_hold`
+  snap.scalars[9] = w.matterCursor
+  snap.scalars[10] = w.mergeStart === null ? -1 : w.mergeStart
+  snap.scalars[11] = w.nTemplated
+  snap.scalars[12] = w.nSown
+  snap.scalars[13] = w.nGerminated
+  snap.scalars[14] = w.nConjugated
+  snap.scalars[15] = w.lightWasted
+  /*
+   * Weights for **every matter slot**, not just the brain slots.
+   *
+   * `sow()` stores a spore's genome on an *intrinsic* particle — below `nIntr` — and this loop
+   * used to start at `nIntr`. So a snapshot destroyed every spore's inheritance: verified, a spore
+   * at slot 5 came back with `isSpore` still 1 and `wBrain` `undefined`. It then germinated into a
+   * body whose `wBrain` was undefined, so `placeOrganism` fell through to `randomBrain` — the
+   * inherited genome silently replaced by a random one, *and* a draw taken from the world's RNG,
+   * which diverges everything after it. Another instance of the `nIntr`-vs-`nMatter` class.
+   *
+   * Birth weights ride along too: without them a rewind silently turns `inherit: 'birth'` into
+   * `'learned'`, so the run does the experiment it was configured not to do.
+   */
   const nb = w.brainWeightCount
-  for (let i = 0; i < w.nMatter - w.nIntr; i++) {
-    const b = w.nIntr + i
+  for (let b = 0; b < w.nMatter; b++) {
     const wl = w.wLimb[b]
     const wb = w.wBrain[b]
-    snap.wHas[i * 2] = wl ? 1 : 0
-    snap.wHas[i * 2 + 1] = wb ? 1 : 0
-    if (wl) snap.wLimb.set(wl, i * N_WLIMB)
-    if (wb) snap.wBrain.set(wb, i * nb)
+    const bl = w.wBirthLimb[b]
+    const bb = w.wBirthBrain[b]
+    snap.wHas[b * 4] = wl ? 1 : 0
+    snap.wHas[b * 4 + 1] = wb ? 1 : 0
+    snap.wHas[b * 4 + 2] = bl ? 1 : 0
+    snap.wHas[b * 4 + 3] = bb ? 1 : 0
+    if (wl) snap.wLimb.set(wl, b * N_WLIMB)
+    if (wb) snap.wBrain.set(wb, b * nb)
+    if (bl) snap.wBirthLimb.set(bl, b * N_WLIMB)
+    if (bb) snap.wBirthBrain.set(bb, b * nb)
   }
   snap.patchCount = w.patches.length
   for (let i = 0; i < w.patches.length; i++) {
@@ -165,11 +202,19 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   w.nClamped = clamped
   w.nSteps = steps
   w.foodOwed = owed
+  w.matterCursor = snap.scalars[9]
+  w.mergeStart = snap.scalars[10] < 0 ? null : snap.scalars[10]
+  w.nTemplated = snap.scalars[11]
+  w.nSown = snap.scalars[12]
+  w.nGerminated = snap.scalars[13]
+  w.nConjugated = snap.scalars[14]
+  w.lightWasted = snap.scalars[15]
   const nb = w.brainWeightCount
-  for (let i = 0; i < w.nMatter - w.nIntr; i++) {
-    const b = w.nIntr + i
-    w.wLimb[b] = snap.wHas[i * 2] ? snap.wLimb.slice(i * N_WLIMB, (i + 1) * N_WLIMB) : undefined
-    w.wBrain[b] = snap.wHas[i * 2 + 1] ? snap.wBrain.slice(i * nb, (i + 1) * nb) : undefined
+  for (let b = 0; b < w.nMatter; b++) {
+    w.wLimb[b] = snap.wHas[b * 4] ? snap.wLimb.slice(b * N_WLIMB, (b + 1) * N_WLIMB) : undefined
+    w.wBrain[b] = snap.wHas[b * 4 + 1] ? snap.wBrain.slice(b * nb, (b + 1) * nb) : undefined
+    w.wBirthLimb[b] = snap.wHas[b * 4 + 2] ? snap.wBirthLimb.slice(b * N_WLIMB, (b + 1) * N_WLIMB) : undefined
+    w.wBirthBrain[b] = snap.wHas[b * 4 + 3] ? snap.wBirthBrain.slice(b * nb, (b + 1) * nb) : undefined
   }
   w.patches.length = 0
   for (let i = 0; i < snap.patchCount; i++) {
@@ -183,6 +228,15 @@ export function restoreSnapshot(init: Init, snap: Snapshot, opts?: { shared?: bo
   w.setFreeFoodSlots(snap.freeFood.subarray(0, snap.freeFoodCount))
   w.lineageCounter = snap.lineageCounter
   if (snap.learner.length === w.learner.saveSize()) w.learner.loadFrom(snap.learner, 0)
+  /*
+   * `bonds.count` is re-derived, because `partner` is restored and the counter is not.
+   *
+   * Verified: a world reporting 98 bonds came back reporting **0** with 98 really there, then 1
+   * against a real 99 three hundred ticks later — and it goes *negative* as pre-existing bonds
+   * break, since `remove()` decrements unconditionally. The sim worker rewinds constantly and the
+   * figure is reported in the stats panel, the recorder and `evaluate`.
+   */
+  w.bonds.recount(w.cap)
   w.aggregates.reset()
   w.orders.reset()
   w.grid.build()

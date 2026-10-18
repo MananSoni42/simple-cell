@@ -400,7 +400,30 @@ export interface Element {
  * the measured value: at 1 a crumb of food drifts exactly as fast as a limb swims, and nothing can
  * be caught.
  */
+/**
+ * The smallest hard-core radius a particle may have, derived rather than chosen.
+ *
+ * The motion budget `d_max` is justified as "half a core radius" against the old universal
+ * exclusion of `r_0 = 10`. But exclusion is now the **sum of the two radii**, so a pair of small
+ * particles can exclude each other at less than one tick's permitted displacement — at
+ * `elementSpread` 1 the sampler draws radii down to 1.84, giving an exclusion of 3.68 against a
+ * budget of 5. Measured: the share of in-core pairs sitting below a tenth of their own exclusion
+ * rose from 0.0015 at the default radius to 0.0106 at radius 2, a sevenfold degradation, and two
+ * isolated particles approached to 3.9% of their exclusion against 20% at the default.
+ *
+ * The floor is `d_max / 2`, so the worst-case pair exclusion is `d_max` itself, and `stability`
+ * below then buys the rest of the margin by raising the sub-step count — the budget that actually
+ * governs a single move is `d_max / substeps`, not `d_max`. Flooring each radius at `d_max`
+ * instead would restore the original two-fold margin in one stroke but forbid small particles
+ * altogether, turning size into a dial that only goes up.
+ *
+ * Clamped here rather than in the sampler, so a hand-written config and a search draw are bound
+ * by the same rule.
+ */
+export const minRadius = (L: Laws): number => L.d_max / 2
+
 export function elementsOf(given: (Partial<Element> | undefined)[] | undefined, L: Laws): Element[] {
+  const floor = minRadius(L)
   return [0, 1, 2, 3, 4, 5, 6].map((t) => ({
     // half the old universal exclusion, so two default particles still part at exactly r_0
     radius: (L.beta * L.r_c) / 2,
@@ -410,7 +433,7 @@ export function elementsOf(given: (Partial<Element> | undefined)[] | undefined, 
     bondCost: L.E_bond,
     decay: 0,
     ...(given?.[t] ?? {}),
-  }))
+  })).map((e) => ({ ...e, radius: Math.max(floor, e.radius) }))
 }
 
 /** Food's type tag. Spelled out here because params must not import from types for this alone. */
@@ -708,11 +731,29 @@ export interface Stability {
 }
 
 export function stability(init: Init, L: Laws = LAWS): Stability {
-  const r0 = L.beta * L.r_c
+  /*
+   * Measured against **this world's own** smallest exclusion and fastest matter, not the global
+   * defaults.
+   *
+   * It used `L.beta * L.r_c` and `L.mu` flat, so it was blind to both per-type radii and per-type
+   * mobility: a world whose particles are small or light was declared stable on the strength of
+   * numbers belonging to a different world. Measured over 20,000 sampled specs, **70% sat outside
+   * the stated budget** — 0% at `elementSpread` 0 and about 93% at every nonzero spread — so
+   * `elementSpread` was confounded with numerical breakage, and "does differentiating the types
+   * help?" was partly "does over-stepping the integrator help?".
+   *
+   * Taking the worst case of each means `substepsFor` now buys sub-steps to cover whatever the
+   * element table asks for, which is what keeps the exclusion guarantee while letting size and
+   * mass vary.
+   */
+  const els = elementsOf(init.elements, L)
+  const smallest = els.reduce((m, e) => Math.min(m, e.radius), Number.POSITIVE_INFINITY)
+  const fastest = els.slice(0, 4).reduce((m, e) => Math.max(m, e.mobility), 1)
+  const r0 = 2 * smallest
   const n = Math.max(1, Math.round(init.substeps))
   // sub-stepping splits the tick: each Brownian increment is sqrt(n) smaller
-  const sigma = Math.sqrt((2 * L.mu * init.T) / n)
-  const forceStep = (L.mu * L.K_core) / n
+  const sigma = Math.sqrt((2 * L.mu * fastest * init.T) / n)
+  const forceStep = (L.mu * fastest * L.K_core) / n
   const bondDepth = (L.r_c * (1 - L.beta)) / 2
   const s: Stability = {
     sigma,

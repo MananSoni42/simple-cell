@@ -297,7 +297,8 @@ export class World {
   /** Each particle's own affinity row: `rows[i * N_MATRIX + m]`. See the constructor. */
   readonly rows: Float64Array
   /** Ticks before a particle may copy itself again. */
-  private readonly tmplCool: Int16Array
+  /** Snapshotted: see `views()`. */
+  readonly tmplCool: Int16Array
   /**
    * Where the next scan for an empty matter slot starts.
    *
@@ -311,7 +312,8 @@ export class World {
    * A scan cannot go stale, which is worth more here than the cost of the scan — and the cursor
    * means each pass starts where the last finished, so the work is spread rather than repeated.
    */
-  private matterCursor = 0
+  /** Snapshotted as a scalar: a scan position is state like any other. */
+  matterCursor = 0
   readonly parentJoined: Uint8Array
   /**
    * The learner's tag for this organism, or 0 if its weights came from chance. A distribution
@@ -405,7 +407,8 @@ export class World {
    * Harvest already reported to an online learner, so each tick's reward is what was eaten *since
    * the last look* rather than a running total. Only touched when a learner is online.
    */
-  private readonly rewarded: Float64Array
+  /** Snapshotted: see `views()`. Harvest already reported to an online learner. */
+  readonly rewarded: Float64Array
   /**
    * The weights an organism was born with, kept only when inheritance is Darwinian.
    *
@@ -414,8 +417,8 @@ export class World {
    * generalise worse. With `'birth'` it copies what the parent started from, so learning shapes
    * a life and selection alone shapes the lineage.
    */
-  private readonly wBirthBrain: (Float64Array | undefined)[]
-  private readonly wBirthLimb: (Float64Array | undefined)[]
+  readonly wBirthBrain: (Float64Array | undefined)[]
+  readonly wBirthLimb: (Float64Array | undefined)[]
   private readonly darwinian: boolean
   readonly wLimb: (Float64Array | undefined)[]
   readonly wBrain: (Float64Array | undefined)[]
@@ -462,7 +465,7 @@ export class World {
     }
     this.blind = opts.blind && opts.blind.length > 0 ? [...opts.blind] : null
     this.rng = new Rng((init.seed ^ 0x9e3779b9) | 0)
-    this.learner = makeLearner(init.learn ?? LEARN_DEFAULTS, init.seed)
+    // learner constructed below, once the brain slot range is known
     this.mergeStart = init.merge_hold ? null : 0
     const L = this.L
 
@@ -598,6 +601,11 @@ export class World {
     this.seedRows()
     for (let i = this.cap - 1; i >= this.nMatter + this.nWall; i--) this.freeFood.push(i)
 
+    /*
+     * The learner is built here, not earlier, because an online one has to be told the brain slot
+     * range: its state is per living organism and has to be a flat array to fit in a snapshot.
+     */
+    this.learner = makeLearner(init.learn ?? LEARN_DEFAULTS, init.seed, this.nIntr, this.nMatter - this.nIntr)
     this.grid = new Grid(L.SIZE, L.r_c, n, this.nMatter, this, sh)
     const g = this.grid
     this.kernelArrays = {
@@ -2628,9 +2636,19 @@ export class World {
       this.repBlocked.matter++
       return false
     }
-    // energy moves, it is never created: the parent's loss is exactly the spore's gain
-    this.energy[b] -= L.E_spore
-    this.energy[pick] += L.E_spore
+    /*
+     * Energy moves, never appears — and the target's reserve is **capped**.
+     *
+     * `energy[pick] += E_spore` with no cap could push a free particle past `E_cap`: verified, a
+     * particle at 95 reached 125 against a cap of 100. The ledger stayed closed, because the parent
+     * paid exactly the same amount, so this is R4's reserve ceiling breaking rather than
+     * conservation. Whatever will not fit is simply not spent, so the parent keeps it.
+     */
+    const room = Math.max(0, L.E_cap - this.energy[pick])
+    const give = Math.min(L.E_spore, room)
+    if (give <= 0) return false // no room in that particle; try again another tick
+    this.energy[b] -= give
+    this.energy[pick] += give
     this.isSpore[pick] = 1
     this.wBrain[pick] = Float64Array.from(this.wBrain[b]!)
     this.wLimb[pick] = Float64Array.from(this.wLimb[b]!)

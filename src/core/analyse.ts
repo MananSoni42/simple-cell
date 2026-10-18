@@ -75,7 +75,75 @@ function cell(label: string, rows: CatalogEntry[]): Cell {
   }
 }
 
-function factor(name: string, groups: Map<string, CatalogEntry[]>): Factor {
+/**
+ * Critical values of the studentized range, q(k, ∞), at α = 0.05, indexed by the number of cells.
+ *
+ * The gap this function reports is between the **best and worst of k sorted cells**, which is a
+ * studentized range, not a two-sample difference. Judging it against a two-sample threshold of 2
+ * SE announces findings that are not there, and the rate was measured: on a synthetic catalog
+ * where the score is independent of every dial, **3 of 26 dial factors flagged `real`**, with a
+ * maximum z of 3.4 at 20,000 worlds. With 26 dial factors plus 20 couplings plus 4 shapes, a
+ * report should be expected to invent about five findings per run — and `z = 3` sits inside the
+ * null.
+ *
+ * Tukey's range distribution is the correct null. The values below are the standard table; `q/√2`
+ * converts it to the same scale as the two-sample z this used to compute, so the threshold for two
+ * cells stays at 2.77/1.41 ≈ 1.96 — the familiar number — and rises as the number of cells grows.
+ */
+const Q_CRIT: readonly number[] = [0, 0, 2.77, 3.31, 3.63, 3.86, 4.03, 4.17, 4.29, 4.39, 4.47]
+
+/**
+ * How many factors a full report contains, for the family-wide correction.
+ *
+ * Counted rather than guessed: ~26 dials, 20 couplings, 4 shapes and a source. Hardcoding it is
+ * the weak part of this — add a factor and the constant should move — so it is deliberately an
+ * over-estimate, which errs toward calling fewer things real.
+ */
+const FAMILY = 55
+
+/**
+ * Normal quantile, Acklam's rational approximation. Accurate to about 1e-9 over (0,1), which is
+ * far more than a significance threshold needs, and it avoids pulling in a dependency for one
+ * number.
+ */
+function probit(p: number): number {
+  const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.38357751867269e2, -3.066479806614716e1, 2.506628277459239]
+  const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1]
+  const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783]
+  const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416]
+  const pl = 0.02425
+  if (p < pl) {
+    const q = Math.sqrt(-2 * Math.log(p))
+    return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1)
+  }
+  if (p > 1 - pl) return -probit(1 - p)
+  const q = p - 0.5
+  const r = q * q
+  return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q /
+    (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1)
+}
+
+/**
+ * The threshold the max−min gap must clear, in z units, for `k` qualifying cells in a report of
+ * `family` factors.
+ *
+ * Two corrections, because there are two multiplicities and fixing one leaves the other. Within a
+ * factor the gap is a **studentized range** over k cells, not a two-sample difference. Across the
+ * report there are **fifty-odd factors**, so at α = 0.05 each a pure null yields two or three
+ * flags whatever the within-factor test does — measured, the range correction alone still left 5
+ * of 50 flagged on a catalog where the score was independent of every dial.
+ *
+ * So the bar is the larger of the two: the range critical value, and a Bonferroni-corrected normal
+ * quantile for the family. Conservative by construction, which is the right direction for a report
+ * whose purpose is to decide what the next search looks for.
+ */
+function rangeThreshold(k: number, family: number): number {
+  const q = Q_CRIT[Math.min(k, Q_CRIT.length - 1)] ?? 4.47
+  const bonferroni = probit(1 - 0.025 / Math.max(1, family))
+  return Math.max(q / Math.SQRT2, bonferroni)
+}
+
+function factor(name: string, groups: Map<string, CatalogEntry[]>, family = FAMILY): Factor {
   const cells = [...groups.entries()]
     .map(([label, rows]) => cell(label, rows))
     .filter((c) => c.n >= MIN_N)
@@ -83,7 +151,8 @@ function factor(name: string, groups: Map<string, CatalogEntry[]>): Factor {
   const hi = cells[0]
   const lo = cells[cells.length - 1]
   const z = hi && lo && hi !== lo ? (hi.mean - lo.mean) / Math.sqrt(hi.se ** 2 + lo.se ** 2 || 1e-9) : 0
-  return { name, cells, z, real: z >= 2 }
+  // against the studentized range for however many cells qualified, not a flat 2 SE
+  return { name, cells, z, real: z >= rangeThreshold(cells.length, family) }
 }
 
 const group = <T,>(rows: CatalogEntry[], key: (e: CatalogEntry) => T): Map<string, CatalogEntry[]> => {
@@ -141,6 +210,8 @@ export function dialFactors(rows: CatalogEntry[]): Factor[] {
     factor('chemistry evolves', group(rows, (e) => (e.spec.templating ? 'yes' : 'no'))),
     factor('row mutation', group(rows, (e) => e.spec.rowMut ?? '(default)')),
     factor('matter decays at', group(rows, (e) => e.spec.decayScale ?? '(never)')),
+    // where a world's organisms come from: the spawner, or its own reproduction
+    factor('a free organism every', group(rows, (e) => e.spec.spawnEvery ?? '(default)')),
     factor('spore cost', group(rows, (e) => e.spec.eSpore ?? '(default)')),
     factor('spore wakes at', group(rows, (e) => e.spec.sporeFood ?? '(default)')),
     /*

@@ -244,6 +244,18 @@ export abstract class Learner {
   constructor(
     readonly cfg: LearnConfig,
     seed: number,
+    /**
+     * Where the brain slots start and how many there are.
+     *
+     * Only the online learners need these, and they need them badly: their state is **per living
+     * organism**, so it has to be a flat array sized at construction rather than a `Map`. A Map
+     * cannot go in a fixed-size snapshot, and an online learner's per-organism state is not
+     * incidental — it *is* the learning, so losing it across a rewind means a restored world
+     * diverges from the one it was copied from. It also removes a Map lookup from a loop that runs
+     * once per organism per tick.
+     */
+    protected readonly brainOffset = 0,
+    protected readonly brainCount = 0,
   ) {
     // its own stream, so switching a learner on cannot move a single food particle
     this.rng = new Rng((seed ^ 0x51ed270b) | 0)
@@ -416,9 +428,19 @@ export abstract class Learner {
   }
 
   // ---- state, for snapshots -------------------------------------------------
-  // A learner is state like any other, so rewinding has to put it back. The in-flight samples of
-  // a batch algorithm are *not* saved: there are only ever a few, and a rewind that loses them
-  // costs one partial update rather than correctness.
+  /*
+   * A learner is state like any other, so rewinding has to put it back.
+   *
+   * The in-flight samples of a batch algorithm are *not* saved, and the note here used to say that
+   * "a rewind that loses them costs one partial update rather than correctness". **That is wrong,
+   * and measured: a CEM world is not bit-identical after a restore.** Losing the pending ε vectors
+   * changes which genome the learner hands out next, which changes the world.
+   *
+   * It is a real gap in the determinism invariant, not a free simplification, and it is the only
+   * one left — every other learner and every world feature now restores bit-identically. Fixing it
+   * means serialising `pending` and `batch`, both bounded (`capPending` is `max(8, batch·4)`), so
+   * it is a bounded amount of work rather than an impossibility. Recorded rather than claimed
+   * harmless.
 
   /** Fixed, so a snapshot ring can be allocated once. */
   saveSize(): number {
@@ -1027,30 +1049,48 @@ class TdLambda extends Online {
   readonly algo = 'td' as const
   /** The shared value head, one weight per brain input. */
   private v = new Float64Array(N_BRAIN_IN)
-  private state = new Map<number, { eV: Float64Array; eA: Float64Array; prevV: number; started: boolean }>()
+  /** Per-organism eligibility traces, flat and indexed by `b - brainOffset`. See the constructor. */
+  private eV: Float64Array
+  private eA: Float64Array
+  private prevV: Float64Array
+  private started: Uint8Array
   private deltaSum = 0
   private deltaN = 0
 
-  private forOrganism(b: number) {
-    let st = this.state.get(b)
-    if (!st) {
-      st = { eV: new Float64Array(N_BRAIN_IN), eA: new Float64Array(N_GENE_BRAIN), prevV: 0, started: false }
-      this.state.set(b, st)
-    }
-    return st
+  constructor(cfg: LearnConfig, seed: number, brainOffset = 0, brainCount = 0) {
+    super(cfg, seed, brainOffset, brainCount)
+    const n = Math.max(1, brainCount)
+    this.eV = new Float64Array(n * N_BRAIN_IN)
+    this.eA = new Float64Array(n * N_GENE_BRAIN)
+    this.prevV = new Float64Array(n)
+    this.started = new Uint8Array(n)
+  }
+
+  /** Slot for organism `b`, or -1 when it falls outside the range this learner was sized for. */
+  private slot(b: number): number {
+    const k = b - this.brainOffset
+    return k >= 0 && k < this.brainCount ? k : -1
   }
 
   forget(b: number): void {
-    this.state.delete(b)
+    const k = this.slot(b)
+    if (k < 0) return
+    this.eV.fill(0, k * N_BRAIN_IN, (k + 1) * N_BRAIN_IN)
+    this.eA.fill(0, k * N_GENE_BRAIN, (k + 1) * N_GENE_BRAIN)
+    this.prevV[k] = 0
+    this.started[k] = 0
   }
 
   act(s: OnlineStep): void {
     const { cfg } = this
-    const st = this.forOrganism(s.b)
+    const k = this.slot(s.b)
+    if (k < 0) return
+    const eVo = k * N_BRAIN_IN
+    const eAo = k * N_GENE_BRAIN
     let value = 0
     for (let i = 0; i < N_BRAIN_IN; i++) value += this.v[i] * s.xin[i]
 
-    if (st.started) {
+    if (this.started[k]) {
       /*
        * δ against *last* tick's prediction. The traces already hold last tick's inputs and action
        * noise, so the error lands on what actually caused it — which is the entire reason to use
@@ -1061,11 +1101,11 @@ class TdLambda extends Online {
        * as a large δ blew up the actor weights, the policy saturated, and movement cost at
        * `c_mv·μ·F²` finished the job. Clipping is the standard guard and it is load-bearing here.
        */
-      const delta = Math.max(-DELTA_CLIP, Math.min(DELTA_CLIP, s.reward + cfg.gamma * value - st.prevV))
+      const delta = Math.max(-DELTA_CLIP, Math.min(DELTA_CLIP, s.reward + cfg.gamma * value - this.prevV[k]))
       this.deltaSum += Math.abs(delta)
       this.deltaN++
-      for (let i = 0; i < N_BRAIN_IN; i++) this.v[i] += cfg.criticLr * delta * st.eV[i]
-      for (let k = 0; k < N_GENE_BRAIN; k++) s.wBrain[k] += cfg.actorLr * delta * st.eA[k] - cfg.decay * s.wBrain[k]
+      for (let i = 0; i < N_BRAIN_IN; i++) this.v[i] += cfg.criticLr * delta * this.eV[eVo + i]
+      for (let q = 0; q < N_GENE_BRAIN; q++) s.wBrain[q] += cfg.actorLr * delta * this.eA[eAo + q] - cfg.decay * s.wBrain[q]
       this.updates++
     }
 
@@ -1080,29 +1120,70 @@ class TdLambda extends Online {
      */
     const decay = cfg.gamma * cfg.lambda
     for (let i = 0; i < N_BRAIN_IN; i++) {
-      const d = decay * st.eV[i]
-      st.eV[i] = Math.abs(s.xin[i]) > Math.abs(d) ? s.xin[i] : d
+      const d = decay * this.eV[eVo + i]
+      this.eV[eVo + i] = Math.abs(s.xin[i]) > Math.abs(d) ? s.xin[i] : d
     }
     if (cfg.explore > 0) {
       for (let o = 0; o < N_BRAIN_OUT; o++) {
         const noise = cfg.explore * this.rng.gauss()
         s.yout[o] += noise
-        const row = o * N_BRAIN_IN
+        const row = eAo + o * N_BRAIN_IN
         for (let i = 0; i < N_BRAIN_IN; i++) {
           const e = noise * s.xin[i]
-          const d = decay * st.eA[row + i]
-          st.eA[row + i] = Math.abs(e) > Math.abs(d) ? e : d
+          const d = decay * this.eA[row + i]
+          this.eA[row + i] = Math.abs(e) > Math.abs(d) ? e : d
         }
       }
     } else {
-      for (let k = 0; k < N_GENE_BRAIN; k++) st.eA[k] *= decay
+      for (let q = 0; q < N_GENE_BRAIN; q++) this.eA[eAo + q] *= decay
     }
-    st.prevV = value
-    st.started = true
+    this.prevV[k] = value
+    this.started[k] = 1
   }
 
   protected held(): number {
-    return this.state.size
+    let n = 0
+    for (let k = 0; k < this.brainCount; k++) if (this.started[k]) n++
+    return n
+  }
+
+  // ---- state, so a rewind restores the learning rather than losing it --------
+  saveSize(): number {
+    return super.saveSize() + N_BRAIN_IN + this.eV.length + this.eA.length + this.prevV.length + this.started.length + 2
+  }
+
+  saveInto(a: Float64Array, off: number): void {
+    super.saveInto(a, off)
+    let o = off + super.saveSize()
+    a.set(this.v, o)
+    o += N_BRAIN_IN
+    a.set(this.eV, o)
+    o += this.eV.length
+    a.set(this.eA, o)
+    o += this.eA.length
+    a.set(this.prevV, o)
+    o += this.prevV.length
+    for (let k = 0; k < this.started.length; k++) a[o + k] = this.started[k]
+    o += this.started.length
+    a[o] = this.deltaSum
+    a[o + 1] = this.deltaN
+  }
+
+  loadFrom(a: Float64Array, off: number): void {
+    super.loadFrom(a, off)
+    let o = off + super.saveSize()
+    this.v.set(a.subarray(o, o + N_BRAIN_IN))
+    o += N_BRAIN_IN
+    this.eV.set(a.subarray(o, o + this.eV.length))
+    o += this.eV.length
+    this.eA.set(a.subarray(o, o + this.eA.length))
+    o += this.eA.length
+    this.prevV.set(a.subarray(o, o + this.prevV.length))
+    o += this.prevV.length
+    for (let k = 0; k < this.started.length; k++) this.started[k] = a[o + k] ? 1 : 0
+    o += this.started.length
+    this.deltaSum = a[o]
+    this.deltaN = a[o + 1]
   }
 
   /** Mean |δ|, which is the honest "is it learning" figure for a critic: it should fall. */
@@ -1126,24 +1207,38 @@ class TdLambda extends Online {
  */
 class Hebbian extends Online {
   readonly algo = 'hebb' as const
-  private state = new Map<number, { base: number; n: number }>()
+  /** Each organism's own running reward baseline, flat so it survives a snapshot. */
+  private base: Float64Array
+  private seenN: Float64Array
+
+  constructor(cfg: LearnConfig, seed: number, brainOffset = 0, brainCount = 0) {
+    super(cfg, seed, brainOffset, brainCount)
+    this.base = new Float64Array(Math.max(1, brainCount))
+    this.seenN = new Float64Array(Math.max(1, brainCount))
+  }
+
+  private slot(b: number): number {
+    const k = b - this.brainOffset
+    return k >= 0 && k < this.brainCount ? k : -1
+  }
 
   forget(b: number): void {
-    this.state.delete(b)
+    const k = this.slot(b)
+    if (k >= 0) {
+      this.base[k] = 0
+      this.seenN[k] = 0
+    }
   }
 
   act(s: OnlineStep): void {
     const { cfg } = this
-    let st = this.state.get(s.b)
-    if (!st) {
-      st = { base: 0, n: 0 }
-      this.state.set(s.b, st)
-    }
+    const k = this.slot(s.b)
+    if (k < 0) return
     if (cfg.explore > 0) for (let o = 0; o < N_BRAIN_OUT; o++) s.yout[o] += cfg.explore * this.rng.gauss()
-    const adv = s.reward - st.base
+    const adv = s.reward - this.base[k]
     // the baseline tracks this organism's own recent reward, so "better than usual" is personal
-    st.base += 0.01 * adv
-    st.n++
+    this.base[k] += 0.01 * adv
+    this.seenN[k]++
     if (adv === 0) return
     for (let o = 0; o < N_BRAIN_OUT; o++) {
       const post = Math.tanh(s.yout[o])
@@ -1158,11 +1253,31 @@ class Hebbian extends Online {
   }
 
   protected held(): number {
-    return this.state.size
+    let n = 0
+    for (let q = 0; q < this.brainCount; q++) if (this.seenN[q] > 0) n++
+    return n
+  }
+
+  saveSize(): number {
+    return super.saveSize() + this.base.length + this.seenN.length
+  }
+
+  saveInto(a: Float64Array, off: number): void {
+    super.saveInto(a, off)
+    const o = off + super.saveSize()
+    a.set(this.base, o)
+    a.set(this.seenN, o + this.base.length)
+  }
+
+  loadFrom(a: Float64Array, off: number): void {
+    super.loadFrom(a, off)
+    const o = off + super.saveSize()
+    this.base.set(a.subarray(o, o + this.base.length))
+    this.seenN.set(a.subarray(o + this.base.length, o + this.base.length + this.seenN.length))
   }
 }
 
-export function makeLearner(cfg: LearnConfig, seed: number): Learner {
+export function makeLearner(cfg: LearnConfig, seed: number, brainOffset = 0, brainCount = 0): Learner {
   switch (cfg.algo) {
     case 'random':
       return new RandomSearch(cfg, seed)
@@ -1174,10 +1289,11 @@ export function makeLearner(cfg: LearnConfig, seed: number): Learner {
       return new Cem(cfg, seed)
     case 'elites':
       return new MapElites(cfg, seed)
+    // the online learners keep state per living organism, so they need to know how many there can be
     case 'td':
-      return new TdLambda(cfg, seed)
+      return new TdLambda(cfg, seed, brainOffset, brainCount)
     case 'hebb':
-      return new Hebbian(cfg, seed)
+      return new Hebbian(cfg, seed, brainOffset, brainCount)
     default:
       return new NoLearner(cfg, seed)
   }

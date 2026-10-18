@@ -115,6 +115,14 @@ export interface WorldSpec {
   /** Per-type decay, as a single multiplier on the drawn table: what makes slots free to copy into. */
   decayScale?: number
   /**
+   * Ticks between free organisms arriving from the spawner (R7.1).
+   *
+   * Searchable because it was silently deciding where a world's population came from: at 25, most
+   * organisms in a short run are spawned rather than descended, so the heredity rungs are reading
+   * the spawner. High values make a world live or die on its own reproduction.
+   */
+  spawnEvery?: number
+  /**
    * A named hand-built brain (see `handbuilt.ts`), instead of random weights.
    *
    * Never drawn by the sampler — these are written, not found. It travels in the spec so a
@@ -199,7 +207,18 @@ export function specInit(spec: WorldSpec): Init {
   init.n_start = Math.max(2, Math.round(spec.slots * 0.1))
   init.n_intrinsic = spec.matter
   init.T = spec.T
-  init.T_spawn = 25
+  /*
+   * The spawner, which was supplying most of every world's population.
+   *
+   * This was hardcoded at 25 against 60–140 from the seed, and in no dial. Measured at the phase-0
+   * horizon: **20 spawns per 500-tick run against a mean of 3.0 budded children** — so roughly
+   * 80% of every organism a short world ever held was a gift from the spawner rather than a
+   * descendant. Every tier-0 rung was partly reading the spawn rate, and `evaluate`'s `extinct`
+   * early stop could essentially never fire: 120 of 120 sampled worlds ran to `done`.
+   *
+   * Now a dial, with the old value among its levels so a search can find that it was right.
+   */
+  init.T_spawn = spec.spawnEvery ?? 25
   init.metabolism = spec.metabolism
   init.bond_flow = spec.bondFlow
   init.fission = spec.fission
@@ -286,7 +305,7 @@ export function specId(spec: WorldSpec): string {
     spec.muFood, spec.fMax, spec.kBond, spec.fBreak, spec.maxBonds, spec.rEat, spec.eBirth, spec.eRepro, spec.reproMut,
     spec.reproMode, spec.eSpore, spec.sporeFood,
     spec.templating === undefined ? undefined : spec.templating ? 1 : 0, spec.rowMut, spec.decayScale,
-    spec.handBuilt,
+    spec.handBuilt, spec.spawnEvery,
     // the element table, canonicalised: field order fixed by `ELEMENT_FIELDS` so two equal tables
     // written in different key orders cannot hash differently
     spec.elements

@@ -209,3 +209,16 @@ some rung of the ladder unreachable rather than merely hard. Numbering is that d
 
 The four that were taken are #1, #2, #3 and #5/#9; see that document for what each cost and what
 it bought.
+
+## Known determinism gap
+
+**A world running CEM (or ES) is not bit-identical after a snapshot restore.** The distribution
+learners' in-flight samples — `pending` and `batch` in `learning.ts` — are not serialised, and
+losing them changes which genome the learner hands out next, which changes the world. Measured
+directly: seven of eight configurations restore bit-identically (plain, TD(λ), Hebbian, TD with
+Darwinian inheritance, templating, spores, conjugation); CEM diverges.
+
+The code used to assert this "costs one partial update rather than correctness", which was wrong.
+Both arrays are bounded (`capPending = max(8, batch·4)`), so serialising them is a bounded job —
+roughly forty lines — and worth doing before any run that relies on rewind plus a distribution
+learner together.
