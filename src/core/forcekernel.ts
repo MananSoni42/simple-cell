@@ -57,6 +57,24 @@ export interface KernelParams {
   skipFood: boolean
   /** Per-type hard-core radii, indexed by particle type. */
   radius: Float64Array
+  /**
+   * True when every particle's row is still identical to its type's row in `A`.
+   *
+   * Then `0.5·(rows[i·N+mj] + rows[j·N+mi])` is exactly `A[mi·N+mj]`, because `A` is symmetric and
+   * both rows were seeded from it — so the kernel can read a 36-element matrix that stays in L1
+   * instead of two per-particle rows of six doubles each.
+   *
+   * Measured, the per-particle read costs **7–9% of the force pass** (1.416 → 1.545 ms at one
+   * scale, 5.330 → 5.798 at another), which is 3–6% of a whole tick since forces are 42–63% of
+   * one. Packing the rows into the grid's packed arrays was measured and is a *net loss* — the
+   * cost is the seven-wide working set, not the indirection, and packing copies it rather than
+   * removing it, at roughly forty times what it saves.
+   *
+   * Static, decided at construction: only `templateParticles` ever writes a row, so a world with
+   * templating off can never diverge. `seedRows` and `resetRow` both copy from `A`. That covers
+   * about half the sampled space and every world catalogued to date.
+   */
+  uniformRows: boolean
 }
 
 const MIDX = Int8Array.from(MATRIX_INDEX)
@@ -68,8 +86,8 @@ const MIDX = Int8Array.from(MATRIX_INDEX)
  * so equal-sized ranges carry equal work.
  */
 export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: KernelParams): void {
-  const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, ffx, ffy, rows } = a
-  const { SIZE: S, r_c: rc, K_core: K, r_brain_core, r_brain, K_brain, A_brain, r_brain_push, r_wall, K_wall, nc, skipFood, radius } = p
+  const { px, py, ptype, powner, pcell, items, cellStart, fx, fy, foodNear, ffx, ffy, rows, A } = a
+  const { SIZE: S, r_c: rc, K_core: K, r_brain_core, r_brain, K_brain, A_brain, r_brain_push, r_wall, K_wall, nc, skipFood, radius, uniformRows } = p
   const rc2 = rc * rc
   const half = S / 2
   for (let k0 = lo; k0 < hi; k0++) {
@@ -130,7 +148,12 @@ export function computeForcesRange(lo: number, hi: number, a: KernelArrays, p: K
             // the pair's coupling: the mean of what each one thinks of the other's kind. One extra
             // indirection per pair — `items` maps a packed slot back to its particle — against
             // which `myRow` is hoisted out of the loop because it never changes.
-            const a = mi >= 0 && mj >= 0 ? 0.5 * (rows[myRow + mj] + rows[items[k] * N_MATRIX + mi]) : 0
+            const a =
+              mi >= 0 && mj >= 0
+                ? uniformRows
+                  ? A[mi * N_MATRIX + mj]
+                  : 0.5 * (rows[myRow + mj] + rows[items[k] * N_MATRIX + mi])
+                : 0
             f = a * (1 - Math.abs(2 * u - 1 - beta) / (1 - beta))
             /*
              * A brain now has chemistry *and* its body radius.

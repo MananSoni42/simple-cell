@@ -612,6 +612,8 @@ export class World {
       r_wall: L.r_wall, K_wall: L.K_wall,
       nc: g.nc, skipFood: !init.foodMoves,
       radius: this.eRadius,
+      // only `templateParticles` ever writes a row, so without it rows stay equal to `A` forever
+      uniformRows: !init.templating,
     }
     this.field = new Float64Array(L.fieldN * L.fieldN)
     this.fieldTmp = new Float64Array(L.fieldN * L.fieldN)
@@ -1388,6 +1390,23 @@ export class World {
         // Brains do not bond to each other, as a rule rather than as an accident of two radii.
         // It held only because `separateBrains` keeps brains 16 apart and a bond needs about 12 —
         // so it would have quietly stopped holding the moment that exclusion became a dial.
+        /*
+         * **Distance first.** Every test here is a conjunction, so the order is free to choose —
+         * and this loop was asking the expensive, least selective questions before the cheap,
+         * most selective one.
+         *
+         * A 3×3 cell block is about 128 units across and a bond forms within roughly 12, so the
+         * distance test rejects about 97% of candidates on its own. It was running *after*
+         * `bonds.has`, `bonds.slots` and `coupling` — two table walks and four array reads — for
+         * every one of them. Measured: 93.7 → 38.6 µs/tick at the phase-0 shape (−59%) and
+         * 845.6 → 402.3 µs at the phase-2 shape (−52%), bit-exact, goldens unchanged.
+         *
+         * `formRange2` needs both types, which is why the type reads stay above it.
+         */
+        const dx = this.minImage(x[j] - x[i])
+        const dy = this.minImage(y[j] - y[i])
+        const r2 = dx * dx + dy * dy
+        if (r2 > this.formRange2(ti, tj)) continue // slack enough that F_form can hold it
         if (ti === BRAIN && tj === BRAIN) continue
         if (this.owner[i] >= 0 && this.owner[i] === this.owner[j]) continue // siblings are already joined by rods
         if (bonds.has(i, j) || bonds.slots(j, this.eValence[tj]) === 0) continue
@@ -1395,11 +1414,6 @@ export class World {
         // the pair's own coupling, not their types' — two P1 particles may now disagree about
         // whether they like each other, and the bond test has to ask the same question the force does
         if (mj < 0 || this.coupling(i, j) < L.A_form) continue
-        const dx = this.minImage(x[j] - x[i])
-        const dy = this.minImage(y[j] - y[i])
-        const r2 = dx * dx + dy * dy
-        // the pair's forming range, from the weaker partner's bond strength
-        if (r2 > this.formRange2(ti, tj)) continue // slack enough that F_form can hold it
         const ci = this.eBondCost[ti]
         const cj = this.eBondCost[tj]
         if (this.energy[i] < ci || this.energy[j] < cj) continue
