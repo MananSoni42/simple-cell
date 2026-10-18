@@ -215,6 +215,179 @@ export type SourceRelation =
 export const SOURCE_RELATIONS: readonly SourceRelation[] = ['independent', 'converging', 'diverging', 'cyclical', 'formation']
 
 /**
+ * The food worlds worth choosing between, as named combinations of the three axes.
+ *
+ * The axes are the right factorisation for a *search* — orthogonal, so a factor table can say which
+ * one mattered. They are the wrong thing to put in front of a person. The cross-product is 8 x 6 x 5
+ * = 240 combinations and most are not worlds: uniform food cannot show a source motion because
+ * nothing is placed relative to a source, a `comet` pattern with `static` motion is a contradiction
+ * in its own name, and `formation` means nothing with one source. Offering all 240 and relying on
+ * the reader to avoid the nonsense produced exactly the complaint it deserved — dials that appear
+ * not to work.
+ *
+ * So: one list, each entry a world that makes sense and is a *different experiment* from its
+ * neighbours. The axes stay exactly as they are underneath and the search still varies them freely;
+ * this is the human-facing projection of them, not a replacement.
+ */
+export interface FoodWorld {
+  key: string
+  name: string
+  /** What choosing it is an experiment *about*, which is why these are not just presets. */
+  why: string
+  mode: FoodMode
+  motion: SourceMotion
+  relation: SourceRelation
+  /** Whether a source count is meaningful here, and whether speed is. */
+  sources: boolean
+  speed: boolean
+}
+
+export const FOOD_WORLDS: readonly FoodWorld[] = [
+  {
+    key: 'spring',
+    name: 'a fixed spring',
+    why: 'one small source, fixed. The control: a fixed source makes the best policy a constant — find it once and stop — so nothing can get better at it, and every moving world is measured against this',
+    mode: 'spring',
+    motion: 'static',
+    relation: 'independent',
+    sources: true,
+    speed: false,
+  },
+  {
+    key: 'band',
+    name: 'a sunlit band',
+    why: 'one bright stripe and desert either side. Fixed, like the spring, but the resource is a line rather than a point, so position matters in one dimension instead of two',
+    mode: 'gradient',
+    motion: 'static',
+    relation: 'independent',
+    sources: true,
+    speed: false,
+  },
+  {
+    key: 'ring',
+    name: 'a ring',
+    why: 'a closed band at a radius — a circuit rather than a field. The only fixed world with no centre to crowd around',
+    mode: 'ring',
+    motion: 'static',
+    relation: 'independent',
+    sources: true,
+    speed: false,
+  },
+  {
+    key: 'patches',
+    name: 'drifting patches',
+    why: 'food in a few slow hot-spots. Following it pays a little, and this is the closest thing here to an ordinary ecology',
+    mode: 'patchy',
+    motion: 'wander',
+    relation: 'independent',
+    sources: true,
+    speed: true,
+  },
+  {
+    key: 'comet',
+    name: 'a comet to chase',
+    why: 'one source on a straight run. Pure pursuit: catch it or starve, with nothing to anticipate',
+    mode: 'comet',
+    motion: 'comet',
+    relation: 'independent',
+    sources: true,
+    speed: true,
+  },
+  {
+    key: 'orbit',
+    name: 'an orbit that returns',
+    why: 'the same chase, but periodic — so it comes back. The only food world where remembering where it was can pay, and therefore the one that bears on intelligence rather than reflexes. Compare it against the comet at the same speed: same difficulty, differing only in predictability',
+    mode: 'patchy',
+    motion: 'orbit',
+    relation: 'independent',
+    sources: true,
+    speed: true,
+  },
+  {
+    key: 'tide',
+    name: 'a sweeping tide',
+    why: 'every source on one heading, so the food crosses the world as a band and the pattern keeps its shape. Rewards being in the right place rather than chasing',
+    mode: 'patchy',
+    motion: 'tide',
+    relation: 'formation',
+    sources: true,
+    speed: true,
+  },
+  {
+    key: 'gathering',
+    name: 'colonies that gather',
+    why: 'separate populations that have never met, drawn together once and left together. Isolation, then contact, then a shared world for good',
+    mode: 'patchy',
+    motion: 'wander',
+    relation: 'converging',
+    sources: true,
+    speed: true,
+  },
+  {
+    key: 'colonies',
+    name: 'colonies that meet and part',
+    why: 'the same, for ever: drawn together and pulled apart again. The social worlds start here, because contact has to keep being possible before cooperation can be worth anything',
+    mode: 'patchy',
+    motion: 'wander',
+    relation: 'cyclical',
+    sources: true,
+    speed: true,
+  },
+  {
+    key: 'scattering',
+    name: 'colonies driven apart',
+    why: 'populations that had met, pushed outward. The one world where being in a group becomes a liability, which is the null for every claim that grouping helps',
+    mode: 'patchy',
+    motion: 'wander',
+    relation: 'diverging',
+    sources: true,
+    speed: true,
+  },
+  {
+    key: 'shy',
+    name: 'food that flees you',
+    why: 'sources that move away from wherever the population has massed. Adversarial: the better they get at finding it, the harder it is to hold, and the most likely of these to go degenerate',
+    mode: 'patchy',
+    motion: 'shy',
+    relation: 'independent',
+    sources: true,
+    speed: true,
+  },
+  {
+    key: 'uniform',
+    name: 'food everywhere',
+    why: 'uniform. Standing still is as good as moving, so this is the null for every claim that foraging matters at all',
+    mode: 'random',
+    motion: 'static',
+    relation: 'independent',
+    sources: false,
+    speed: false,
+  },
+]
+
+/**
+ * The named world a configuration corresponds to, or null when the axes were set to a combination
+ * the list does not cover.
+ *
+ * Matches on the **resolved** axes, which is the part that matters. A world that predates the axes
+ * leaves both unset and gets its motion from `foodMode`, so comparing the raw fields would report
+ * every rolled world as hand-built — which is exactly what it did, and what sent a brand-new world
+ * to the page labelled as something the user had built by hand.
+ *
+ * Motion and relation decide the match and the landing pattern only breaks ties, because motion is
+ * what distinguishes these worlds from each other. `random` is the exception: uniform food is a
+ * different world whatever its sources do, since nothing is placed relative to one.
+ */
+export function foodWorldOf(init: Pick<Init, 'foodMode' | 'sourceMotion' | 'sourceRelation'>): FoodWorld | null {
+  const legacy = foodAxes(init.foodMode)
+  const motion = init.sourceMotion ?? legacy.motion
+  const relation = init.sourceRelation ?? legacy.relation
+  if (init.foodMode === 'random') return FOOD_WORLDS.find((w) => w.mode === 'random') ?? null
+  const fits = FOOD_WORLDS.filter((w) => w.mode !== 'random' && w.motion === motion && w.relation === relation)
+  return fits.find((w) => w.mode === init.foodMode) ?? fits[0] ?? null
+}
+
+/**
  * The three axes a legacy `foodMode` stands for.
  *
  * One place, so the old names keep meaning exactly what they meant while the new axes become the

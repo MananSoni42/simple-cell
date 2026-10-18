@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { type WorldSpec, specId, specInit } from '../src/core/catalog'
-import { type FoodMode, SOURCE_MOTIONS, SOURCE_RELATIONS, foodAxes } from '../src/core/params'
+import { FOOD_WORLDS, type FoodMode, SOURCE_MOTIONS, SOURCE_RELATIONS, foodAxes, foodWorldOf } from '../src/core/params'
 import { FOOD } from '../src/core/types'
 import { restoreSnapshot, takeSnapshot } from '../src/core/snapshot'
 import { World } from '../src/core/world'
@@ -242,6 +242,75 @@ describe('food sources: three axes, not one enum', () => {
     // world built in the browser does, and why the slider there appeared not to work.
     const direct = new World({ ...specInit({ ...BASE, foodMode: 'comet' }), n_patch: 6 })
     expect(direct.patches.length).toBe(6)
+  })
+
+  it('makes every named world behave the way its name claims', () => {
+    /*
+     * The guarantee the simplified panel rests on. Six named worlds are only worth having if each
+     * one is a *different experiment* and each one works — the complaint that produced this list was
+     * dials that appeared not to work, and a list of names is a worse version of that complaint if
+     * the names do not deliver.
+     *
+     * Checked against the thing the name promises, not against the axes it is made of: whether food
+     * is actually near its source, whether the source actually moves, whether the count is honoured.
+     */
+    for (const world of FOOD_WORLDS) {
+      const spec = {
+        ...BASE,
+        foodMode: world.mode,
+        sourceMotion: world.motion,
+        sourceRelation: world.relation,
+        sourceSpeed: 0.8,
+        patches: world.key === 'colonies' || world.key === 'tide' ? 3 : 1,
+        foodLife: 150,
+      }
+      const w = new World(specInit(spec))
+      if (world.relation === 'cyclical' || world.relation === 'converging') w.mergeStart = 0
+      for (let t = 0; t < 900; t++) w.step()
+
+      // the count is honoured, whatever the pattern is called
+      expect(w.patches.length, `${world.key} sources`).toBe(spec.patches)
+
+      // a world that says its sources move, moves them; a control does not
+      const moved = Math.max(...w.patches.map((p) => Math.hypot(p.dx, p.dy)))
+      if (world.motion === 'static') expect(moved, `${world.key} is a control`).toBe(0)
+      else expect(moved, `${world.key} moves`).toBeGreaterThan(20)
+
+      // food exists and, unless the world is uniform by design, is placed around a source
+      let n = 0
+      let near = 0
+      for (let i = 0; i < w.cap; i++) {
+        if (w.type[i] !== FOOD || !w.alive[i]) continue
+        n++
+        for (const p of w.patches) {
+          if (Math.hypot(sep(w, w.x[i] - p.x), sep(w, w.y[i] - p.y)) < 110) {
+            near++
+            break
+          }
+        }
+      }
+      expect(n, `${world.key} has food`).toBeGreaterThan(0)
+      /*
+       * The bar depends on the *shape*, not on whether the world works. A disc concentrates food
+       * around its source and nearly all of it lands within reach. A band is half the world wide
+       * and a ring sits at a radius, so neither concentrates — they are held to beating uniform
+       * instead, which is what they used to degenerate to when placement ignored the source.
+       */
+      const spread = world.mode === 'gradient' || world.mode === 'ring'
+      if (world.mode === 'random') expect(near / n, `${world.key} is uniform`).toBeLessThan(0.6)
+      else if (spread) expect(near / n, `${world.key} food follows its source`).toBeGreaterThan(0.6)
+      else expect(near / n, `${world.key} food is at its sources`).toBeGreaterThan(0.85)
+    }
+  })
+
+  it('recognises each named world from its configuration, and a hand-set one as neither', () => {
+    // How the panel knows which chip to light. A combination off the list must read as off the
+    // list, rather than silently matching the nearest name.
+    for (const w of FOOD_WORLDS) {
+      const init = specInit({ ...BASE, foodMode: w.mode, sourceMotion: w.motion, sourceRelation: w.relation })
+      expect(foodWorldOf(init)?.key, w.key).toBe(w.key)
+    }
+    expect(foodWorldOf(specInit({ ...BASE, foodMode: 'ring', sourceMotion: 'shy', sourceRelation: 'diverging' }))).toBeNull()
   })
 
   it('translates every legacy mode onto the axes', () => {

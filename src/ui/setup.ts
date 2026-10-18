@@ -10,7 +10,8 @@ import {
   LAWS,
   type Laws,
   elementsOf,
-  foodAxes,
+  FOOD_WORLDS,
+  foodWorldOf,
   LEVEL_MULTIPLIER,
   QUANTA,
   type SourceMotion,
@@ -47,7 +48,7 @@ import {
   worldKindOf,
 } from './recipes'
 import { mountPreview } from './preview'
-import { fmt, reducedMotion } from './theme'
+import { fmt } from './theme'
 
 const FOOD = FOOD_ROW
 /**
@@ -63,11 +64,19 @@ const FOOD = FOOD_ROW
  * the matter wants and what the world is like, because whether anything in a world is being
  * optimised is not a detail of that world.
  */
+/*
+ * The categories. One tab each, and every setting lives in exactly one of them.
+ *
+ * Learning has its own tab rather than sitting inside Organisms because whether anything in a world
+ * is being optimised is not a detail of that world — it is the most consequential choice on the
+ * screen, and it changes what the run *means*.
+ */
 const TABS = [
   ['particles', 'Particles'],
   ['organisms', 'Organisms'],
   ['food', 'Food'],
   ['world', 'World'],
+  ['learning', 'Learning'],
 ] as const
 type Tab = (typeof TABS)[number][0]
 
@@ -100,8 +109,6 @@ export function mountSetup(
   let chosen = -1
   /** True once the world stopped being a recipe — a preset, an import, a hand-edited number. */
   let custom = false
-  /** The default path has no settings at all; the builder is opened deliberately. */
-  let building = false
   /**
    * Which tick the run starts at, and the checkpoints that make that possible.
    *
@@ -120,9 +127,16 @@ export function mountSetup(
     init = fromHash.init
     if (fromHash.perf) Object.assign(perf, fromHash.perf)
     custom = true
-    building = true
   }
 
+  /*
+   * One layer, with each category's own `advanced` block as the optional second.
+   *
+   * It used to be three: the settings below were behind a "Build it yourself" button, and every
+   * actual dial behind a further disclosure called "Every setting". Three gates to reach a number,
+   * and the thing most worth doing — change one and watch the preview — was buried deepest. The
+   * preview is a *header* rather than a gate now: it keeps running whatever is changed below it.
+   */
   root.innerHTML = `
     <div class="setup">
       <div class="setup-head">
@@ -148,57 +162,34 @@ export function mountSetup(
           <p class="pitch-line" id="s-learn-line"></p>
           <div class="pitch-go">
             <button class="primary" id="s-start">Begin →</button>
+            <button id="s-start-paused" title="paused, so you can place food, walls and saved organisms before it runs">open paused</button>
             <button id="s-roll">roll another</button>
             <button id="s-best" title="the measured-best world and learner: see docs/RULES.md §24">★ best known</button>
           </div>
-          <button class="ghost wide" id="s-toggle-build">Build it yourself →</button>
           <div class="note" id="s-io"></div>
         </div>
       </div>
 
-      <div class="builder" id="s-builder" hidden>
-        <div class="builder-head">
-          <div><b>Build it yourself</b>
-            <div class="note">three dials: what the matter wants, what the world is like, and whether anything is learning. the seed decides the rest.</div>
-          </div>
-          <button id="s-close-build">done</button>
-        </div>
-        <div class="field"><div class="field-head"><label>what the matter wants</label></div>
-          <div class="presets" id="s-chem-chips"></div>
-          <div class="field-hint" id="s-chem-hint"></div>
-        </div>
-        <div class="field"><div class="field-head"><label>what the world is like</label></div>
-          <div class="presets" id="s-world-chips"></div>
-          <div class="field-hint" id="s-world-hint"></div>
-        </div>
-        <div class="field"><div class="field-head"><label>how they learn</label>
-            <span class="note" id="s-learn-tag"></span></div>
-          <div class="presets" id="s-algos"></div>
-          <div class="field-hint" id="s-algo-hint"></div>
-        </div>
-        <div id="s-learn-panel"></div>
-        <div class="row-wrap">
-          <div id="s-size"></div>
-          <div id="s-terrain"></div>
-        </div>
-        <div class="row" style="margin-bottom:14px">
-          <label class="mono-k">seed</label>
-          <input id="s-seed" inputmode="numeric" style="width:120px" />
-          <button id="s-roll2">re-roll</button>
-        </div>
-        <div class="field"><div class="field-head"><label>or start from a known world</label></div>
+      <div class="builder" id="s-builder">
+        <!--
+          Quick starts, then the settings. These are not a *layer* over the settings: a preset and a
+          seed both write the same numbers the tabs below show, and both are small enough to sit in
+          the open. What used to be a layer was the "Build it yourself" panel offering a second,
+          parallel way to set things the settings tabs already set — two control surfaces for one
+          state, which is the part that was actually confusing rather than the depth.
+        -->
+        <div class="field"><div class="field-head"><label>start from a known world</label></div>
           <div class="presets" id="s-presets"></div>
           <div class="field-hint" id="s-preset-hint"></div>
         </div>
-        <div class="row" style="margin-bottom:16px">
-          <button class="primary" id="s-start-paused">Open it paused →</button>
-          <span class="note">paused, so you can place food, walls and saved organisms before it runs</span>
+        <div class="row" style="margin-bottom:6px">
+          <label class="mono-k">seed</label>
+          <input id="s-seed" inputmode="numeric" style="width:120px" />
+          <button id="s-roll2">re-roll</button>
+          <span class="note" id="s-changed"></span>
         </div>
-        <details class="advanced" id="s-adv">
-          <summary>Every setting <span class="note" id="s-changed"></span></summary>
-          <div class="tabs">${TABS.map(([k, label]) => `<button type="button" data-tab="${k}">${label}</button>`).join('')}</div>
-          ${TABS.map(([k]) => `<div class="panel" data-panel="${k}"></div>`).join('')}
-        </details>
+        <div class="tabs">${TABS.map(([k, label]) => `<button type="button" data-tab="${k}">${label}</button>`).join('')}</div>
+        ${TABS.map(([k]) => `<div class="panel" data-panel="${k}"></div>`).join('')}
       </div>
     </div>`
 
@@ -206,6 +197,25 @@ export function mountSetup(
   const seedEl = q<HTMLInputElement>('#s-seed')
   const ioEl = q('#s-io')
   const panel = (k: Tab): HTMLElement => q(`[data-panel="${k}"]`)
+
+  /**
+   * A category's optional second layer.
+   *
+   * Every tab shows a handful of levers and puts the rest here. Collapsed rather than removed,
+   * because hiding a setting is only safe if it is still reachable and the panel admits it exists —
+   * the same discipline as `changeSummary` naming whatever has been changed away from the default.
+   */
+  const advanced = (host: HTMLElement, summary: string, fields: HTMLElement[]): void => {
+    if (fields.length === 0) return
+    const det = document.createElement('details')
+    det.className = 'advanced'
+    det.innerHTML = `<summary>${summary}</summary>`
+    const box = document.createElement('div')
+    box.className = 'fields'
+    box.append(...fields)
+    det.appendChild(box)
+    host.appendChild(det)
+  }
 
   type NumLaw = { [K in keyof Laws]: Laws[K] extends number ? K : never }[keyof Laws]
   /**
@@ -243,24 +253,25 @@ export function mountSetup(
   // ------------------------------------------------------------------ physics
   const world = (): void => {
     const p = panel('world')
-    p.innerHTML = '<div class="cols"></div><div class="stab" id="s-stab"></div>'
+    p.innerHTML = '<div id="s-arena" style="margin-bottom:16px"></div><div class="cols"></div><div class="stab" id="s-stab"></div>'
+    q('#s-arena').append(...arena())
     const cols = p.querySelector('.cols')!
     const left = card('The world')
     const right = card('Matter')
     cols.append(left, right)
 
+    const beyondChips = new Slider({
+      label: 'size beyond the chips',
+      min: 1,
+      max: 32,
+      step: 1,
+      value: init.scale,
+      curve: 'log',
+      format: (v) => `${Math.round(v)}×`,
+      hint: (v) => `${300 * Math.round(v)} units across${v > 8 ? ' — too big to place things by hand' : ''}`,
+      onChange: (v) => reseed(init.seed, Math.round(v)),
+    }).el
     fieldsOf(left).append(
-      new Slider({
-        label: 'size beyond the chips',
-        min: 1,
-        max: 32,
-        step: 1,
-        value: init.scale,
-        curve: 'log',
-        format: (v) => `${Math.round(v)}×`,
-        hint: (v) => `${300 * Math.round(v)} units across${v > 8 ? ' — too big to place things by hand' : ''}`,
-        onChange: (v) => reseed(init.seed, Math.round(v)),
-      }).el,
       new Slider({
         label: 'metabolism',
         min: 0.05,
@@ -303,6 +314,9 @@ export function mountSetup(
           refresh()
         },
       }).el,
+    )
+    advanced(left, 'size and the integrator', [
+      beyondChips,
       new Slider({
         label: 'sub-steps',
         min: 1,
@@ -315,7 +329,7 @@ export function mountSetup(
           refresh()
         },
       }).el,
-    )
+    ])
 
     fieldsOf(right).append(
       new Slider({
@@ -412,6 +426,10 @@ export function mountSetup(
   const particles = (): void => {
     const p = panel('particles')
     p.innerHTML = `
+      <div id="s-chem-recipe"></div>
+      <div class="field-hint" id="s-chem-hint" style="margin-bottom:16px"></div>
+      <details class="advanced"><summary>the chemistry table itself<span class="note"> — what the recipe above sets</span></summary>
+      <div id="s-chem-quant" class="fields"></div>
       <div class="note" style="margin-bottom:12px">The <b>ancestral</b> chemistry: what every
         particle starts from. Positive attracts, negative repels. Drag a cell up or down, or
         double-click to type. Only one half is shown, since the table is symmetric by law — an
@@ -425,9 +443,29 @@ export function mountSetup(
         <span class="note">Food×Food is always 0 · the Food row acts at half strength · Brain has a
           row too now, so a body can be held together by what it is made of rather than only by its rods</span>
       </div>
-      <div class="cols"><div id="s-chem-l"></div><div id="s-chem-r"></div></div>
+      </details>
+      <div id="s-chem-r"></div>
       <div id="s-elements"></div>`
-    const l = q('#s-chem-l')
+    /*
+     * The recipe above the table it writes. It used to live in a separate "Build it yourself" panel
+     * that set this table from a distance, which meant two controls for one piece of state and no
+     * indication that one drove the other.
+     */
+    q('#s-chem-recipe').append(
+      new Chips<string>({
+        label: 'what the matter wants',
+        value: chosen < 0 && !custom ? recipe.chemistry : '',
+        options: CHEMISTRIES.map((c) => ({ value: c.key, label: c.name, hint: c.blurb })),
+        onChange: (v) => setRecipe({ ...recipe, chemistry: v }),
+      }).el,
+    )
+    // Only when the recipe is *not* driving: the chips carry their own description, so repeating it
+    // underneath was the same sentence twice.
+    q('#s-chem-hint').textContent =
+      chosen < 0 && !custom ? '' : 'the chemistry came from a preset, an import or a hand edit — the table below is what it actually is'
+    // Inside the table's own disclosure, because this snaps that table — on its own in a column it
+    // read as an unrelated fourth collapsed thing.
+    const l = q('#s-chem-quant')
     l.append(
       new Toggle({
         label: 'quantized bonds',
@@ -510,12 +548,14 @@ export function mountSetup(
     const c = card('How matter holds together')
     q('#s-chem-r').appendChild(c)
     fieldsOf(c).append(
-      lawSlider('bond stiffness', 'k_bond', 0.05, 4, 0.05, () => 'the spring constant along a bond'),
       lawSlider('bond breaks at', 'F_break', 0.5, 16, 0.5, (v) => {
         const f = (init.laws?.F_max as number | undefined) ?? LAWS.F_max
         return `${(v / f).toFixed(1)}× the strongest force a brain can exert. Measured: dropping this from 4 to 2.5 cost four fifths of all standing bonds`
       }),
       lawSlider('bonds per particle', 'max_bonds', 1, 8, 1, (v) => (v <= 2 ? 'two admits only chains and rings — never a sheet' : `up to ${Math.round(v)} neighbours, so a particle can sit inside a sheet`), true),
+    )
+    advanced(c, 'bond stiffness, and whether the chemistry itself evolves', [
+      lawSlider('bond stiffness', 'k_bond', 0.05, 4, 0.05, () => 'the spring constant along a bond'),
       new Toggle({
         label: 'the chemistry evolves',
         hint: 'a bonded particle with energy to spare copies itself into a slot decay has emptied, mutating its own affinities. Only bonded particles can copy, so what gets selected is chemistry that gets itself attached where energy flows. Measured: affinity to matter falls far below what mutation alone gives, which is the opposite of the obvious prediction — an earlier claim that food affinity rises was an artefact of a bug and is retracted',
@@ -545,7 +585,7 @@ export function mountSetup(
             }).el,
           ]
         : []),
-    )
+    ])
   }
 
   // ------------------------------------------------------------------ food
@@ -588,13 +628,15 @@ export function mountSetup(
     const host = q('#s-elements')
     const now = elementsOf(init.elements, { ...LAWS, ...init.laws })
     const names = ['P1', 'P2', 'P3', 'P4']
+    // Collapsed: twenty numbers describing what each kind of matter *is*. Real, and not what
+    // anybody reaches for first — the recipe at the top of this tab is.
     host.innerHTML = `
-      <div class="row-k" style="margin-top:4px"><b>What each kind of matter is</b></div>
-      <div class="note" style="margin-bottom:8px">Drag a cell up or down, or double-click to type.
+      <details class="advanced"><summary>what each kind of matter is<span class="note"> — size, mass, bonds, strength, decay, per type</span></summary>
+      <div class="note" style="margin:8px 0">Drag a cell up or down, or double-click to type.
         Every one of these was a single global constant until recently — four types differing only in
         their chemistry are barely four types.</div>
       <table class="m" id="s-elgrid"></table>
-      <div class="note" id="s-elhint">&nbsp;</div>`
+      <div class="note" id="s-elhint">&nbsp;</div></details>`
     const table = q<HTMLTableElement>('#s-elgrid')
     let html = `<tr><th></th>${ELEMENT_COLS.map((c) => `<th>${c.label}</th>`).join('')}</tr>`
     for (const [t, name] of names.entries()) {
@@ -652,87 +694,104 @@ export function mountSetup(
 
   // ------------------------------------------------------------------ food
 
+  /**
+   * The food panel, as a handful of levers.
+   *
+   * It used to be three orthogonal axes — pattern, source motion, source relation — plus their
+   * conditional extras, which is the right factorisation for a search and the wrong one for a
+   * person. The cross-product is 240 combinations and most are not worlds: uniform food cannot show
+   * a source motion, a comet that does not move is a contradiction, a formation of one source is
+   * nothing. The result was dials that appeared not to work.
+   *
+   * So the top of the panel is **one list of named worlds**, each a combination that makes sense and
+   * is a different experiment from its neighbours, plus the two numbers that mean something in all
+   * of them. The raw axes are still there, under `advanced`, for building something the list does
+   * not cover — and the search still varies them freely, because this is a projection of them
+   * rather than a replacement.
+   */
   const food = (): void => {
     const p = panel('food')
     p.innerHTML = '<div class="cols"></div>'
     const cols = p.querySelector('.cols')!
-    const where = card('Where it falls')
-    const moves = card('How the sources move')
+    const where = card('Where the food is')
     const how = card('How much, and for how long')
-    cols.append(where, moves, how)
+    cols.append(where, how)
 
+    /*
+     * The food recipe — Plenty, Patches, Harsh, Pulsing, Drifting — above the settings it writes.
+     * Same reasoning as the chemistry recipe: it used to set these from a different panel.
+     */
+    const recipeHost = document.createElement('div')
+    recipeHost.append(
+      new Chips<string>({
+        label: 'what the world is like',
+        value: chosen < 0 && !custom ? recipe.world : '',
+        options: WORLD_KINDS.map((w) => ({ value: w.key, label: w.name, hint: w.blurb })),
+        onChange: (v) => setRecipe({ ...recipe, world: v }),
+      }).el,
+    )
+    const recipeHint = document.createElement('div')
+    recipeHint.className = 'field-hint'
+    recipeHint.style.marginBottom = '16px'
+    // Same as the chemistry recipe: the chips carry their own description, so a line under them
+    // saying it again was the sentence twice.
+    recipeHint.textContent =
+      chosen < 0 && !custom ? '' : 'the food settings came from a preset, an import or a hand edit — what follows is what they actually are'
+    p.prepend(recipeHost, recipeHint)
+
+    const chosenWorld = foodWorldOf(init)
     fieldsOf(where).append(
-      new Chips<FoodMode>({
-        label: 'pattern',
-        value: init.foodMode,
+      new Chips<string>({
+        label: 'the world',
+        value: chosenWorld?.key ?? 'custom',
         options: [
-          { value: 'random', label: 'uniform', hint: 'everywhere equally — standing still is as good as moving' },
-          { value: 'patchy', label: 'patches', hint: 'a few drifting hot-spots, so following the food pays' },
-          { value: 'gradient', label: 'sunlit band', hint: 'one bright stripe; the rest is desert' },
-          { value: 'converging', label: 'colonies', hint: 'separate colonies that slowly migrate together and merge into one — isolation, then contact' },
-          { value: 'breathing', label: 'breathing', hint: 'colonies that merge and separate again, for ever — populations meet, mix, and are pulled apart to drift on their own' },
-          { value: 'spring', label: 'spring', hint: 'a single small fixed source everything must come to; the most contested world there is' },
-          { value: 'comet', label: 'comet', hint: 'one fast-moving source: food is a target you follow or starve' },
-          { value: 'ring', label: 'ring', hint: 'a closed band of food around the middle — a circuit rather than a field' },
+          ...FOOD_WORLDS.map((w) => ({ value: w.key, label: w.name, hint: w.why })),
+          // Shown only once something is hand-set, so the list is six choices until you go digging.
+          ...(chosenWorld ? [] : [{ value: 'custom', label: 'hand-built', hint: 'the axes below are set to a combination the list does not name' }]),
         ],
         onChange: (v) => {
-          init.foodMode = v
+          const w = FOOD_WORLDS.find((x) => x.key === v)
+          if (!w) return
+          init.foodMode = w.mode
+          init.sourceMotion = w.motion
+          init.sourceRelation = w.relation
+          if (init.sourceSpeed === undefined) init.sourceSpeed = 0.5
           refresh()
         },
       }).el,
-      new Toggle({
-        label: 'food drifts',
-        hint: 'off, food sits where it lands and has to be reached',
-        value: init.foodMoves,
-        onChange: (v) => {
-          init.foodMoves = v
-          sync()
-        },
-      }).el,
     )
-    if (init.foodMode === 'converging' || init.foodMode === 'breathing') {
-      const breathing = init.foodMode === 'breathing'
+    if (chosenWorld?.sources !== false) {
       fieldsOf(where).append(
         new Slider({
-          label: 'colonies',
-          min: 2,
-          max: 4,
+          label: 'how many sources',
+          min: 1,
+          max: Math.max(8, 8 * init.scale * init.scale),
           step: 1,
-          value: Math.max(2, Math.min(4, init.n_patch)),
-          hint: (v) => `${v} colonies, spread evenly round the world to begin with`,
+          value: Math.max(1, init.n_patch),
+          curve: 'log',
+          /*
+           * Reads out coverage, not just the count, because the count alone means nothing across
+           * scales: at 16x the world is 4,800 units across, where a handful of sources are needles
+           * in it and a thousand blanket it so evenly there is no gradient left to navigate.
+           */
+          hint: (v) => {
+            const cover = (100 * Math.PI * init.r_patch * init.r_patch * Math.round(v)) / (init.size * init.size)
+            return cover > 70
+              ? `${Math.round(v)} sources covering ~${Math.round(Math.min(100, cover))}% of the world — near-uniform, so there is no gradient left to follow`
+              : `${Math.round(v)} sources, ~${cover < 1 ? cover.toFixed(1) : Math.round(cover)}% of the world within reach of food`
+          },
           onChange: (v) => {
-            init.n_patch = v
+            init.n_patch = Math.round(v)
             refresh()
           },
         }).el,
         new Slider({
-          label: breathing ? 'one full breath' : 'meet after',
-          min: 200,
-          max: 40000,
-          step: 100,
-          value: init.converge_ticks,
-          curve: 'log',
-          format: (v) => `${Math.round(v)}t`,
-          hint: (v) =>
-            breathing
-              ? `merged every ${Math.round(v)} ticks and fully apart again halfway between`
-              : `apart until roughly tick ${Math.round(v * 0.3)}, fully merged by ${Math.round(v)}`,
-          onChange: (v) => {
-            init.converge_ticks = Math.round(v)
-            sync()
-          },
-        }).el,
-      )
-    }
-    if (init.foodMode !== 'random' && init.foodMode !== 'gradient') {
-      fieldsOf(where).append(
-        new Slider({
-          label: 'source radius',
+          label: 'source size',
           min: 10,
           max: 200,
           step: 5,
           value: init.r_patch,
-          hint: (v) => `${Math.round((100 * Math.PI * v * v * Math.max(1, init.n_patch)) / (init.size * init.size))}% of the world is within reach of food`,
+          hint: (v) => `food lands within ${Math.round(v)} units of a source`,
           onChange: (v) => {
             init.r_patch = v
             refresh()
@@ -740,82 +799,10 @@ export function mountSetup(
         }).el,
       )
     }
-    if (init.foodMode === 'patchy') {
+    if (chosenWorld?.speed !== false) {
       fieldsOf(where).append(
         new Slider({
-          label: 'patches',
-          min: 1,
-          max: Math.max(6, 6 * init.scale * init.scale),
-          step: 1,
-          value: init.n_patch,
-          onChange: (v) => {
-            init.n_patch = v
-            sync()
-          },
-        }).el,
-      )
-    }
-
-    /*
-     * The source axes. Separate card because they are genuinely independent of the pattern above:
-     * the pattern says where food lands around a source, these say what the source itself does.
-     *
-     * `legacy` is a real option rather than an omission. It is what every saved world and every
-     * catalog row runs on, and picking it here puts this world back on exactly that code path — so
-     * "did moving food help?" stays a comparison rather than an assumption.
-     */
-    const legacyAxes = foodAxes(init.foodMode)
-    /*
-     * Uniform food cannot show a source motion, because nothing is placed relative to a source.
-     * Said out loud rather than quietly ignored: "I chose a motion and nothing moved" is exactly
-     * the confusion this panel has to avoid.
-     */
-    if (init.foodMode === 'random' && init.sourceMotion !== undefined && init.sourceMotion !== 'static') {
-      const warn = document.createElement('div')
-      warn.className = 'field-hint'
-      warn.textContent =
-        '⚠ uniform food lands everywhere equally, so it is not placed around a source — a source motion cannot show through it. Pick patches, a spring, a ring or a band to see it.'
-      fieldsOf(moves).append(warn)
-    }
-    fieldsOf(moves).append(
-      new Chips<SourceMotion | 'legacy'>({
-        label: 'each source',
-        value: init.sourceMotion ?? 'legacy',
-        options: [
-          { value: 'legacy', label: `as the pattern says (${legacyAxes.motion})`, hint: 'the original behaviour for this pattern, unchanged — the control every comparison needs' },
-          { value: 'static', label: 'stays put', hint: 'fixed. Find it once and stop: the optimal policy is a constant, so there is nothing to get better at' },
-          { value: 'comet', label: 'runs straight', hint: 'a constant heading across the world. Pure pursuit' },
-          { value: 'orbit', label: 'circles', hint: 'periodic, so it comes back — the only motion where remembering where food was pays off' },
-          { value: 'wander', label: 'wanders', hint: 'a random walk at the same speed as circling: tracking, with nothing to anticipate' },
-          { value: 'tide', label: 'sweeps', hint: 'all sources share a heading, so the food crosses the world as a band. Food comes to you' },
-          { value: 'shy', label: 'flees the crowd', hint: 'moves away from wherever the population has massed. The better they get at finding it, the harder it is to hold' },
-        ],
-        onChange: (v) => {
-          init.sourceMotion = v === 'legacy' ? undefined : v
-          refresh()
-        },
-      }).el,
-      new Chips<SourceRelation | 'legacy'>({
-        label: 'the sources together',
-        value: init.sourceRelation ?? 'legacy',
-        options: [
-          { value: 'legacy', label: `as the pattern says (${legacyAxes.relation})`, hint: 'the original behaviour for this pattern' },
-          { value: 'independent', label: 'independently', hint: 'each goes its own way; no relationship between them' },
-          { value: 'converging', label: 'gather', hint: 'all close on the middle and stay. Populations that have never met end up sharing a table' },
-          { value: 'diverging', label: 'scatter', hint: 'all spread outward from where they began. Populations that had met are driven apart' },
-          { value: 'cyclical', label: 'gather and scatter', hint: 'in and out for ever, so isolation and contact keep alternating' },
-          { value: 'formation', label: 'in formation', hint: 'spacing preserved while the whole pattern travels' },
-        ],
-        onChange: (v) => {
-          init.sourceRelation = v === 'legacy' ? undefined : v
-          refresh()
-        },
-      }).el,
-    )
-    if (init.sourceMotion !== undefined || init.sourceRelation !== undefined) {
-      fieldsOf(moves).append(
-        new Slider({
-          label: 'source speed',
+          label: 'how fast they move',
           min: 0.1,
           max: 1.5,
           step: 0.05,
@@ -823,8 +810,8 @@ export function mountSetup(
           format: (v) => `${v.toFixed(2)}×`,
           /*
            * A fraction of how fast an organism travels, not a number of units. The absolute version
-           * was the bug: one pattern's source ran at 1.9× anything that could chase it while four
-           * others sat at exactly zero, and nobody could see either from the dial.
+           * was the bug: one pattern's source ran at 1.9x anything that could chase it while four
+           * others sat at exactly zero, and no dial in the UI showed either.
            */
           hint: (v) =>
             v >= 1
@@ -836,50 +823,28 @@ export function mountSetup(
           },
         }).el,
       )
-      if (init.sourceRelation === 'converging' || init.sourceRelation === 'diverging' || init.sourceRelation === 'cyclical') {
-        fieldsOf(moves).append(
-          new Slider({
-            label: init.sourceRelation === 'cyclical' ? 'one full cycle' : 'takes',
-            min: 200,
-            max: 40000,
-            step: 100,
-            value: init.converge_ticks,
-            curve: 'log',
-            format: (v) => `${Math.round(v)}t`,
-            hint: () => 'nothing happens until the world is asked to merge — a held world keeps its colonies apart until you say so',
-            onChange: (v) => {
-              init.converge_ticks = Math.round(v)
-              sync()
-            },
-          }).el,
-        )
-      }
     }
-    fieldsOf(moves).append(
-      new Slider({
-        label: 'how many sources',
-        min: 1,
-        max: Math.max(8, 8 * init.scale * init.scale),
-        step: 1,
-        value: Math.max(1, init.n_patch),
-        curve: 'log',
-        /*
-         * Shown as coverage because the count alone means nothing across scales. At 16x the world
-         * is 4,800 units across: a handful of sources are needles in it, and a thousand blanket it
-         * so evenly that there is no gradient left to navigate towards.
-         */
-        hint: (v) => {
-          const cover = (100 * Math.PI * init.r_patch * init.r_patch * Math.round(v)) / (init.size * init.size)
-          return cover > 70
-            ? `${Math.round(v)} sources covering ~${Math.round(Math.min(100, cover))}% of the world — near-uniform, so there is no gradient left to follow`
-            : `${Math.round(v)} sources, ~${cover < 1 ? cover.toFixed(1) : Math.round(cover)}% of the world within reach of food`
-        },
-        onChange: (v) => {
-          init.n_patch = Math.round(v)
-          refresh()
-        },
-      }).el,
-    )
+    if (init.sourceRelation === 'converging' || init.sourceRelation === 'diverging' || init.sourceRelation === 'cyclical') {
+      fieldsOf(where).append(
+        new Slider({
+          label: init.sourceRelation === 'cyclical' ? 'one full cycle' : 'takes',
+          min: 200,
+          max: 40000,
+          step: 100,
+          value: init.converge_ticks,
+          curve: 'log',
+          format: (v) => `${Math.round(v)}t`,
+          hint: () =>
+            init.merge_hold
+              ? 'held: the colonies stay apart until you release them from the world screen'
+              : 'from the first tick',
+          onChange: (v) => {
+            init.converge_ticks = Math.round(v)
+            sync()
+          },
+        }).el,
+      )
+    }
 
     const sus = sustenanceRate(init)
     fieldsOf(how).append(
@@ -914,6 +879,94 @@ export function mountSetup(
         },
       }).el,
       new Slider({
+        label: 'spoils after',
+        min: 0,
+        max: 3000,
+        step: 10,
+        value: init.food_life,
+        format: (v) => (v === 0 ? 'never' : `${Math.round(v)}t`),
+        hint: (v) =>
+          v === 0
+            ? 'food waits forever, so it piles up to the cap'
+            : `uneaten food lasts ${Math.round(v)} ticks — scarcity is what makes foraging worth the cost. A long life behind a moving source leaves a trail, which re-creates the static world it was meant to replace`,
+        onChange: (v) => {
+          init.food_life = v
+          refresh()
+        },
+      }).el,
+    )
+
+    /*
+     * Everything below here is real and rarely the thing you want. It is collapsed rather than
+     * removed: hiding a setting is only safe if it is still reachable and the panel admits it
+     * exists, which is the same discipline as `changeSummary` naming what has been changed.
+     */
+    const adv = document.createElement('details')
+    adv.className = 'advanced'
+    adv.innerHTML = '<summary>the axes underneath, and the rest<span class="note"> — the named worlds above are combinations of these</span></summary>'
+    const advFields = document.createElement('div')
+    advFields.className = 'fields'
+    adv.appendChild(advFields)
+    how.appendChild(adv)
+    advFields.append(
+      new Chips<FoodMode>({
+        label: 'where food lands around a source',
+        value: init.foodMode,
+        options: [
+          { value: 'random', label: 'uniform', hint: 'everywhere equally, so nothing is placed around a source and a source motion cannot show' },
+          { value: 'patchy', label: 'a disc', hint: 'a disc around each source' },
+          { value: 'spring', label: 'a tight disc', hint: 'a much smaller disc: the most contested world there is' },
+          { value: 'gradient', label: 'a band', hint: 'a bright stripe across the world; the rest is desert' },
+          { value: 'ring', label: 'a ring', hint: 'a closed band at a radius from the source — a circuit rather than a field' },
+        ],
+        onChange: (v) => {
+          init.foodMode = v
+          refresh()
+        },
+      }).el,
+      new Chips<SourceMotion>({
+        label: 'how each source moves',
+        value: init.sourceMotion ?? 'static',
+        options: [
+          { value: 'static', label: 'stays put', hint: 'fixed. The optimal policy is a constant, so there is nothing to get better at' },
+          { value: 'comet', label: 'runs straight', hint: 'a constant heading across the world' },
+          { value: 'orbit', label: 'circles', hint: 'periodic, so it comes back — the only motion where remembering pays' },
+          { value: 'wander', label: 'wanders', hint: 'a random walk at the same speed as circling: tracking, with nothing to anticipate' },
+          { value: 'tide', label: 'sweeps', hint: 'all sources share a heading, so the food crosses as a band' },
+          { value: 'shy', label: 'flees the crowd', hint: 'moves away from wherever the population has massed' },
+        ],
+        onChange: (v) => {
+          init.sourceMotion = v
+          if (init.sourceRelation === undefined) init.sourceRelation = 'independent'
+          refresh()
+        },
+      }).el,
+      new Chips<SourceRelation>({
+        label: 'what the sources do together',
+        value: init.sourceRelation ?? 'independent',
+        options: [
+          { value: 'independent', label: 'independently', hint: 'each goes its own way' },
+          { value: 'converging', label: 'gather', hint: 'all close on the middle and stay' },
+          { value: 'diverging', label: 'scatter', hint: 'all spread outward from where they began' },
+          { value: 'cyclical', label: 'gather and scatter', hint: 'in and out for ever, so isolation and contact alternate' },
+          { value: 'formation', label: 'in formation', hint: 'spacing preserved while the whole pattern travels' },
+        ],
+        onChange: (v) => {
+          init.sourceRelation = v
+          if (init.sourceMotion === undefined) init.sourceMotion = 'wander'
+          refresh()
+        },
+      }).el,
+      new Toggle({
+        label: 'food drifts',
+        hint: 'off, food sits where it lands and has to be reached',
+        value: init.foodMoves,
+        onChange: (v) => {
+          init.foodMoves = v
+          sync()
+        },
+      }).el,
+      new Slider({
         label: 'arrives every',
         min: 1,
         max: 60,
@@ -927,22 +980,6 @@ export function mountSetup(
         },
         onChange: (v) => {
           init.T_food = v
-          refresh()
-        },
-      }).el,
-      new Slider({
-        label: 'spoils after',
-        min: 0,
-        max: 3000,
-        step: 10,
-        value: init.food_life,
-        format: (v) => (v === 0 ? 'never' : `${Math.round(v)}t`),
-        hint: (v) =>
-          v === 0
-            ? 'food waits forever, so it piles up to the cap'
-            : `uneaten food lasts ${Math.round(v)} ticks — scarcity is what makes foraging worth the cost`,
-        onChange: (v) => {
-          init.food_life = v
           refresh()
         },
       }).el,
@@ -1021,6 +1058,8 @@ export function mountSetup(
           sync()
         },
       }).el,
+    )
+    advanced(arrive, 'how new organisms keep arriving', [
       new Slider({
         label: 'a new one every',
         min: 5,
@@ -1035,7 +1074,7 @@ export function mountSetup(
           sync()
         },
       }).el,
-    )
+    ])
 
     fieldsOf(rules).append(
       new Toggle({
@@ -1065,6 +1104,14 @@ export function mountSetup(
           sync()
         },
       }).el,
+    )
+    /*
+     * The other routes to a child, and what birth costs. All real, none the first thing to reach
+     * for — and `conjugation` and `spores` are *additional routes* rather than settings of the main
+     * one, so listing them level with "reproduction" read as competing switches instead of one
+     * default plus two options.
+     */
+    advanced(rules, 'other ways to reproduce, and what birth costs', [
       /*
        * The two modes that are not clonal.
        *
@@ -1148,7 +1195,7 @@ export function mountSetup(
           refresh()
         },
       }).el,
-    )
+    ])
   }
 
   // ------------------------------------------------------------------ learning
@@ -1164,6 +1211,25 @@ export function mountSetup(
   const learning = (): void => {
     const L = init.learn
     const on = L.algo !== 'none'
+    /*
+     * Its own tab, built here rather than hosted by the page markup. Whether anything in a world is
+     * being optimised is not a detail of that world — it is the most consequential choice on the
+     * screen and it changes what the run *means* — so it gets a category rather than a corner of
+     * one, and `none` is the first option and says out loud that it is the control.
+     */
+    const tab = panel('learning')
+    tab.innerHTML = '<div id="s-algos"></div><div class="field-hint" id="s-algo-hint" style="margin-bottom:16px"></div><div id="s-learn-panel"></div>'
+    q('#s-algos').append(
+      new Chips<string>({
+        label: 'how they learn',
+        value: L.algo,
+        options: LEARNERS.map((l) => ({ value: l.key, label: l.name, hint: l.blurb })),
+        onChange: (v) => {
+          init.learn = { ...init.learn, algo: v as LearnAlgo }
+          refresh()
+        },
+      }).el,
+    )
     const host = q('#s-learn-panel')
     const isOnline = ONLINE_ALGOS.includes(L.algo)
     /*
@@ -1190,17 +1256,7 @@ export function mountSetup(
          <div class="cols"><div id="s-learn-l"></div><div id="s-learn-r"></div></div>`
       : ''
 
-    q('#s-algos').innerHTML = LEARNERS.map(
-      (l) => `<button type="button" data-algo="${l.key}" class="${l.key === L.algo ? 'on' : ''}">${l.name}</button>`,
-    ).join('')
     q('#s-algo-hint').textContent = LEARNERS.find((l) => l.key === L.algo)?.blurb ?? ''
-    q('#s-learn-tag').textContent = on ? `on ${describeSpec(L.fitness)}` : 'off — the control'
-    for (const b of Array.from(root.querySelectorAll<HTMLElement>('[data-algo]'))) {
-      b.addEventListener('click', () => {
-        init.learn = { ...init.learn, algo: b.dataset.algo as LearnAlgo }
-        refresh()
-      })
-    }
     if (!on) return
 
     fieldsOf(q('#s-learn-l').appendChild(card('What counts as doing well'))).append(
@@ -1375,9 +1431,17 @@ export function mountSetup(
   // ------------------------------------------------------------------ compute
   const compute = (): void => {
     const p = panel('world')
-    // appended: `world()` owns this panel's markup, and this adds a section to the end of it
+    /*
+     * Appended — `world()` owns this panel's markup — and collapsed, because none of it is the
+     * world. Where the forces are computed, how a config moves in and out, and which checkpoint a
+     * run starts from are all real and none is a thing you change while looking at a world.
+     */
+    const det = document.createElement('details')
+    det.className = 'advanced'
+    det.innerHTML = '<summary>compute, import, and where the run starts</summary>'
+    p.appendChild(det)
     const host = document.createElement('div')
-    p.appendChild(host)
+    det.appendChild(host)
     host.innerHTML = `
       <div class="note" style="margin-bottom:14px">${MAX_THREADS} cores detected. These change only
         <i>where</i> the forces are computed, never what the world does — threads give bit-identical
@@ -1554,13 +1618,12 @@ export function mountSetup(
     })
   }
 
-  // ------------------------------------------------------------------ the two dials
-  q('#s-chem-chips').innerHTML = CHEMISTRIES.map(
-    (c) => `<button type="button" data-chem="${c.key}" title="${c.blurb}">${c.name}</button>`,
-  ).join('')
-  q('#s-world-chips').innerHTML = WORLD_KINDS.map(
-    (w) => `<button type="button" data-wk="${w.key}" title="${w.blurb}">${w.name}</button>`,
-  ).join('')
+  /*
+   * The presets are still raw markup bound once, because the row never re-renders. The two recipe
+   * dials used to be done the same way and are now `Chips` inside the tabs that own them — which is
+   * the point of the change: a chemistry recipe belongs above the chemistry table, not in a separate
+   * panel that sets it from a distance.
+   */
   q('#s-presets').innerHTML = PRESETS.map(
     (p, i) => `<button type="button" data-preset="${i}" title="${p.blurb}">${p.name}</button>`,
   ).join('')
@@ -1570,8 +1633,6 @@ export function mountSetup(
       b.addEventListener('click', () => fn(b.dataset[attr]!, b))
     }
   }
-  onEach('chem', (key) => setRecipe({ ...recipe, chemistry: key }))
-  onEach('wk', (key) => setRecipe({ ...recipe, world: key }))
   onEach('preset', (i) => {
     chosen = Number(i)
     custom = true
@@ -1677,57 +1738,45 @@ export function mountSetup(
     refresh()
   }
 
+  /** Size and terrain: the two choices that describe the arena rather than what is in it. */
+  const arena = (): HTMLElement[] => [
+    new Chips<string>({
+      label: 'how big',
+      value: String(init.scale),
+      options: [1, 2, 4, 8].map((n) => ({
+        value: String(n),
+        label: `${n}×`,
+        hint: `${300 * n} units across${n > 4 ? ' — placing things by hand needs a zoom in' : ''}`,
+      })),
+      onChange: (v) => reseed(init.seed, Number(v)),
+    }).el,
+    new Chips<WallLayout>({
+      label: 'terrain',
+      value: init.walls,
+      options: [
+        { value: 'none', label: 'open', hint: 'nothing in the way' },
+        { value: 'pillars', label: 'pillars', hint: 'a regular grid of immovable blocks' },
+        { value: 'maze', label: 'maze', hint: 'straight runs at right angles' },
+        { value: 'ring', label: 'ring', hint: 'one closed circle of wall' },
+      ],
+      onChange: (v) => {
+        if (chosen < 0 && !custom) {
+          setRecipe({ ...recipe, terrain: v })
+          return
+        }
+        init.walls = v
+        refresh()
+      },
+    }).el,
+  ]
+
   function refresh(): void {
     void findCheckpoints()
     if (document.activeElement !== seedEl) seedEl.value = String(init.seed)
-    const sizeHost = q('#s-size')
-    sizeHost.innerHTML = ''
-    sizeHost.append(
-      new Chips<string>({
-        label: 'how big',
-        value: String(init.scale),
-        options: [1, 2, 4, 8].map((n) => ({
-          value: String(n),
-          label: `${n}×`,
-          hint: `${300 * n} units across${n > 4 ? ' — placing things by hand needs a zoom in' : ''}`,
-        })),
-        onChange: (v) => reseed(init.seed, Number(v)),
-      }).el,
-    )
-    const terrainHost = q('#s-terrain')
-    terrainHost.innerHTML = ''
-    terrainHost.append(
-      new Chips<WallLayout>({
-        label: 'terrain',
-        value: init.walls,
-        options: [
-          { value: 'none', label: 'open', hint: 'nothing in the way' },
-          { value: 'pillars', label: 'pillars', hint: 'a regular grid of immovable blocks' },
-          { value: 'maze', label: 'maze', hint: 'straight runs at right angles' },
-          { value: 'ring', label: 'ring', hint: 'one closed circle of wall' },
-        ],
-        onChange: (v) => {
-          if (chosen < 0 && !custom) {
-            setRecipe({ ...recipe, terrain: v })
-            return
-          }
-          init.walls = v
-          refresh()
-        },
-      }).el,
-    )
-
-    const on = (attr: string, value: string): void => {
-      for (const b of Array.from(root.querySelectorAll<HTMLElement>(`[data-${attr}]`))) {
-        b.classList.toggle('on', b.dataset[attr] === value)
-      }
-    }
     const dialled = chosen < 0 && !custom
-    on('chem', dialled ? recipe.chemistry : '')
-    on('wk', dialled ? recipe.world : '')
-    on('preset', String(chosen))
-    q('#s-chem-hint').textContent = dialled ? chemistryOf(recipe.chemistry).blurb : 'the chemistry came from elsewhere — the table is under Every setting'
-    q('#s-world-hint').textContent = dialled ? worldKindOf(recipe.world).blurb : 'the food settings came from elsewhere — they are under Every setting'
+    for (const b of Array.from(root.querySelectorAll<HTMLElement>('[data-preset]'))) {
+      b.classList.toggle('on', b.dataset.preset === String(chosen))
+    }
     q('#s-preset-hint').textContent = chosen >= 0 ? PRESETS[chosen].blurb : 'nine worlds that are known to do something'
 
     q('#s-name').textContent = title()
@@ -1743,8 +1792,6 @@ export function mountSetup(
         : `learning: ${lrnName}, scored on ${describeSpec(lrn.fitness)} — a chosen measure, and part of the result`
     q<HTMLElement>('#s-learn-line').style.color = lrn.algo === 'none' ? '' : 'var(--accent)'
     q('#s-changed').textContent = changeSummary()
-    q<HTMLElement>('#s-builder').hidden = !building
-    q('#s-toggle-build').textContent = building ? 'hide the builder' : 'Build it yourself →'
 
     // `world()` first, because `compute()` appends into the same panel rather than owning one
     world()
@@ -1809,13 +1856,6 @@ export function mountSetup(
     const v = Number(seedEl.value)
     if (Number.isFinite(v) && seedEl.value.trim() !== '') reseed(Math.floor(v))
   })
-  const setBuilding = (v: boolean): void => {
-    building = v
-    refresh()
-    if (v) q('#s-builder').scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' })
-  }
-  q('#s-toggle-build').addEventListener('click', () => setBuilding(!building))
-  q('#s-close-build').addEventListener('click', () => setBuilding(false))
   q('#s-back').addEventListener('click', () => hooks.back())
   q('#s-how').addEventListener('click', () => hooks.explain())
   q('#s-lib').addEventListener('click', () => hooks.library())
@@ -1849,7 +1889,7 @@ export function mountSetup(
       ;(document.activeElement as HTMLElement | null)?.blur()
       void go(false)
     } else if (typing) return
-    else if (e.key >= '1' && e.key <= '5' && building) {
+    else if (e.key >= '1' && e.key <= '5') {
       tab = TABS[Number(e.key) - 1][0]
       paintTabs()
     } else if (e.key === 'r' || e.key === 'R') rollAnother()
@@ -1867,7 +1907,6 @@ export function mountSetup(
       startTick = 0
       custom = true
       chosen = -1
-      setBuilding(true)
       refresh()
     },
   }
