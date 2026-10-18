@@ -41,10 +41,23 @@ const run = (spec: WorldSpec, ticks: number): World => {
   return w
 }
 
+/**
+ * The shortest signed separation on a torus. Local to the test rather than reaching into the
+ * world's own private helper, so these assertions do not widen the model's API to make themselves
+ * easier to write.
+ */
+const sep = (w: World, d: number): number => {
+  const s = w.L.SIZE
+  let v = d % s
+  if (v > s / 2) v -= s
+  if (v < -s / 2) v += s
+  return v
+}
+
 /** Distance from the world's middle, respecting the wrap. */
 const fromMiddle = (w: World, i: number): number => {
   const half = w.L.SIZE / 2
-  return Math.hypot(w.minImage(w.patches[i].x - half), w.minImage(w.patches[i].y - half))
+  return Math.hypot(sep(w, w.patches[i].x - half), sep(w, w.patches[i].y - half))
 }
 const meanFromMiddle = (w: World): number => w.patches.reduce((s, _, i) => s + fromMiddle(w, i), 0) / w.patches.length
 
@@ -105,7 +118,7 @@ describe('food sources: three axes, not one enum', () => {
     const orbit = run({ ...BASE, sourceMotion: 'orbit', sourceSpeed: 0.8, patches: 1 }, 1200)
     const comet = run({ ...BASE, sourceMotion: 'comet', sourceSpeed: 0.8, patches: 1 }, 1200)
     // an orbit keeps its radius; a straight line does not keep anything
-    const r0 = Math.hypot(orbit.minImage(orbit.patches[0].ox - orbit.L.SIZE / 2), orbit.minImage(orbit.patches[0].oy - orbit.L.SIZE / 2))
+    const r0 = Math.hypot(sep(orbit, orbit.patches[0].ox - orbit.L.SIZE / 2), sep(orbit, orbit.patches[0].oy - orbit.L.SIZE / 2))
     expect(Math.abs(fromMiddle(orbit, 0) - r0)).toBeLessThan(1e-6)
     expect(comet.patches[0].dx !== 0 || comet.patches[0].dy !== 0).toBe(true)
   })
@@ -145,7 +158,7 @@ describe('food sources: three axes, not one enum', () => {
 
   it('keeps a formation in formation: spacing is preserved while the pattern travels', () => {
     const w = new World(specInit({ ...BASE, sourceRelation: 'formation', sourceMotion: 'comet', sourceSpeed: 0.8, patches: 3 }))
-    const gap = (ww: World): number => Math.hypot(ww.minImage(ww.patches[1].x - ww.patches[0].x), ww.minImage(ww.patches[1].y - ww.patches[0].y))
+    const gap = (ww: World): number => Math.hypot(sep(ww, ww.patches[1].x - ww.patches[0].x), sep(ww, ww.patches[1].y - ww.patches[0].y))
     for (let t = 0; t < 50; t++) w.step()
     const g0 = gap(w)
     for (let t = 0; t < 600; t++) w.step()

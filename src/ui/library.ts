@@ -8,6 +8,8 @@ import { fmt } from './theme'
 export interface LibraryHooks {
   /** Run a stored world again, exactly as it was. */
   replay(init: Init): void
+  /** Open a stored world in the setup panel, so its dials can be changed before it runs again. */
+  edit(init: Init): void
   /** Hand an organism to the world screen's organism tool. */
   arm(o: OrganismFile): void
   back(): void
@@ -123,6 +125,7 @@ export function mountLibrary(root: HTMLElement, hooks: LibraryHooks): { refresh(
           </div>
           <div class="row" style="gap:5px">
             <button data-replay="${r.id}">run again</button>
+            <button data-edit="${r.id}" title="open this world's settings, change something, and run it from scratch or from a saved tick">edit & re-run</button>
             <button data-delrun="${r.id}">delete</button>
           </div>
         </div>
@@ -224,6 +227,10 @@ export function mountLibrary(root: HTMLElement, hooks: LibraryHooks): { refresh(
     on('del', async (id) => {
       await collection.deleteOrganism(id)
       await refresh()
+    })
+    on('edit', (id) => {
+      const r = runs.find((x) => x.id === id)
+      if (r) hooks.edit(r.init)
     })
     on('replay', (id) => {
       const r = runs.find((x) => x.id === id)

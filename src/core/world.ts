@@ -946,6 +946,45 @@ export class World {
   }
 
   /**
+   * Re-derives the laws and the chemistry from `init`, for a parameter changeover mid-run.
+   *
+   * Everything here is state the constructor computed *from* `init` and then never looked at
+   * again, so a world whose `init` has been edited is running on stale derived values until this
+   * is called. It exists for resume points: restore a mature population under the parameters it
+   * matured under, then change one thing and watch.
+   *
+   * Deliberately narrow. It re-derives only what `TWEAKABLE` in resume.ts can reach — the law
+   * table and the scaled affinity matrix. It does **not** touch anything that decides an array's
+   * length or a table's width, because those cannot change under a restored state at all; that is
+   * enforced on the other side, by what `TWEAKABLE` omits.
+   *
+   * Note what it does not do to particles: `rows` are left alone. Every particle carries its own
+   * affinity row, which has already drifted from the matrix through replication, and overwriting
+   * those from a tweaked matrix would discard the world's entire evolutionary history to change a
+   * dial. A new matrix governs what gets seeded from here on, and — in a world without templating,
+   * where the kernel reads the matrix directly — the forces too.
+   */
+  relaw(): void {
+    const met = this.init.metabolism ?? 1
+    Object.assign(this.L, {
+      ...LAWS,
+      SIZE: this.init.size,
+      fieldN: this.L.fieldN, // derived from size, which cannot change under a restored state
+      c_up: LAWS.c_up * met,
+      c_mv: LAWS.c_mv * met,
+      c_sig: LAWS.c_sig * met,
+      ...this.init.laws,
+    })
+    const Araw = widenMatrix(this.init.quantized ? applyQuantization(this.init.A.map((r) => r.slice())) : this.init.A)
+    for (let i = 0; i < N_MATRIX; i++) {
+      for (let j = 0; j < N_MATRIX; j++) {
+        const w = i === FOOD_ROW || j === FOOD_ROW ? this.L.food_coupling : 1
+        this.A[i * N_MATRIX + j] = w * Araw[i][j]
+      }
+    }
+  }
+
+  /**
    * Credits time spent in a compound to each of its members. Order is a property of a group, so
    * to drive anything it has to become per-organism: every member earns `(n - 1) ^ order_alpha`
    * per tick, superlinear so that a long-held large compound counts for much more than a long

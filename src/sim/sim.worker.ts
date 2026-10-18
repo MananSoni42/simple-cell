@@ -3,6 +3,7 @@ import { ladder } from '../core/ladder'
 import { census, lifeStats } from '../core/metrics'
 import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, takeSnapshot, writeSnapshot } from '../core/snapshot'
 import { type OrganismFile, defaultName, exportOrganism } from '../core/organism'
+import { applyTweaks, decodeResume, encodeResume } from '../core/resume'
 import type { Init } from '../core/params'
 import { Recorder } from '../core/recorder'
 import { World } from '../core/world'
@@ -51,6 +52,36 @@ function planHistory(w: World): void {
   historyEvery = 1
 }
 
+/**
+ * Resume milestones: a snapshot every `MILESTONE_EVERY` ticks, kept apart from the rewind ring.
+ *
+ * Separate because the ring is a *scrubbing* structure — it samples by wall-clock rate so a fast
+ * world does not fill it in a second, which means the ticks it holds depend on how fast you were
+ * running and are not reproducible. A resume point has to land on a predictable tick, or a slider
+ * over them is meaningless.
+ *
+ * Bounded by bytes, not by count. A snapshot of an 11,200-particle world with brains is tens of
+ * megabytes, so a long run would otherwise accumulate gigabytes; the oldest is dropped when the
+ * budget is spent. Any of them can be written out to a file, which is how a resume point outlives
+ * the tab.
+ */
+const MILESTONE_EVERY = 5000
+const MILESTONE_BUDGET = 256 << 20
+let milestones: Snapshot[] = []
+let milestoneCap = 0
+
+function planMilestones(w: World): void {
+  milestones = []
+  milestoneCap = Math.max(1, Math.floor(MILESTONE_BUDGET / snapshotBytes(w)))
+}
+
+function milestone(w: World): void {
+  if (w.tick === 0 || w.tick % MILESTONE_EVERY !== 0) return
+  if (milestones.length > 0 && milestones[milestones.length - 1].tick === w.tick) return
+  milestones.push(writeSnapshot(w, allocSnapshot(w)))
+  while (milestones.length > milestoneCap) milestones.shift()
+}
+
 /** Oldest-to-newest view of the ring. */
 function snapshots(): Snapshot[] {
   const out: Snapshot[] = []
@@ -59,6 +90,9 @@ function snapshots(): Snapshot[] {
 }
 
 function remember(w: World): void {
+  // Milestones first, and unconditionally: they are on a tick schedule, where the ring is on a
+  // wall-clock one and returns early on most ticks.
+  milestone(w)
   if (ring.length === 0 || w.tick % historyEvery !== 0) return
   writeSnapshot(w, ring[ringPos])
   ringPos = (ringPos + 1) % ring.length
@@ -332,15 +366,62 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
   try {
     if (m.kind === 'start') {
       session++
-      const w = new World(m.init, { shared: canShare })
+      let w = new World(m.init, { shared: canShare })
       const made = await makeBackend(w, m.perf)
       w.backend = made.backend
       note = made.note
+      /*
+       * A resume point, if one was handed over. `decodeResume` checks the state's shape against
+       * this world and throws rather than restoring arrays that mean something else — the failure
+       * mode being guarded against is not a crash, it is a world that looks fine and is not the one
+       * that was saved.
+       */
+      let resumed = ''
+      if (m.resume) {
+        const snap = decodeResume(m.resume, w)
+        const fresh = restoreSnapshot(w.init, snap, { shared: canShare })
+        fresh.backend = w.backend
+        w = fresh
+        resumed = `resumed at tick ${w.tick}`
+        /*
+         * Tweaks land *after* the restore, which is the whole semantics of the feature: the world
+         * developed under the parameters it developed under, and the change is a perturbation
+         * applied to a mature population rather than a different history.
+         */
+        if (m.tweaks) {
+          const applied = applyTweaks(w, m.tweaks)
+          if (applied.length > 0) resumed += `, changed ${applied.join(', ')}`
+        }
+      }
       world = w
       planHistory(w)
       planEdits(w)
+      planMilestones(w)
       recorder = new Recorder()
       retune()
+      /*
+       * The warm-up. Exact rather than approximate — the world is deterministic, so this is the
+       * state those ticks would have produced had they been watched. Nothing is drawn, no rewind
+       * history is kept, and the recorder still observes so the run's charts are not missing their
+       * early half. Progress is posted because a 28-minute skip with no output reads as a hang.
+       */
+      const target = Math.max(0, Math.round(m.warmup ?? 0))
+      if (target > w.tick) {
+        const mine0 = session
+        while (mine0 === session && w.tick < target) {
+          const deadline = performance.now() + 50
+          while (mine0 === session && w.tick < target && performance.now() < deadline) {
+            await w.stepAsync()
+            milestone(w)
+            recorder.observe(w)
+          }
+          post({ kind: 'warming', tick: w.tick, target })
+          await yieldNow()
+        }
+        if (mine0 !== session) return // superseded: a newer world was started while this one warmed
+        resumed = resumed ? `${resumed}, warmed to tick ${w.tick}` : `warmed to tick ${w.tick}`
+      }
+      if (resumed) note = note ? `${note} — ${resumed}` : resumed
       const layout = layoutOf(w)
       frames = Array.from({ length: N_FRAMES }, () => allocFrame(layout))
       header = new Int32Array(new SharedArrayBuffer(4 * H.SIZE))
@@ -353,6 +434,22 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       const starting = run(w, mine)
       post({ kind: 'ready', layout, frames, header, note })
       await starting
+    } else if (m.kind === 'saveResume') {
+      const w = world
+      if (w) {
+        /*
+         * A requested tick picks the newest milestone at or before it; absent, the live state is
+         * written. The milestone path is what makes a 5,000-tick slider honest — it hands back a
+         * state that really is from that tick, rather than the nearest thing the ring happened to
+         * keep.
+         */
+        let snap: Snapshot | null = null
+        if (m.tick !== undefined) {
+          for (const ms of milestones) if (ms.tick <= m.tick) snap = ms
+        }
+        if (!snap) snap = takeSnapshot(w)
+        post({ kind: 'resumePoint', file: encodeResume(w, snap), milestones: milestones.map((ms) => ms.tick) })
+      }
     } else if (m.kind === 'rewind') {
       rewindTo = Math.max(0, (world?.tick ?? 0) - m.ticks)
     } else if (m.kind === 'seek') {

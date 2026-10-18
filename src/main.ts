@@ -10,6 +10,7 @@ import { InspectPanel } from './ui/inspect'
 import { mountLanding } from './ui/landing'
 import { Router } from './ui/router'
 import { mountDiscoveries } from './ui/discoveries'
+import type { ResumeFile } from './core/resume'
 import { mountLibrary } from './ui/library'
 import { mountSetup } from './ui/setup'
 import { collection } from './ui/store'
@@ -194,7 +195,7 @@ function teardown(): void {
   inspect.hide()
 }
 
-function startWorld(init: Init, perf: Perf, build = true): void {
+function startWorld(init: Init, perf: Perf, build = true, opts: { warmup?: number; resume?: ResumeFile; tweaks?: Init } = {}): void {
   openPaused = build
   teardown()
   lastInit = init
@@ -203,6 +204,7 @@ function startWorld(init: Init, perf: Perf, build = true): void {
   worker.onmessage = (e: MessageEvent<FromSim>) => {
     const m = e.data
     if (m.kind === 'ready') {
+      $('warming').hidden = true
       link = {
         worker,
         layout: m.layout,
@@ -236,6 +238,17 @@ function startWorld(init: Init, perf: Perf, build = true): void {
     }
     else if (m.kind === 'undoDepth') bUndo.disabled = m.depth === 0
     else if (m.kind === 'organism') inspect.show(m.organism)
+    else if (m.kind === 'resumePoint') {
+      download(`simplecell-resume-${m.file.init.seed}-${m.file.tick}t.json`, JSON.stringify(m.file))
+    }
+    else if (m.kind === 'warming') {
+      // A long warm-up must not read as a hang: a 4x world takes about half an hour to reach tick
+      // 10,000, and until the first frame exists there is nothing else on screen to say so.
+      const el = $('warming')
+      el.hidden = false
+      const pct = m.target > 0 ? Math.round((100 * m.tick) / m.target) : 100
+      el.innerHTML = `<strong>warming up</strong><br />tick ${m.tick.toLocaleString()} of ${m.target.toLocaleString()} — ${pct}%<div class="warming-bar"><i style="width:${pct}%"></i></div><span class="note">nothing is drawn while skipping ahead; the world is deterministic, so this is exactly the state those ticks produce</span>`
+    }
     else if (m.kind === 'builtConfig') {
       download(`simplecell-world-${m.init.seed}.json`, JSON.stringify({ version: 1, init: m.init }, null, 2))
     }
@@ -254,7 +267,7 @@ function startWorld(init: Init, perf: Perf, build = true): void {
       router.go('summary')
     } else if (m.kind === 'error') console.error('simulation error:', m.message)
   }
-  worker.postMessage({ kind: 'start', init, perf } satisfies ToSim)
+  worker.postMessage({ kind: 'start', init, perf, ...opts } satisfies ToSim)
 }
 
 // ---------------------------------------------------------------- screens
@@ -277,7 +290,7 @@ $('page-explain').addEventListener('click', (e) => {
 const setup = mountSetup($('page-setup'), {
   start: (init, perf, opts) => {
     resumeRate = null // a world built by hand starts at a watchable speed
-    startWorld(init, perf, opts.build)
+    startWorld(init, perf, opts.build, { warmup: opts.warmup, resume: opts.resume, tweaks: opts.tweaks })
   },
   back: () => router.go('landing'),
   library: () => router.go('library'),
@@ -301,6 +314,15 @@ const library = mountLibrary($('page-library'), {
     resumeRate = null
     startWorld(init, lastPerf, false)
   },
+  /*
+   * Hand a stored world to the setup panel instead of running it, so its dials can be changed
+   * before it runs again. `replay` and this differ only in where they send you, but the difference
+   * is the whole point: one repeats a run, the other asks what one change would have done.
+   */
+  edit: (init) => {
+    setup.load(init)
+    router.go('setup')
+  },
   arm: (o) => {
     arm(o)
     setTool('organism')
@@ -323,6 +345,12 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-t
   b.addEventListener('click', () => setTool(b.dataset.tool as Tool))
 }
 $('t-save').addEventListener('click', () => send({ kind: 'snapshotConfig' }))
+/*
+ * A resume point is the world's whole state, not a config. It is a large file — tens of megabytes
+ * for a world with thousands of brains — which is why it is a deliberate button rather than part
+ * of the run summary everybody downloads.
+ */
+$('t-resume').addEventListener('click', () => send({ kind: 'saveResume' }))
 const bUndo = $<HTMLButtonElement>('t-undo')
 bUndo.addEventListener('click', () => send({ kind: 'undo' }))
 // Shown only while colonies are held apart. A merged world should meet when you decide it meets,

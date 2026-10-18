@@ -974,6 +974,34 @@ and the lineage counter. Restoring one reproduces not just the same state but th
 future**, which is the test: a restored world and the original run 400 more ticks and still hash
 identically.
 
+**Resume points.** The same snapshot, written to a file, so a run can start at a non-zero tick
+instead of from the beginning. Three rules keep it trustworthy, and all three guard against a
+*quietly wrong* world rather than a crash:
+
+- **The `init` travels with the state and is not optional.** A snapshot is typed arrays whose
+  meaning comes entirely from the world they were taken from — how many matter slots, how many
+  brain weights, how big the field is. Restored against a different `init` they do not fail, they
+  produce a world that is subtly not the one saved. The shape is checked and a mismatch is refused.
+- **The format carries a version.** The layout has already changed twice here: a per-particle
+  chemistry row, then the food-source offsets that took the patch stride from 5 to 7. A stale file
+  is rejected by version rather than restored into nonsense.
+- **A warm-up is not an approximation of a resume.** The world is deterministic, so running N ticks
+  with nothing drawn gives exactly the state a resume at tick N gives. That is why one control
+  covers both: at tick 0 it is an ordinary run, above 0 it skips ahead, and a loaded resume point
+  only makes the skip instant.
+
+**Parameter changeover.** A tweak applied at a resume point takes effect **after** the restore, so
+the population developed under the parameters it developed under and the change is a perturbation
+rather than a different history. `World.relaw()` re-derives the law table and the scaled affinity
+matrix from the edited `init`; it deliberately does **not** rewrite per-particle affinity rows,
+which have drifted from the matrix through replication — overwriting them would discard the world's
+evolutionary history in order to change a dial.
+
+Only dials that affect the future may change. `TWEAKABLE` in resume.ts is the list, and two
+exclusions in it are not obvious: `inflow` reads as a policy switch but sets `continuous`, which
+triples the brain allocation and so changes `nMatter` and `cap`; and `elements` is only a table of
+per-type numbers, but the bond table's width is `max(valence)` over it, fixed at construction.
+
 The simulation worker keeps a ring of snapshots. Two things keep it affordable: the buffers are
 **allocated once and overwritten in place**, and the sampling interval is derived from the *tick
 rate* so the world takes ~20 snapshots per second of wall clock however fast it is running.

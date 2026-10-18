@@ -11,6 +11,12 @@
   <section class="page" id="page-explain" hidden></section>
   <section class="page" id="page-setup" hidden></section>
 
+  <!--
+    Warm-up progress. The world page has nothing on it until the first frame is published, and a
+    warm-up to tick 10,000 in a large world takes about half an hour, so without this a deliberate
+    skip is indistinguishable from a hang.
+  -->
+  <div id="warming" class="warming" hidden></div>
   <section class="page" id="page-world" hidden>
     <div class="world-grid">
       <aside class="rail" id="stats"></aside>
@@ -28,6 +34,7 @@
         <button id="t-merge" title="release the food colonies: the populations begin closing from now" hidden>◉ Bring them together</button>
         <button id="t-undo" title="undo the last thing placed (cmd/ctrl-Z)" disabled>↶ Undo</button>
         <button id="t-save" title="save this arrangement as a config">save world</button>
+        <button id="t-resume" title="save the world's full state, so a later run can start from this tick instead of from scratch">save resume point</button>
       </div>
       <div class="bar">
         <button id="b-play" title="start / resume (space)">▶ Start</button>

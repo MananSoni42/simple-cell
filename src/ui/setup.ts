@@ -30,6 +30,7 @@ import { LEARNERS, ONLINE_ALGOS, type LearnAlgo } from '../core/learning'
 import { measurePicker } from './measure'
 import { FOOD_ROW, MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
+import { type ResumeFile, tweakDiff } from '../core/resume'
 import { capture } from '../render/renderer'
 import { Chips, Slider, Toggle, card, fieldsOf } from './controls'
 import { PRESETS } from './presets'
@@ -82,13 +83,13 @@ function cellColor(a: number): string {
 export function mountSetup(
   root: HTMLElement,
   hooks: {
-    start(init: Init, perf: Perf, opts: { build: boolean }): void
+    start(init: Init, perf: Perf, opts: { build: boolean; warmup?: number; resume?: ResumeFile; tweaks?: Init }): void
     back(): void
     explain(): void
     library(): void
     discoveries(): void
   },
-): { refresh(): void; stop(): void } {
+): { refresh(): void; stop(): void; load(init: Init): void } {
   /** The two-dial description of the world, when it came from the dials. */
   let recipe: Recipe = randomRecipe()
   let init = buildRecipe(recipe)
@@ -100,6 +101,17 @@ export function mountSetup(
   let custom = false
   /** The default path has no settings at all; the builder is opened deliberately. */
   let building = false
+  /**
+   * Where to start the run, in ticks.
+   *
+   * Zero is "from the beginning", which is why one control covers two features: at zero, a tweaked
+   * world simply runs tweaked from scratch, and above zero the tweak becomes a perturbation applied
+   * at that tick. Stepped in 5,000s to match the interval resume points are taken at, so the slider
+   * lands on ticks a saved point can actually satisfy.
+   */
+  let warmup = 0
+  /** A loaded resume point, and the configuration it was saved under. */
+  let resume: ResumeFile | null = null
   const fromHash = readHash()
   if (fromHash) {
     init = fromHash.init
@@ -1362,7 +1374,19 @@ export function mountSetup(
         <button id="s-import">import…</button>
         <input type="file" id="s-file" accept="application/json" hidden />
       </div>
-      <textarea id="s-paste" placeholder="paste a config here, then press Import again" hidden></textarea>`
+      <textarea id="s-paste" placeholder="paste a config here, then press Import again" hidden></textarea>
+      <div class="field-sep"></div>
+      <div class="note" style="margin:14px 0 10px">Where the run <i>starts</i>. At zero it starts from
+        scratch, as always. Above zero it skips ahead — which is exact rather than approximate, because
+        the world is deterministic: warming up to a tick gives the state those ticks would have
+        produced. It costs the compute, so load a resume point to make it instant.</div>
+      <div id="s-warm"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="s-resume">load resume point…</button>
+        <button id="s-resume-clear" hidden>forget it</button>
+        <input type="file" id="s-resume-file" accept="application/json" hidden />
+      </div>
+      <div class="field-hint" id="s-resume-note"></div>`
     q('#s-c-l').append(
       new Slider({
         label: 'threads',
@@ -1382,6 +1406,78 @@ export function mountSetup(
         onChange: (v) => (perf.gpu = v && gpuAvailable()),
       }).el,
     )
+
+    /*
+     * The warm-up slider, stepped in 5,000s because that is the interval the worker takes resume
+     * points at. A continuous slider would offer ticks no saved point can satisfy, and silently
+     * fall back to computing them.
+     */
+    q('#s-warm').append(
+      new Slider({
+        label: 'start at tick',
+        min: 0,
+        max: 200000,
+        step: 5000,
+        value: warmup,
+        format: (v) => (v === 0 ? 'the beginning' : `${Math.round(v).toLocaleString()}t`),
+        hint: (v) => {
+          if (v === 0) return resume ? 'ignoring the loaded resume point and starting from scratch' : 'from the beginning, as usual'
+          if (resume && resume.tick === v) return `instant: the loaded resume point is exactly tick ${v.toLocaleString()}`
+          if (resume && resume.tick < v) return `restores at tick ${resume.tick.toLocaleString()}, then computes the remaining ${(v - resume.tick).toLocaleString()}`
+          if (resume) return `the loaded point is tick ${resume.tick.toLocaleString()}, which is past this — it will be used and this slider ignored`
+          // The honest cost. A 4x world runs at roughly 6 ticks a second, so this is not a detail.
+          return `${Math.round(v).toLocaleString()} ticks to compute before anything is drawn — load a resume point to skip it`
+        },
+        onChange: (v) => {
+          warmup = Math.round(v)
+          refresh()
+        },
+      }).el,
+    )
+    const resumeNote = q('#s-resume-note')
+    const paintResume = (): void => {
+      q('#s-resume-clear').hidden = resume === null
+      if (!resume) {
+        resumeNote.textContent = 'without one, starting at a non-zero tick means computing those ticks'
+        return
+      }
+      /*
+       * The two lists are the whole safety story. State arrays are sized and indexed by a world's
+       * shape, so a dial that decides a shape cannot change under a restored state — and the
+       * refusal has to name the dial, because "you cannot resume with that change" is useless.
+       */
+      const d = tweakDiff(resume.init, init)
+      const parts = [`resume point at tick ${resume.tick.toLocaleString()}, seed ${resume.init.seed}`]
+      if (d.allowed.length > 0) parts.push(`changing ${d.allowed.join(', ')} from that tick on`)
+      if (d.refused.length > 0) parts.push(`⚠ ${d.refused.join(', ')} cannot change at a resume point — that would restore the saved state into a differently shaped world, so those will be ignored`)
+      if (d.allowed.length === 0 && d.refused.length === 0) parts.push('no changes: it will run on exactly as it was')
+      resumeNote.textContent = parts.join(' · ')
+    }
+    paintResume()
+    q('#s-resume').addEventListener('click', () => q<HTMLInputElement>('#s-resume-file').click())
+    q('#s-resume-clear').addEventListener('click', () => {
+      resume = null
+      refresh()
+    })
+    q<HTMLInputElement>('#s-resume-file').addEventListener('change', async (e) => {
+      const f = (e.target as HTMLInputElement).files?.[0]
+      if (!f) return
+      try {
+        const file = JSON.parse(await f.text()) as ResumeFile
+        if (file.kind !== 'simplecell-resume') throw new Error('that is a config or a run, not a resume point')
+        resume = file
+        // The dials become the *tweaks*, so they have to start from what was saved — otherwise
+        // every difference between the current panel and the saved world reads as a deliberate
+        // change the user never made.
+        init = file.init
+        warmup = file.tick
+        custom = true
+        chosen = -1
+        refresh()
+      } catch (err) {
+        resumeNote.textContent = `could not read that: ${(err as Error).message}`
+      }
+    })
 
     const paste = q<HTMLTextAreaElement>('#s-paste')
     q('#s-export').addEventListener('click', () => {
@@ -1665,7 +1761,16 @@ export function mountSetup(
 
   const go = (build: boolean): void => {
     preview.stop()
-    hooks.start(init, { ...perf }, { build })
+    /*
+     * With a resume point loaded the world is built from the **saved** configuration and the dials
+     * are handed over separately as tweaks, because that is what makes the changeover semantics
+     * work: the state restores into the world it was saved from, and only then does the change take
+     * effect. Building from the edited config instead would restore the arrays into a world they
+     * do not describe, which `decodeResume` would refuse outright for a shape change and — worse —
+     * would silently accept for everything else.
+     */
+    if (resume) hooks.start(resume.init, { ...perf }, { build, warmup, resume, tweaks: init })
+    else hooks.start(init, { ...perf }, { build, warmup })
   }
   q('#s-start').addEventListener('click', () => go(false))
   q('#s-start-paused').addEventListener('click', () => go(true))
@@ -1685,5 +1790,18 @@ export function mountSetup(
   })
 
   refresh()
-  return { refresh, stop: () => preview.stop() }
+  return {
+    refresh,
+    stop: () => preview.stop(),
+    /** Open a world that came from somewhere else — the collection, a file — with its dials live. */
+    load: (loaded: Init) => {
+      init = loaded
+      resume = null
+      warmup = 0
+      custom = true
+      chosen = -1
+      setBuilding(true)
+      refresh()
+    },
+  }
 }

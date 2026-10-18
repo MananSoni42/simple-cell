@@ -1,5 +1,6 @@
 import type { Perf } from '../compute/select'
 import type { Init } from '../core/params'
+import type { ResumeFile } from '../core/resume'
 import type { AggregateStats } from '../core/aggregates'
 import type { Census, LifeStats } from '../core/metrics'
 import type { FitnessSpec } from '../core/fitness'
@@ -11,7 +12,23 @@ import type { OrderStats } from '../core/orders'
 import type { FrameBuffers, FrameLayout } from './frames'
 
 export type ToSim =
-  | { kind: 'start'; init: Init; perf: Perf }
+  /**
+   * Start a world.
+   *
+   * `warmup` runs that many ticks before the first frame is published, with nothing drawn and no
+   * history kept — "skip the first N ticks" for a world where the interesting part is late. It is
+   * exact rather than approximate, because the world is deterministic: warming up to tick N gives
+   * the state those N ticks would have produced had you watched them.
+   *
+   * `resume` short-circuits that: a saved state restores at its tick instantly, and `warmup`
+   * beyond it carries on from there. A resume point may be combined with `tweaks` to change
+   * parameters *at* that tick — the world develops under the parameters it was saved with, and the
+   * tweak is a perturbation applied to a mature population. At warmup/resume tick 0 that is the
+   * same thing as simply running a tweaked world from scratch, which is why one control covers both.
+   */
+  | { kind: 'start'; init: Init; perf: Perf; warmup?: number; resume?: ResumeFile; tweaks?: Init }
+  /** Hand back the current state as a portable resume point, or the newest milestone at or before a tick. */
+  | { kind: 'saveResume'; tick?: number }
   | { kind: 'rewind'; ticks: number } // step back to the newest snapshot at least this far back
   | { kind: 'seek'; tick: number }
   | { kind: 'feed'; x: number; y: number; n: number; radius: number }
@@ -100,5 +117,9 @@ export type FromSim =
   | { kind: 'ready'; layout: FrameLayout; frames: FrameBuffers[]; header: Int32Array; note: string }
   | { kind: 'stats'; stats: StatsSnapshot }
   | { kind: 'error'; message: string }
+  /** A portable resume point, and the ticks that have milestones held in memory. */
+  | { kind: 'resumePoint'; file: ResumeFile; milestones: number[] }
+  /** Progress through a warm-up, so a long skip is not an unexplained freeze. */
+  | { kind: 'warming'; tick: number; target: number }
   /** How many edits can still be taken back, so the Undo control can tell the truth. */
   | { kind: 'undoDepth'; depth: number }
