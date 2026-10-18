@@ -131,11 +131,24 @@ function readCatalog(): CatalogEntry[] {
   return out
 }
 
-/** A world is impossible if it cannot bond, cannot stay alive, or is numerically broken. */
+/**
+ * A world is impossible if it cannot bond, cannot stay alive, or is numerically broken.
+ *
+ * **It must never test `level`,** and that rule was broken, which killed the whole search. `level`
+ * requires every rung at and below a tier, and tier 0 contains `Lasts`, which wants a p90 lifetime
+ * of 2,000 ticks. Phase 0 runs **500**. So no phase-0 world could ever reach level 0, and the
+ * screen discarded everything: measured, `60 catalogued · 0 possible (0%)`, and phase 1 then had
+ * nothing to run. At the full 200,000 budget that is roughly ten core-hours producing zero
+ * survivors.
+ *
+ * This is why `kills: 'impossible-only'` exists at all — a 500-tick horizon can establish that a
+ * world is *broken* and nothing more. Ranking or gating on achievement at that length throws away
+ * every slow starter, which is precisely what the search is looking for.
+ */
 function possible(e: CatalogEntry): boolean {
-  if (e.level < 0) return false // nothing was ever alive for a whole window
   if (e.stats.bonds === 0 && e.stats.bestOrder === 0) return false // the chemistry cannot hold
   if (e.stats.clampPct > 60) return false // the integrator is fighting it the whole way
+  if (e.stats.organisms === 0 && e.stop === 'extinct') return false // nothing survived to judge
   return true
 }
 

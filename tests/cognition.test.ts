@@ -15,7 +15,7 @@ import { World } from '../src/core/world'
  */
 
 /** Feeds a synthetic organism a scripted life: one call per tick, as `think` would. */
-type Beat = { mx: number; my: number; gx: number; gy: number; food: number; sx: number; sy: number; meals: number }
+type Beat = { mx: number; my: number; gx: number; gy: number; food: number; sx: number; sy: number; meals: number; vx?: number; vy?: number }
 
 const SUBJECTS = 6
 
@@ -31,7 +31,12 @@ function script(ticks: number, make: (k: number) => (t: number) => Beat): { cog:
    */
   for (let b = 0; b < SUBJECTS; b++) {
     const behave = make(b)
-    for (let t = 0; t < ticks; t++) cog.observe({ b, ...behave(t), age: t })
+    for (let t = 0; t < ticks; t++) {
+      const beat = behave(t)
+      // vx/vy default to the command: a synthetic organism that goes where it asked to. Taxis
+      // subtracts the drift's own alignment, so a case that wants credit must make the two differ.
+      cog.observe({ b, ...beat, vx: beat.vx ?? beat.mx, vy: beat.vy ?? beat.my, age: t })
+    }
   }
   return { cog, stats: cog.stats(Array.from({ length: SUBJECTS }, (_, b) => ({ b, gen: 0, age: ticks }))) }
 }
@@ -45,7 +50,17 @@ describe('taxis cannot be won by a fixed heading in a fixed world', () => {
       const gy = Math.sin(a)
       // follows the gradient, a little less exactly for each subject, so the spread is real
       const m = a + 0.02 * k
-      return { mx: Math.cos(m), my: Math.sin(m), gx, gy, food: 3, sx: 0, sy: 0, meals: 0 }
+      /*
+       * The drift points somewhere *else*, and it has to.
+       *
+       * Taxis measures the command's alignment with food minus the alignment the body's existing
+       * drift already had, because the food gradient is a force and a body is carried toward food
+       * whether it decides anything or not. A synthetic organism whose drift equals its command is
+       * therefore scored zero by construction — correctly: it is indistinguishable from one that
+       * merely keeps going. Here the drift is fixed and the command steers, which is the case the
+       * rung exists to detect.
+       */
+      return { mx: Math.cos(m), my: Math.sin(m), vx: 1, vy: 0, gx, gy, food: 3, sx: 0, sy: 0, meals: 0 }
     })
     expect(stats.taxis.effect).toBeGreaterThan(0.3)
     expect(stats.taxis.z).toBeGreaterThan(3)
@@ -58,7 +73,7 @@ describe('taxis cannot be won by a fixed heading in a fixed world', () => {
      * its heading is a constant. A time-shuffle gives it nothing, because shuffling which tick's
      * gradient is paired with which tick's command changes nothing when both are constant.
      */
-    const { stats } = script(2000, () => () => ({ mx: 0, my: 1, gx: 0, gy: 1, food: 3, sx: 0, sy: 0, meals: 0 }))
+    const { stats } = script(2000, () => () => ({ mx: 0, my: 1, vx: 0, vy: 1, gx: 0, gy: 1, food: 3, sx: 0, sy: 0, meals: 0 }))
     expect(Math.abs(stats.taxis.effect)).toBeLessThan(0.01)
   })
 

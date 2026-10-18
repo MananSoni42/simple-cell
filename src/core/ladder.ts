@@ -94,6 +94,15 @@ const SOLO_MIN_SPEED = 0.02
 /** Coasting times a structure must outlast to count as holding together. */
 const HOLD_COASTS = 3
 
+/**
+ * Completed lives needed before the tier-0 rungs report anything.
+ *
+ * Ten, because a p90 over fewer is just the second-largest value. In a real run `Lasts` first
+ * latched at exactly 10 lives and `Feeds` at 17, so this costs almost nothing and removes the
+ * single-death false positive entirely.
+ */
+const MIN_LIVES = 10
+
 export interface Rung {
   n: number
   /** Which level of organisation this rung belongs to, as an index into LEVELS. */
@@ -270,9 +279,22 @@ export class LadderTracker {
       return a[Math.min(a.length - 1, Math.floor(q * (a.length - 1)))]
     }
 
-    // metabolism: lives against their own endowment, so no dial can buy these rungs
-    const fedMedian = quantile(lives.map((l) => l.fed), 0.5)
-    const coastsP90 = quantile(lives.map((l) => l.coasts), 0.9)
+    /*
+     * Tier 0 needs **enough completed lives to have a median**, and it had no floor at all.
+     *
+     * `quantile` returns the single element when handed one, so `Feeds` ("the *typical* life ate
+     * more than it was given") and `Lasts` ("p90 lifespan") both fired off **n = 1**. Verified: one
+     * recorded death that ate 3× its endowment and lasted 4 coasts met both rungs outright. And
+     * tier 0 is the conjunction that gates `level` for the whole ladder, so one lucky early death
+     * opened every rung above it.
+     *
+     * Every other rung here already has a floor — `SOLO_MIN_N` 5, `sN >= 60`, `minTicks` 200,
+     * `gens.length >= 8`. These two were the omission. A p90 over fewer than ten values is the
+     * second-largest of them, which is not a p90.
+     */
+    const enoughLives = lives.length >= MIN_LIVES
+    const fedMedian = enoughLives ? quantile(lives.map((l) => l.fed), 0.5) : 0
+    const coastsP90 = enoughLives ? quantile(lives.map((l) => l.coasts), 0.9) : 0
 
     /*
      * What was here, and why it is gone.
@@ -393,13 +415,13 @@ export class LadderTracker {
      * long in ticks, and longer than a free ride on the endowment gives — is the only version
      * neither direction of the dial can game.
      */
-    const lifeP90 = quantile(lives.map((l) => l.age), 0.9)
+    const lifeP90 = enoughLives ? quantile(lives.map((l) => l.age), 0.9) : 0
     add(
       0,
       'Lasts',
       'long lives: 2,000 ticks, and twice what coasting on the endowment allows',
       Math.min(coastsP90 / 2, lifeP90 / 2000),
-      `p90 ${Math.round(lifeP90)}t, ${coastsP90.toFixed(2)} coasts`,
+      enoughLives ? `p90 ${Math.round(lifeP90)}t, ${coastsP90.toFixed(2)} coasts` : `only ${lives.length} lives so far`,
     )
 
     // ---- tier 1: reactive. Acts on what it senses now ---------------------------------------

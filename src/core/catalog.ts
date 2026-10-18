@@ -173,6 +173,22 @@ export function specInit(spec: WorldSpec): Init {
   const init = initFromSeed(spec.seed, spec.scale)
   init.A = matrixOf(spec.A)
   init.quantized = true
+  /*
+   * **Food has to be allowed to move for its mobility to mean anything.**
+   *
+   * `foodMoves` was never set here, so it stayed `false` from the seed, the integrator skipped food
+   * entirely, and `muFood` — four levels across a twentyfold range — produced **bit-identical
+   * worlds**. Verified: 6 of 6 pairs identical between `muFood` 0.05 and 1. So the dial was dead,
+   * the factor table for "food mobility" was reporting pure noise over tens of thousands of worlds
+   * per cell, and pre-registered prediction P3 ("muFood below 0.4 is necessary for Seeks") was
+   * untestable by the search that was meant to test it.
+   *
+   * Tied to the dial rather than forced on: `muFood` at 1 means food that drifts exactly as fast as
+   * a limb swims, which is the regime where nothing can be caught, so the search needs to be able
+   * to choose it. The cost is real — moving food also turns on the kernel's food path, which
+   * `skipFood` had been eliding for about half the packed particles.
+   */
+  if (spec.muFood !== undefined) init.foodMoves = true
   init.foodMode = spec.foodMode
   init.foodLevel = spec.foodLevel
   init.foodRegime = spec.foodRegime

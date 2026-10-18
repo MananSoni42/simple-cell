@@ -169,6 +169,30 @@ export const HAND_BUILT: Record<string, HandBuilt> = {
   },
 
   /**
+   * The exploit, kept as a policy so it can never quietly come back.
+   *
+   * Two weights, reading **no food, no field, no sockets** — "swim the way I am already drifting".
+   * It scored **2.94 on Taxis**, met, at nearly three times the threshold, while eating *less than
+   * the do-nothing control*. The food gradient is a force already applied to the body, `VEL` feeds
+   * the resulting motion back in, and this brain inherits the whole correlation for free.
+   *
+   * Taxis now subtracts the drift's own alignment, so this scores ~0. The policy stays as a
+   * permanent adversary: any future change that lets it pass the rung again fails a test.
+   */
+  momentum: {
+    rung: '(none — the exploit)',
+    representable: true,
+    describe: 'swims whichever way it is already drifting, reading nothing at all — the policy that used to pass Taxis for free',
+    brain() {
+      const m = w()
+      set(m, BRAIN_OUT.FX, BRAIN_IN.VEL_X, 8)
+      set(m, BRAIN_OUT.FY, BRAIN_IN.VEL_Y, 8)
+      return m
+    },
+    limb: silentLimb,
+  },
+
+  /**
    * A thrifty control: pushes nothing, signals nothing, spends as little as it can.
    *
    * Not built to pass a rung — built to **fail all of them** while staying alive, because that is

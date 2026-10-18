@@ -33,10 +33,17 @@ export interface OrderStats {
    * is still there is the first thing in this world worth calling alive.
    */
   oldest: {
+    /** The order it has **now** — what a gate asking "is this a structure" must use. */
     order: number
+    /** The largest order it ever held, which is what its lifetime score is built on. */
+    peak: number
     age: number
     replacements: number
-    /** Net distance the structure's centroid has travelled since it formed, torus-unwrapped. */
+    /**
+     * Net distance the centroid has travelled since it formed, torus-unwrapped — accumulated
+     * **only across samples where the membership held**, since a centroid jump on a join or a
+     * departure is not motion.
+     */
     travel: number
     /** Births that happened inside it. */
     births: number
@@ -261,9 +268,19 @@ export class OrderTracker {
         since: st.since,
         replacements: st.replacements + changed,
         peak: Math.max(st.peak, members.size),
-        // unwrap: move the plane position by the torus-shortest step the wrapped centroid took
-        ux: st.ux + minImage(cx - st.cx),
-        uy: st.uy + minImage(cy - st.cy),
+        /*
+         * Unwrap the centroid — but **only when the membership did not change**.
+         *
+         * The centroid jumps when members join or leave, and that jump is not motion. Measured on a
+         * bonding world with `d_max = 5` and a 10-tick sample, so a physical ceiling of 50 units:
+         * the largest single step was **394 units**, 8× the ceiling, and 1,620 of 1,668
+         * membership-change samples moved more than 2 units. Decomposed, one structure's reported
+         * travel of 64.6 (1.32× solo, enough to pass the rung) was 6.5 (0.13× solo) once
+         * membership-change steps were excluded — a factor of ten. The rung was measuring churn,
+         * and churn is highest in exactly the crowded clumps that are least coherent.
+         */
+        ux: changed === 0 ? st.ux + minImage(cx - st.cx) : st.ux,
+        uy: changed === 0 ? st.uy + minImage(cy - st.cy) : st.uy,
         ox: st.ox,
         oy: st.oy,
         cx,
@@ -293,7 +310,19 @@ export class OrderTracker {
       const score = Math.max(0, st.peak - 1) * Math.pow(heldFrac, 1.5)
       if (!out.oldest || score > out.oldest.score) {
         out.oldest = {
-          order: st.peak,
+          /*
+           * The order it **has**, not the largest it ever held.
+           *
+           * `peak` is a high-water mark, and both collective rungs gate on `order >= 3`. Measured:
+           * a structure of **two** members was reported as order 39, and one seed passed `Moves
+           * together` entirely because of it — swapping `peak` for the current size took that seed
+           * from 3.871 (met) to 0.000. The readout lied too: "19° for 0.45 coasts" for a group of 9.
+           *
+           * `peak` is still the right thing for the *score* below, which is about what a structure
+           * achieved over its life; it is the wrong thing for a gate asking what exists now.
+           */
+          order: st.members.size,
+          peak: st.peak,
           age,
           replacements: st.replacements,
           heldFrac,

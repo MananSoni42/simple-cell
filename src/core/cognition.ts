@@ -111,6 +111,18 @@ export interface CogStep {
   /** The commanded force — what the brain asked for, before the world had its say. */
   mx: number
   my: number
+  /**
+   * Last tick's realised displacement, which the taxis measure has to subtract out.
+   *
+   * The food "gradient" the brain reads is not information about food, it is a **force already
+   * applied to the body** — `forcekernel` accumulates the identical term into the net force and
+   * into `ffx/ffy`. So a body is pulled toward food whether or not it decides anything, and
+   * `VEL_X/VEL_Y` feeds that motion back in as an input. A brain with two weights, `FX ← VEL_X`
+   * and `FY ← VEL_Y`, therefore scored **2.94 on Taxis** — met, at nearly three times the
+   * threshold — while eating *less than the do-nothing control*. It reads no food at all.
+   */
+  vx: number
+  vy: number
   /** The food gradient on the whole body, and the count of food within reach. */
   gx: number
   gy: number
@@ -243,8 +255,28 @@ export class Cognition {
       const gMag = Math.hypot(s.gx, s.gy)
       const sMag = Math.hypot(shufGx, shufGy)
       if (gMag > 1e-9 && sMag > 1e-9) {
-        this.taxR[b] += (s.mx * s.gx + s.my * s.gy) / (mMag * gMag)
-        this.taxS[b] += (s.mx * shufGx + s.my * shufGy) / (mMag * sMag)
+        /*
+         * Alignment of the **command** minus alignment of the **drift it already had**.
+         *
+         * Without the second term the rung is passed by a brain that reads no food whatsoever: the
+         * food gradient is a force, so the body is carried toward food regardless, `VEL` feeds that
+         * motion back as an input, and `FX ← VEL_X` inherits the whole correlation. Measured, that
+         * two-weight brain scored 2.94 and met the rung while eating less than a brain that does
+         * nothing at all.
+         *
+         * Subtracting the drift's own alignment asks the only question worth asking: did the
+         * organism steer toward food **more than it was already being carried there**? A momentum
+         * brain commands along its drift, so the two terms cancel to zero. A chemotaxis brain
+         * commands along the gradient whatever its drift is doing, so it does not.
+         *
+         * The time-shuffled null is applied to both terms alike, so it still removes any static
+         * regularity in where food happens to be.
+         */
+        const vMag = Math.hypot(s.vx, s.vy)
+        const drift = vMag > 1e-9 ? (s.vx * s.gx + s.vy * s.gy) / (vMag * gMag) : 0
+        const driftShuf = vMag > 1e-9 ? (s.vx * shufGx + s.vy * shufGy) / (vMag * sMag) : 0
+        this.taxR[b] += (s.mx * s.gx + s.my * s.gy) / (mMag * gMag) - drift
+        this.taxS[b] += (s.mx * shufGx + s.my * shufGy) / (mMag * sMag) - driftShuf
         this.taxN[b] += 1
       }
 

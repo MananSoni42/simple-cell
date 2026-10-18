@@ -1715,6 +1715,8 @@ export class World {
         b,
         mx: this.mvx[b],
         my: this.mvy[b],
+        vx: this.lvx[b],
+        vy: this.lvy[b],
         gx,
         gy,
         food: near,
