@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { type WorldSpec, specId, specInit } from '../src/core/catalog'
-import { SOURCE_MOTIONS, SOURCE_RELATIONS, foodAxes } from '../src/core/params'
+import { type FoodMode, SOURCE_MOTIONS, SOURCE_RELATIONS, foodAxes } from '../src/core/params'
+import { FOOD } from '../src/core/types'
 import { restoreSnapshot, takeSnapshot } from '../src/core/snapshot'
 import { World } from '../src/core/world'
 
@@ -183,6 +184,64 @@ describe('food sources: three axes, not one enum', () => {
       expect(b.patches.map((p) => [p.x, p.y, p.dx, p.dy]), `motion ${motion}`).toEqual(wanted)
       expect(b.srcV).toBe(a.srcV)
     }
+  })
+
+  it('places food around its source for every pattern that has one', () => {
+    /*
+     * The bug this pins. `spring` read a stored fixed point, and `ring` and `gradient` were defined
+     * relative to the world's middle — fine while motion was part of the pattern, wrong once motion
+     * became its own axis. A source could orbit while the food kept landing in the same place, so
+     * choosing a motion appeared to do nothing, which is indistinguishable from the dial being
+     * broken.
+     *
+     * Measured as the share of food within reach of where the source actually is.
+     */
+    const share = (w: World, within: number): number => {
+      const p = w.patches[0]
+      let n = 0
+      let near = 0
+      for (let i = 0; i < w.cap; i++) {
+        if (w.type[i] !== FOOD || !w.alive[i]) continue
+        n++
+        if (Math.hypot(sep(w, w.x[i] - p.x), sep(w, w.y[i] - p.y)) < within) near++
+      }
+      return n > 0 ? near / n : 0
+    }
+    const moving = (mode: FoodMode): World =>
+      run({ ...BASE, foodMode: mode, foodLife: 120, sourceMotion: 'comet', sourceSpeed: 0.8, patches: 1 }, 900)
+
+    for (const mode of ['patchy', 'spring', 'comet'] as const) {
+      const w = moving(mode)
+      expect(Math.hypot(w.patches[0].dx, w.patches[0].dy), `${mode} source moved`).toBeGreaterThan(30)
+      // a disc around the source: nearly all of it should be there, and was not before the fix
+      expect(share(w, 90), `${mode} food follows`).toBeGreaterThan(0.9)
+    }
+    // A band is half the world wide and a ring sits at a radius, so neither concentrates near the
+    // source — they are checked against *uniform* instead, which is what they used to degenerate to.
+    expect(share(moving('gradient'), 90)).toBeGreaterThan(0.45)
+    expect(share(moving('ring'), 150)).toBeGreaterThan(0.6)
+    // Uniform food genuinely cannot show a source motion, and is left alone rather than forced to.
+    expect(share(moving('random'), 90)).toBeLessThan(0.45)
+  })
+
+  it('believes the source count it is given, and defaults it where defaults belong', () => {
+    /*
+     * `comet` and `spring` name worlds with a single source, and the World used to enforce that by
+     * ignoring `n_patch` outright. Gating that override on "did you also pick a motion?" only moved
+     * the surprise somewhere less obvious, so the default now lives in `specInit` and the World
+     * believes whatever it is handed.
+     */
+    for (const mode of ['comet', 'spring'] as const) {
+      // the catalog keeps the count it was scored with: every comet row really did run with one
+      expect(specInit({ ...BASE, foodMode: mode, patches: 4 }).n_patch, `${mode} default`).toBe(1)
+      // ...and a spec that opts into the axes keeps its count
+      expect(specInit({ ...BASE, foodMode: mode, patches: 4, sourceMotion: 'wander' }).n_patch).toBe(4)
+      expect(run({ ...BASE, foodMode: mode, patches: 4, sourceMotion: 'wander', sourceSpeed: 0.5 }, 10).patches.length).toBe(4)
+    }
+    // Anything that states a count is believed, whatever the pattern is called — which is what a
+    // world built in the browser does, and why the slider there appeared not to work.
+    const direct = new World({ ...specInit({ ...BASE, foodMode: 'comet' }), n_patch: 6 })
+    expect(direct.patches.length).toBe(6)
   })
 
   it('translates every legacy mode onto the axes', () => {

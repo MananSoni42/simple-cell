@@ -23,9 +23,10 @@ const DB = 'simplecell'
  * same list would invite exactly the comparison that cannot be made. The upgrade therefore drops
  * both stores and recreates them.
  */
-const VERSION = 2
+const VERSION = 3
 const RUNS = 'runs'
 const ORGANISMS = 'organisms'
+const CHECKPOINTS = 'checkpoints'
 
 export interface StoredRun {
   id: string
@@ -64,6 +65,38 @@ export interface StoredOrganism {
   organism: OrganismFile
 }
 
+/**
+ * A world's state at one tick, saved automatically as a run passes each checkpoint interval.
+ *
+ * The state lives in `buffer` as raw bytes rather than JSON, which is what makes this affordable:
+ * IndexedDB stores an `ArrayBuffer` natively, and the same buffer is *transferred* from the
+ * simulation worker instead of being copied, so saving a 20 MB checkpoint does not stall the world.
+ *
+ * `world` is the identity of the configuration, not of the run. That is on purpose — re-running the
+ * same world should offer the checkpoints its earlier runs left behind, which is the entire point.
+ */
+export interface StoredCheckpoint {
+  id: string
+  /** `initId` of the configuration. Checkpoints from different worlds never mix. */
+  world: string
+  tick: number
+  savedAt: number
+  /** Metadata needed to restore, minus the bytes. */
+  meta: unknown
+  buffer: ArrayBuffer
+  /** For the list: what world this was, in words. */
+  label: string
+}
+
+/**
+ * How many checkpoints to keep per world, oldest dropped first.
+ *
+ * Bounded by count rather than bytes because the size is dominated by one thing — a world with
+ * thousands of brains — and a count is something a person can reason about: "the last eight
+ * checkpoints", which at the 5,000-tick interval is the last 40,000 ticks.
+ */
+export const CHECKPOINTS_PER_WORLD = 8
+
 export type StoreMode = 'idb' | 'memory'
 
 function open(): Promise<IDBDatabase> {
@@ -78,6 +111,9 @@ function open(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(RUNS)) db.createObjectStore(RUNS, { keyPath: 'id' })
       if (!db.objectStoreNames.contains(ORGANISMS)) db.createObjectStore(ORGANISMS, { keyPath: 'id' })
+      // Version 3 adds checkpoints. Note it does *not* drop the other two: unlike the version-2
+      // upgrade, nothing about the existing runs or organisms became incomparable.
+      if (!db.objectStoreNames.contains(CHECKPOINTS)) db.createObjectStore(CHECKPOINTS, { keyPath: 'id' })
     }
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error ?? new Error('could not open the collection'))
@@ -105,6 +141,7 @@ export class Collection {
   private db: IDBDatabase | null = null
   private memRuns = new Map<string, StoredRun>()
   private memOrganisms = new Map<string, StoredOrganism>()
+  private memCheckpoints = new Map<string, StoredCheckpoint>()
 
   async init(): Promise<StoreMode> {
     try {
@@ -136,6 +173,50 @@ export class Collection {
     if (!this.db) return
     const tx = this.db.transaction(store, 'readwrite')
     await wrap(tx.objectStore(store).delete(id))
+  }
+
+  /** Every checkpoint for one world configuration, oldest tick first. */
+  async checkpoints(world: string): Promise<StoredCheckpoint[]> {
+    const all = await this.all<StoredCheckpoint>(CHECKPOINTS, this.memCheckpoints)
+    return all.filter((c) => c.world === world).sort((a, b) => a.tick - b.tick)
+  }
+
+  /** Every world that has checkpoints, newest first, for a picker. */
+  async checkpointWorlds(): Promise<{ world: string; label: string; ticks: number[]; savedAt: number }[]> {
+    const all = await this.all<StoredCheckpoint>(CHECKPOINTS, this.memCheckpoints)
+    const by = new Map<string, StoredCheckpoint[]>()
+    for (const c of all) {
+      const list = by.get(c.world)
+      if (list) list.push(c)
+      else by.set(c.world, [c])
+    }
+    return [...by.entries()]
+      .map(([world, cs]) => ({
+        world,
+        label: cs[0].label,
+        ticks: cs.map((c) => c.tick).sort((a, b) => a - b),
+        savedAt: Math.max(...cs.map((c) => c.savedAt)),
+      }))
+      .sort((a, b) => b.savedAt - a.savedAt)
+  }
+
+  /**
+   * Saves a checkpoint and drops the world's oldest once there are more than the cap.
+   *
+   * Re-saving the same tick overwrites rather than accumulating: a world re-run from scratch passes
+   * tick 5,000 again, and two checkpoints for the same tick of the same configuration are the same
+   * state, so keeping both would spend the budget on duplicates.
+   */
+  async saveCheckpoint(c: Omit<StoredCheckpoint, 'id'>): Promise<void> {
+    await this.put<StoredCheckpoint>(CHECKPOINTS, this.memCheckpoints, { ...c, id: `cp_${c.world}_${c.tick}` })
+    const mine = await this.checkpoints(c.world)
+    for (const old of mine.slice(0, Math.max(0, mine.length - CHECKPOINTS_PER_WORLD))) {
+      await this.drop(CHECKPOINTS, this.memCheckpoints, old.id)
+    }
+  }
+
+  async deleteCheckpoints(world: string): Promise<void> {
+    for (const c of await this.checkpoints(world)) await this.drop(CHECKPOINTS, this.memCheckpoints, c.id)
   }
 
   runs(): Promise<StoredRun[]> {

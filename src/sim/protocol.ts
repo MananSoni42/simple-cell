@@ -1,6 +1,6 @@
 import type { Perf } from '../compute/select'
 import type { Init } from '../core/params'
-import type { ResumeFile } from '../core/resume'
+import type { PackedResume, ResumeFile } from '../core/resume'
 import type { AggregateStats } from '../core/aggregates'
 import type { Census, LifeStats } from '../core/metrics'
 import type { FitnessSpec } from '../core/fitness'
@@ -15,19 +15,18 @@ export type ToSim =
   /**
    * Start a world.
    *
-   * `warmup` runs that many ticks before the first frame is published, with nothing drawn and no
-   * history kept — "skip the first N ticks" for a world where the interesting part is late. It is
-   * exact rather than approximate, because the world is deterministic: warming up to tick N gives
-   * the state those N ticks would have produced had you watched them.
+   * `resume` restores a saved checkpoint instead of starting at tick 0. There is deliberately no
+   * compute-ahead option: a start tick must be backed by a checkpoint, because the alternative was
+   * offering to spend half an hour computing ticks nobody watches and calling it a feature. A run
+   * saves its own checkpoints as it goes, so the *next* run of that world can start from one.
    *
-   * `resume` short-circuits that: a saved state restores at its tick instantly, and `warmup`
-   * beyond it carries on from there. A resume point may be combined with `tweaks` to change
-   * parameters *at* that tick — the world develops under the parameters it was saved with, and the
-   * tweak is a perturbation applied to a mature population. At warmup/resume tick 0 that is the
-   * same thing as simply running a tweaked world from scratch, which is why one control covers both.
+   * A checkpoint may be combined with `tweaks` to change parameters *at* that tick — the world
+   * develops under the parameters it was saved with, and the tweak is a perturbation applied to a
+   * mature population. With no checkpoint the tweaks are simply the world's configuration, which
+   * is the same thing said at tick 0.
    */
-  | { kind: 'start'; init: Init; perf: Perf; warmup?: number; resume?: ResumeFile; tweaks?: Init }
-  /** Hand back the current state as a portable resume point, or the newest milestone at or before a tick. */
+  | { kind: 'start'; init: Init; perf: Perf; resume?: PackedResume; tweaks?: Init }
+  /** Hand back a checkpoint as a downloadable file: the newest one at or before a tick, else the live state. */
   | { kind: 'saveResume'; tick?: number }
   | { kind: 'rewind'; ticks: number } // step back to the newest snapshot at least this far back
   | { kind: 'seek'; tick: number }
@@ -117,9 +116,14 @@ export type FromSim =
   | { kind: 'ready'; layout: FrameLayout; frames: FrameBuffers[]; header: Int32Array; note: string }
   | { kind: 'stats'; stats: StatsSnapshot }
   | { kind: 'error'; message: string }
-  /** A portable resume point, and the ticks that have milestones held in memory. */
+  /** A checkpoint as a downloadable file, and the ticks held in memory. */
   | { kind: 'resumePoint'; file: ResumeFile; milestones: number[] }
-  /** Progress through a warm-up, so a long skip is not an unexplained freeze. */
-  | { kind: 'warming'; tick: number; target: number }
+  /**
+   * A checkpoint the running world just passed, for the page to persist.
+   *
+   * Pushed rather than polled, and the buffer is transferred rather than copied, so a 20 MB
+   * checkpoint costs the simulation a pointer hand-off instead of a stall.
+   */
+  | { kind: 'checkpoint'; packed: PackedResume }
   /** How many edits can still be taken back, so the Undo control can tell the truth. */
   | { kind: 'undoDepth'; depth: number }

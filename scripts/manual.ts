@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { type CatalogEntry, type WorldSpec, specId } from '../src/core/catalog'
 import { evaluate } from '../src/core/evaluate'
 import { HAND_BUILT, HAND_BUILT_NAMES } from '../src/core/handbuilt'
+import type { Init } from '../src/core/params'
 
 /**
  * The hand-built worlds, scored and written for the Discoveries page.
@@ -53,6 +54,22 @@ const BASE: WorldSpec = {
 /** A chemistry that bonds everything, for the policy whose rung needs structures to exist. */
 const STICKY = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5]
 
+/**
+ * Worlds built by hand in the browser and saved to a file, rather than written as a policy.
+ *
+ * These are the other half of "manual": not a brain built to defeat a rung, but a *world* someone
+ * assembled and kept. They go through the same `evaluate` and the same ladder, and they carry their
+ * `init` whole rather than as a spec, because a world built in the browser has settings the spec
+ * cannot express — its own size, substep count, source count, a full 6x6 matrix, a configured
+ * learner. Described as a spec it would open as a different world from the one scored here.
+ */
+const SAVED_WORLDS: { file: string; why: string }[] = [
+  {
+    file: 'custom_saved_worlds/simplecell-run-829641549-11062t.json',
+    why: 'a 4x world built by hand: 11,200 matter, 2,400 brains, comet food on a cycling regime, Hebbian learning',
+  },
+]
+
 const rows: CatalogEntry[] = []
 for (const name of HAND_BUILT_NAMES) {
   const h = HAND_BUILT[name]
@@ -78,6 +95,37 @@ for (const name of HAND_BUILT_NAMES) {
     why: `manual · ${h.rung.startsWith('(none') ? h.rung.replace(/^\(none — (.*)\)$/, '$1') : `built for ${h.rung}`} — ${h.describe}`,
   })
   console.log(`${name.padEnd(15)} level ${String(r.level).padStart(2)} score ${r.score.toFixed(2).padStart(6)} · ${passed} rungs met · ${h.rung}`)
+}
+
+for (const saved of SAVED_WORLDS) {
+  const parsed = JSON.parse(readFileSync(saved.file, 'utf8')) as { init: Init }
+  const spec: WorldSpec = { ...BASE, init: parsed.init }
+  const t0 = Date.now()
+  const r = evaluate(spec, { ticks: TICKS, maxExtend: 1, plateauFrac: 0, every: 500 })
+  const passed = r.ratios.filter((x) => x >= 1).length
+  rows.push({
+    id: specId(spec),
+    spec,
+    phase: -1,
+    ms: Date.now() - t0,
+    ticks: r.ticks,
+    stop: r.stop,
+    level: r.level,
+    score: r.score,
+    ratios: r.ratios,
+    stats: r.stats,
+    seeds: 1,
+    at: Date.now(),
+    source: undefined,
+    /*
+     * The `why` says what it *is* and what it did, in that order, and does not round the verdict
+     * up. This world meets four rungs and reaches level -1, because level is an unbroken run from
+     * the bottom and it fails rung 1. Reporting "four rungs" without that would be the page
+     * flattering a world that cannot feed itself.
+     */
+    why: `manual · ${saved.why} — ${passed} rungs met, level ${r.level}`,
+  })
+  console.log(`${saved.file.split('/').pop()?.padEnd(15)} level ${String(r.level).padStart(2)} score ${r.score.toFixed(2).padStart(6)} · ${passed} rungs met`)
 }
 
 /*

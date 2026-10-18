@@ -631,6 +631,7 @@ export function coreRadius(brainA: boolean, brainB: boolean, L: Laws): number {
 /** `scale` multiplies the world edge; counts and rates scale with area so density stays constant. */
 function seedWorld(seed: number, scale = 1): Init {
   const rng = new Rng(seed)
+  // eslint-disable-next-line prefer-const -- named so the single-source clamp below can be applied
   const area = scale * scale
   const A = Array.from({ length: N_MATRIX }, () => new Array<number>(N_MATRIX).fill(0))
   /*
@@ -667,7 +668,7 @@ function seedWorld(seed: number, scale = 1): Init {
     A[BRAIN_ROW][j] = a
     A[j][BRAIN_ROW] = a
   }
-  return {
+  const init: Init = {
     seed,
     size: LAWS.SIZE * scale,
     scale,
@@ -721,6 +722,16 @@ function seedWorld(seed: number, scale = 1): Init {
     metabolism: 0.5,
     bond_flow: 0.05,
   }
+  /*
+   * `comet` and `spring` name worlds with a *single* source. Applied after the literal rather than
+   * inside it, so that no random draw moves: `foodMode` must be drawn where it always was, or every
+   * seed-based world shifts by one draw and all of them become different worlds.
+   *
+   * The clamp lives here and in `specInit` rather than in the World, which has to believe whatever
+   * count it is handed — a world built in the browser with eight sources should get eight.
+   */
+  if (init.foodMode === 'comet' || init.foodMode === 'spring') init.n_patch = 1
+  return init
 }
 
 /**

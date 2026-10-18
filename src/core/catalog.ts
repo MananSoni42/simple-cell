@@ -146,6 +146,19 @@ export interface WorldSpec {
    * other, which is the point: the policy the feasibility suite asserts on is the policy on screen.
    */
   handBuilt?: string
+  /**
+   * A complete world, used verbatim instead of being built from the dials above.
+   *
+   * The escape hatch for a world that did not come from the dial space at all — one built by hand
+   * in the browser and saved to a file. Such a world has settings the spec cannot express (its own
+   * size, substep count, source count, a full 6x6 matrix, a configured learner), so describing it
+   * as a spec would put a row on the Discoveries page that opens a *different world* from the one
+   * the numbers beside it were measured on.
+   *
+   * Never drawn by the sampler, and the rest of the spec is ignored when this is set. Carried so
+   * such a world is still catalogable, scorable and openable like any other row.
+   */
+  init?: Init
 }
 
 /** The reproduction modes a world may allow. Budding is always available; these add to it. */
@@ -194,6 +207,12 @@ export function triOf(A: number[][]): number[] {
 
 /** A world from a spec. Deterministic: the same spec always gives the same world. */
 export function specInit(spec: WorldSpec): Init {
+  /*
+   * A world given whole is used whole. Returning a copy rather than the object itself because the
+   * caller's spec is often reused across seeds and a World writes to its own `init` — a parameter
+   * changeover at a checkpoint does exactly that.
+   */
+  if (spec.init) return { ...spec.init }
   const init = initFromSeed(spec.seed, spec.scale)
   init.A = matrixOf(spec.A)
   init.quantized = true
@@ -226,6 +245,16 @@ export function specInit(spec: WorldSpec): Init {
    * area. That inconsistency is the reason this dial exists; it is now explicit instead of implied.
    */
   init.n_patch = Math.max(1, Math.round(spec.patches * spec.scale ** (spec.sourceDensity ?? 0)))
+  /*
+   * `comet` and `spring` name worlds with a *single* source, and the world used to enforce that by
+   * ignoring `n_patch`. Enforcing it here instead means the catalog keeps the counts it was scored
+   * with — every comet row really did run with one source — while a world that states a count
+   * somewhere else is believed rather than silently overridden. A spec that sets a source axis has
+   * opted into the factored behaviour and keeps its count.
+   */
+  if ((spec.foodMode === 'comet' || spec.foodMode === 'spring') && spec.sourceMotion === undefined && spec.sourceRelation === undefined) {
+    init.n_patch = 1
+  }
   /*
    * The new axes are only plumbed through when the spec asks for them. Absent, `stepPatches` takes
    * its legacy branch and every saved world keeps the trajectory it had — which is the only reason
@@ -326,6 +355,12 @@ export function specId(spec: WorldSpec): string {
     spec.scale,
     spec.learn ?? 'none',
   ]
+  /*
+   * A world given whole is identified by the whole of it, because nothing else in the spec
+   * describes it. Appended only when present — an empty field would still change the canonical
+   * string for every spec that does not use it, and re-run the catalog.
+   */
+  if (spec.init) canon.push(`init:${JSON.stringify(spec.init)}`)
   /*
    * The food-source axes, on the same terms as the law dials below: appended only when the spec
    * sets one, so a spec that predates them hashes exactly as it did and a resumed search does not

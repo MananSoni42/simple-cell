@@ -10,7 +10,7 @@ import { InspectPanel } from './ui/inspect'
 import { mountLanding } from './ui/landing'
 import { Router } from './ui/router'
 import { mountDiscoveries } from './ui/discoveries'
-import type { ResumeFile } from './core/resume'
+import { type PackedResume, initId } from './core/resume'
 import { mountLibrary } from './ui/library'
 import { mountSetup } from './ui/setup'
 import { collection } from './ui/store'
@@ -195,7 +195,7 @@ function teardown(): void {
   inspect.hide()
 }
 
-function startWorld(init: Init, perf: Perf, build = true, opts: { warmup?: number; resume?: ResumeFile; tweaks?: Init } = {}): void {
+function startWorld(init: Init, perf: Perf, build = true, opts: { resume?: PackedResume; tweaks?: Init } = {}): void {
   openPaused = build
   teardown()
   lastInit = init
@@ -204,7 +204,6 @@ function startWorld(init: Init, perf: Perf, build = true, opts: { warmup?: numbe
   worker.onmessage = (e: MessageEvent<FromSim>) => {
     const m = e.data
     if (m.kind === 'ready') {
-      $('warming').hidden = true
       link = {
         worker,
         layout: m.layout,
@@ -239,15 +238,26 @@ function startWorld(init: Init, perf: Perf, build = true, opts: { warmup?: numbe
     else if (m.kind === 'undoDepth') bUndo.disabled = m.depth === 0
     else if (m.kind === 'organism') inspect.show(m.organism)
     else if (m.kind === 'resumePoint') {
-      download(`simplecell-resume-${m.file.init.seed}-${m.file.tick}t.json`, JSON.stringify(m.file))
+      download(`simplecell-checkpoint-${m.file.init.seed}-${m.file.tick}t.json`, JSON.stringify(m.file))
     }
-    else if (m.kind === 'warming') {
-      // A long warm-up must not read as a hang: a 4x world takes about half an hour to reach tick
-      // 10,000, and until the first frame exists there is nothing else on screen to say so.
-      const el = $('warming')
-      el.hidden = false
-      const pct = m.target > 0 ? Math.round((100 * m.tick) / m.target) : 100
-      el.innerHTML = `<strong>warming up</strong><br />tick ${m.tick.toLocaleString()} of ${m.target.toLocaleString()} — ${pct}%<div class="warming-bar"><i style="width:${pct}%"></i></div><span class="note">nothing is drawn while skipping ahead; the world is deterministic, so this is exactly the state those ticks produce</span>`
+    else if (m.kind === 'checkpoint') {
+      /*
+       * A running world saving itself. Persisted without being asked, because the whole point is
+       * that the *next* run of this world can start somewhere other than tick 0 — a checkpoint you
+       * had to remember to take is a checkpoint you do not have when you want it.
+       */
+      void collection
+        .saveCheckpoint({
+          world: initId(m.packed.meta.init),
+          tick: m.packed.meta.tick,
+          savedAt: m.packed.meta.at,
+          meta: m.packed.meta,
+          buffer: m.packed.buffer,
+          label: `seed ${m.packed.meta.init.seed}, ${m.packed.meta.init.scale ?? 1}x`,
+        })
+        .catch(() => {
+          /* a browser that blocks storage still runs; it just cannot resume later */
+        })
     }
     else if (m.kind === 'builtConfig') {
       download(`simplecell-world-${m.init.seed}.json`, JSON.stringify({ version: 1, init: m.init }, null, 2))
@@ -290,7 +300,7 @@ $('page-explain').addEventListener('click', (e) => {
 const setup = mountSetup($('page-setup'), {
   start: (init, perf, opts) => {
     resumeRate = null // a world built by hand starts at a watchable speed
-    startWorld(init, perf, opts.build, { warmup: opts.warmup, resume: opts.resume, tweaks: opts.tweaks })
+    startWorld(init, perf, opts.build, { resume: opts.resume, tweaks: opts.tweaks })
   },
   back: () => router.go('landing'),
   library: () => router.go('library'),
@@ -346,9 +356,10 @@ for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>('[data-t
 }
 $('t-save').addEventListener('click', () => send({ kind: 'snapshotConfig' }))
 /*
- * A resume point is the world's whole state, not a config. It is a large file — tens of megabytes
- * for a world with thousands of brains — which is why it is a deliberate button rather than part
- * of the run summary everybody downloads.
+ * Download the world's state as a file. Checkpoints are saved to this browser's collection without
+ * being asked, so this button is for moving one somewhere else — it produces a large file, tens of
+ * megabytes for a world with thousands of brains, which is why it is not part of the run summary
+ * everybody downloads.
  */
 $('t-resume').addEventListener('click', () => send({ kind: 'saveResume' }))
 const bUndo = $<HTMLButtonElement>('t-undo')

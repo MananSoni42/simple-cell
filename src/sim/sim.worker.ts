@@ -3,7 +3,7 @@ import { ladder } from '../core/ladder'
 import { census, lifeStats } from '../core/metrics'
 import { type Snapshot, allocSnapshot, restoreSnapshot, snapshotBytes, takeSnapshot, writeSnapshot } from '../core/snapshot'
 import { type OrganismFile, defaultName, exportOrganism } from '../core/organism'
-import { applyTweaks, decodeResume, encodeResume } from '../core/resume'
+import { CHECKPOINT_EVERY, applyTweaks, decodeResume, packResume, toResumeFile } from '../core/resume'
 import type { Init } from '../core/params'
 import { Recorder } from '../core/recorder'
 import { World } from '../core/world'
@@ -53,7 +53,7 @@ function planHistory(w: World): void {
 }
 
 /**
- * Resume milestones: a snapshot every `MILESTONE_EVERY` ticks, kept apart from the rewind ring.
+ * Resume milestones: a snapshot every `CHECKPOINT_EVERY` ticks, kept apart from the rewind ring.
  *
  * Separate because the ring is a *scrubbing* structure — it samples by wall-clock rate so a fast
  * world does not fill it in a second, which means the ticks it holds depend on how fast you were
@@ -65,8 +65,7 @@ function planHistory(w: World): void {
  * budget is spent. Any of them can be written out to a file, which is how a resume point outlives
  * the tab.
  */
-const MILESTONE_EVERY = 5000
-const MILESTONE_BUDGET = 256 << 20
+const MILESTONE_BUDGET = 128 << 20
 let milestones: Snapshot[] = []
 let milestoneCap = 0
 
@@ -76,10 +75,21 @@ function planMilestones(w: World): void {
 }
 
 function milestone(w: World): void {
-  if (w.tick === 0 || w.tick % MILESTONE_EVERY !== 0) return
+  if (w.tick === 0 || w.tick % CHECKPOINT_EVERY !== 0) return
   if (milestones.length > 0 && milestones[milestones.length - 1].tick === w.tick) return
-  milestones.push(writeSnapshot(w, allocSnapshot(w)))
+  const snap = writeSnapshot(w, allocSnapshot(w))
+  milestones.push(snap)
   while (milestones.length > milestoneCap) milestones.shift()
+  /*
+   * Handed to the page to be persisted, unasked. A checkpoint you had to remember to take is a
+   * checkpoint you do not have when you want it — and the next run of this world starting anywhere
+   * other than tick 0 depends entirely on these existing.
+   *
+   * The buffer is *transferred*, so this costs a pointer hand-off rather than copying tens of
+   * megabytes out of the simulation thread.
+   */
+  const packed = packResume(w, snap)
+  ;(self as unknown as Worker).postMessage({ kind: 'checkpoint', packed } satisfies FromSim, [packed.buffer])
 }
 
 /** Oldest-to-newest view of the ring. */
@@ -399,28 +409,6 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
       planMilestones(w)
       recorder = new Recorder()
       retune()
-      /*
-       * The warm-up. Exact rather than approximate — the world is deterministic, so this is the
-       * state those ticks would have produced had they been watched. Nothing is drawn, no rewind
-       * history is kept, and the recorder still observes so the run's charts are not missing their
-       * early half. Progress is posted because a 28-minute skip with no output reads as a hang.
-       */
-      const target = Math.max(0, Math.round(m.warmup ?? 0))
-      if (target > w.tick) {
-        const mine0 = session
-        while (mine0 === session && w.tick < target) {
-          const deadline = performance.now() + 50
-          while (mine0 === session && w.tick < target && performance.now() < deadline) {
-            await w.stepAsync()
-            milestone(w)
-            recorder.observe(w)
-          }
-          post({ kind: 'warming', tick: w.tick, target })
-          await yieldNow()
-        }
-        if (mine0 !== session) return // superseded: a newer world was started while this one warmed
-        resumed = resumed ? `${resumed}, warmed to tick ${w.tick}` : `warmed to tick ${w.tick}`
-      }
       if (resumed) note = note ? `${note} — ${resumed}` : resumed
       const layout = layoutOf(w)
       frames = Array.from({ length: N_FRAMES }, () => allocFrame(layout))
@@ -448,7 +436,7 @@ self.onmessage = async (e: MessageEvent<ToSim>) => {
           for (const ms of milestones) if (ms.tick <= m.tick) snap = ms
         }
         if (!snap) snap = takeSnapshot(w)
-        post({ kind: 'resumePoint', file: encodeResume(w, snap), milestones: milestones.map((ms) => ms.tick) })
+        post({ kind: 'resumePoint', file: toResumeFile(packResume(w, snap)), milestones: milestones.map((ms) => ms.tick) })
       }
     } else if (m.kind === 'rewind') {
       rewindTo = Math.max(0, (world?.tick ?? 0) - m.ticks)

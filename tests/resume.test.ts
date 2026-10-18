@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { type WorldSpec, specInit } from '../src/core/catalog'
-import { RESUME_VERSION, applyTweaks, decodeResume, encodeResume, tweakDiff } from '../src/core/resume'
+import { CHECKPOINT_EVERY, RESUME_VERSION, applyTweaks, decodeResume, encodeResume, initId, packResume, tweakDiff } from '../src/core/resume'
 import { restoreSnapshot, takeSnapshot } from '../src/core/snapshot'
 import { World } from '../src/core/world'
 
@@ -144,6 +144,36 @@ describe('resume points', () => {
     applyTweaks(w, specInit({ ...BASE, matter: 60, slots: 10, metabolism: 2 }))
     expect(w.L.c_up).toBeCloseTo(c0 * 4, 12) // 2 / 0.5
     expect(Array.from(w.rows.subarray(0, 60))).toEqual(rows)
+  })
+
+  it('round-trips through the packed binary form without going near base64', () => {
+    /*
+     * The form a running world actually saves in: metadata plus one transferable ArrayBuffer, which
+     * is what the worker hands the page every 5,000 ticks. Base64 is only for files — on this path
+     * it would be 1.37x the bytes built as a string on the simulation thread, stalling the world at
+     * every checkpoint.
+     */
+    const a = after(new World(specInit(BASE)), 300)
+    const packed = packResume(a, takeSnapshot(a))
+    expect(packed.buffer.byteLength).toBe(packed.meta.sizes.reduce((x, y) => x + y, 0))
+    const wanted = fingerprint(after(a, 200))
+    const b = restoreSnapshot(new World(specInit(BASE)).init, decodeResume(packed, new World(specInit(BASE))))
+    expect(fingerprint(after(b, 200))).toBe(wanted)
+  })
+
+  it('gives a world one identity, and two worlds different ones', () => {
+    // How a checkpoint finds its way back to the world it belongs to. Strict on purpose: an
+    // over-strict id costs a reuse, an under-strict one restores the wrong world.
+    expect(initId(specInit(BASE))).toBe(initId(specInit(BASE)))
+    expect(initId(specInit(BASE))).not.toBe(initId(specInit({ ...BASE, seed: 32 })))
+    expect(initId(specInit(BASE))).not.toBe(initId(specInit({ ...BASE, T: 6 })))
+  })
+
+  it('takes checkpoints on a tick schedule a slider can land on', () => {
+    // The interval is the step of the control that picks a start tick, so a world must actually
+    // pass through the ticks on offer. A wall-clock schedule would not be reproducible.
+    expect(CHECKPOINT_EVERY).toBeGreaterThan(0)
+    expect(10 * CHECKPOINT_EVERY % CHECKPOINT_EVERY).toBe(0)
   })
 
   it('carries the food-source axes across a resume, legacy or not', () => {

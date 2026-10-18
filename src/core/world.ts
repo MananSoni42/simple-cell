@@ -649,7 +649,18 @@ export class World {
     this.fieldTmp = new Float64Array(L.fieldN * L.fieldN)
     const colonyModes = init.foodMode === 'converging' || init.foodMode === 'breathing'
     const colonies = colonyModes ? Math.max(2, Math.min(4, init.n_patch)) : init.n_patch
-    const nPatch = init.foodMode === 'comet' || init.foodMode === 'spring' ? 1 : colonies
+    /*
+     * The source count is `n_patch`, full stop — the world no longer second-guesses it.
+     *
+     * `comet` and `spring` each described a *single* source, so they used to force the count to one
+     * and ignore `n_patch` entirely. That is wrong now the count is its own dial: asking for eight
+     * sources and getting one is the dial not working, and gating the override on "did you also set
+     * a motion?" only moved the surprise somewhere less obvious. The legacy default now lives where
+     * defaults belong — `specInit` and `initFromSeed` set `n_patch` to 1 for those two patterns, so
+     * every catalogued world keeps the count it was scored with, while anything that states a count
+     * is believed.
+     */
+    const nPatch = colonies
     for (let p = 0; p < nPatch; p++) {
       // colony modes start spread evenly round the world, so they really are apart; a world that
       // names its origins (a merge) overrides that, because its colonies have to begin where its
@@ -2377,19 +2388,43 @@ export class World {
       const radius = init.foodMode === 'comet' ? init.r_patch * 0.45 : init.r_patch
       return inPatch(p, radius)
     }
+    /*
+     * Three patterns were written against *fixed* geometry — `spring` reads a stored point,
+     * `ring` and `gradient` are defined relative to the world's middle — which was fine while
+     * motion was part of the pattern. It is not fine now that motion is its own axis: a source
+     * could be orbiting while the food kept landing in the same place, so choosing a motion
+     * appeared to do nothing at all. That is the bug this guard fixes.
+     *
+     * With an axis set, each of the three becomes source-relative and therefore moves with its
+     * source. `random` is deliberately left alone: uniform food is uniform, and a source motion
+     * genuinely cannot show through it — the UI says so rather than pretending otherwise.
+     */
+    const axed = init.sourceMotion !== undefined || init.sourceRelation !== undefined
+    const anchor = axed && this.patches.length > 0 ? this.patches[rng.int(this.patches.length)] : null
     if (init.foodMode === 'spring') {
-      // one small fixed source: everything has to come here, so position is everything
-      return inPatch({ x: this.spring[0], y: this.spring[1] }, init.r_patch * 0.22)
+      // one small tight source: everything has to come to it, so position is everything
+      return inPatch(anchor ?? { x: this.spring[0], y: this.spring[1] }, init.r_patch * 0.22)
     }
     if (init.foodMode === 'ring') {
       const a = rng.next() * TAU
       const rr = S * 0.33 + (rng.next() - 0.5) * init.r_patch * 0.6
-      return [this.wrap(S / 2 + rr * Math.cos(a)), this.wrap(S / 2 + rr * Math.sin(a))]
+      const cx = anchor ? anchor.x : S / 2
+      const cy = anchor ? anchor.y : S / 2
+      return [this.wrap(cx + rr * Math.cos(a)), this.wrap(cy + rr * Math.sin(a))]
     }
     if (init.foodMode === 'gradient') {
+      /*
+       * A sunlit stripe, centred on its source when there is one so the band itself travels.
+       *
+       * The legacy centre is **zero, not the middle**: `(1 + cos(2*pi*x/S)) / 2` peaks at x = 0,
+       * which is the wrap seam. Taking it as the middle instead moved the band half a world for
+       * every existing gradient world — caught by two pinned goldens, which is exactly what they
+       * are for.
+       */
+      const centre = anchor ? anchor.x : 0
       for (;;) {
         const px = rng.next() * S
-        const w = (1 + Math.cos((TAU * px) / S)) / 2
+        const w = (1 + Math.cos((TAU * this.minImage(px - centre)) / S)) / 2
         if (rng.next() < w * w) return [px, rng.next() * S]
       }
     }

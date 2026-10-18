@@ -30,7 +30,8 @@ import { LEARNERS, ONLINE_ALGOS, type LearnAlgo } from '../core/learning'
 import { measurePicker } from './measure'
 import { FOOD_ROW, MATRIX_NAMES, N_MATRIX } from '../core/types'
 import { configText, download, parseConfig, readHash, writeHash } from './config'
-import { type ResumeFile, tweakDiff } from '../core/resume'
+import { CHECKPOINT_EVERY, type PackedResume, type ResumeFile, fromResumeFile, initId, tweakDiff } from '../core/resume'
+import { collection } from './store'
 import { capture } from '../render/renderer'
 import { Chips, Slider, Toggle, card, fieldsOf } from './controls'
 import { PRESETS } from './presets'
@@ -83,7 +84,7 @@ function cellColor(a: number): string {
 export function mountSetup(
   root: HTMLElement,
   hooks: {
-    start(init: Init, perf: Perf, opts: { build: boolean; warmup?: number; resume?: ResumeFile; tweaks?: Init }): void
+    start(init: Init, perf: Perf, opts: { build: boolean; resume?: PackedResume; tweaks?: Init }): void
     back(): void
     explain(): void
     library(): void
@@ -102,16 +103,18 @@ export function mountSetup(
   /** The default path has no settings at all; the builder is opened deliberately. */
   let building = false
   /**
-   * Where to start the run, in ticks.
+   * Which tick the run starts at, and the checkpoints that make that possible.
    *
-   * Zero is "from the beginning", which is why one control covers two features: at zero, a tweaked
+   * Zero means from the beginning, which is why one control covers two things: at zero a tweaked
    * world simply runs tweaked from scratch, and above zero the tweak becomes a perturbation applied
-   * at that tick. Stepped in 5,000s to match the interval resume points are taken at, so the slider
-   * lands on ticks a saved point can actually satisfy.
+   * at that tick. Only ticks in `available` can be chosen — there is no computing ahead.
    */
-  let warmup = 0
-  /** A loaded resume point, and the configuration it was saved under. */
-  let resume: ResumeFile | null = null
+  let startTick = 0
+  let available: number[] = []
+  /** The configuration those checkpoints were saved under, which the dials are tweaks against. */
+  let checkpointInit: Init | null = null
+  /** A checkpoint loaded from a file rather than from this browser's collection. */
+  let resume: PackedResume | null = null
   const fromHash = readHash()
   if (fromHash) {
     init = fromHash.init
@@ -762,6 +765,18 @@ export function mountSetup(
      * "did moving food help?" stays a comparison rather than an assumption.
      */
     const legacyAxes = foodAxes(init.foodMode)
+    /*
+     * Uniform food cannot show a source motion, because nothing is placed relative to a source.
+     * Said out loud rather than quietly ignored: "I chose a motion and nothing moved" is exactly
+     * the confusion this panel has to avoid.
+     */
+    if (init.foodMode === 'random' && init.sourceMotion !== undefined && init.sourceMotion !== 'static') {
+      const warn = document.createElement('div')
+      warn.className = 'field-hint'
+      warn.textContent =
+        '⚠ uniform food lands everywhere equally, so it is not placed around a source — a source motion cannot show through it. Pick patches, a spring, a ring or a band to see it.'
+      fieldsOf(moves).append(warn)
+    }
     fieldsOf(moves).append(
       new Chips<SourceMotion | 'legacy'>({
         label: 'each source',
@@ -1376,14 +1391,15 @@ export function mountSetup(
       </div>
       <textarea id="s-paste" placeholder="paste a config here, then press Import again" hidden></textarea>
       <div class="field-sep"></div>
-      <div class="note" style="margin:14px 0 10px">Where the run <i>starts</i>. At zero it starts from
-        scratch, as always. Above zero it skips ahead — which is exact rather than approximate, because
-        the world is deterministic: warming up to a tick gives the state those ticks would have
-        produced. It costs the compute, so load a resume point to make it instant.</div>
+      <div class="note" style="margin:14px 0 10px">Where the run <i>starts</i>. A running world saves
+        itself every ${CHECKPOINT_EVERY.toLocaleString()} ticks, and those checkpoints are the only
+        ticks offered here — there is no computing ahead. So the first run of a world starts at the
+        beginning; after that you can start from where it got to, change a dial, and watch what the
+        change does to a world that already grew up.</div>
       <div id="s-warm"></div>
       <div class="row" style="margin-top:10px">
-        <button id="s-resume">load resume point…</button>
-        <button id="s-resume-clear" hidden>forget it</button>
+        <button id="s-resume">load a checkpoint file…</button>
+        <button id="s-resume-clear" hidden>start from the beginning</button>
         <input type="file" id="s-resume-file" accept="application/json" hidden />
       </div>
       <div class="field-hint" id="s-resume-note"></div>`
@@ -1408,37 +1424,50 @@ export function mountSetup(
     )
 
     /*
-     * The warm-up slider, stepped in 5,000s because that is the interval the worker takes resume
-     * points at. A continuous slider would offer ticks no saved point can satisfy, and silently
-     * fall back to computing them.
+     * The start-tick control, over the checkpoints that actually exist for this world.
+     *
+     * A free-range slider was the wrong shape for this. It offered every multiple of 5,000 up to
+     * 200,000 and then quietly computed whichever one you picked, so the control implied a cheap
+     * choice and delivered half an hour of waiting. Listing only what is backed by saved state
+     * makes the honest thing the easy thing, and makes "nothing here yet, run it once" a visible
+     * state rather than a surprise.
      */
-    q('#s-warm').append(
-      new Slider({
-        label: 'start at tick',
-        min: 0,
-        max: 200000,
-        step: 5000,
-        value: warmup,
-        format: (v) => (v === 0 ? 'the beginning' : `${Math.round(v).toLocaleString()}t`),
-        hint: (v) => {
-          if (v === 0) return resume ? 'ignoring the loaded resume point and starting from scratch' : 'from the beginning, as usual'
-          if (resume && resume.tick === v) return `instant: the loaded resume point is exactly tick ${v.toLocaleString()}`
-          if (resume && resume.tick < v) return `restores at tick ${resume.tick.toLocaleString()}, then computes the remaining ${(v - resume.tick).toLocaleString()}`
-          if (resume) return `the loaded point is tick ${resume.tick.toLocaleString()}, which is past this — it will be used and this slider ignored`
-          // The honest cost. A 4x world runs at roughly 6 ticks a second, so this is not a detail.
-          return `${Math.round(v).toLocaleString()} ticks to compute before anything is drawn — load a resume point to skip it`
-        },
-        onChange: (v) => {
-          warmup = Math.round(v)
-          refresh()
-        },
-      }).el,
-    )
+    const warmHost = q('#s-warm')
+    const paintWarm = (): void => {
+      warmHost.innerHTML = ''
+      const ticks = [0, ...available]
+      if (available.length === 0) {
+        warmHost.innerHTML = `<div class="field-hint">no checkpoints for this world yet — run it once and it
+          will save one every ${CHECKPOINT_EVERY.toLocaleString()} ticks, then this will offer them</div>`
+        return
+      }
+      warmHost.append(
+        new Chips<string>({
+          label: 'start at tick',
+          value: String(startTick),
+          options: ticks.map((t) => ({
+            value: String(t),
+            label: t === 0 ? 'the beginning' : t.toLocaleString(),
+            hint:
+              t === 0
+                ? 'from scratch, with whatever the dials now say'
+                : `restores the saved state at tick ${t.toLocaleString()}; dial changes take effect from there`,
+          })),
+          onChange: (v) => {
+            startTick = Number(v)
+            resume = null // a picked tick is loaded from the collection at start, not held here
+            refresh()
+          },
+        }).el,
+      )
+    }
+    paintWarm()
     const resumeNote = q('#s-resume-note')
     const paintResume = (): void => {
-      q('#s-resume-clear').hidden = resume === null
-      if (!resume) {
-        resumeNote.textContent = 'without one, starting at a non-zero tick means computing those ticks'
+      q('#s-resume-clear').hidden = resume === null && startTick === 0
+      const savedInit = resume?.meta.init ?? (startTick > 0 ? checkpointInit : null)
+      if (!savedInit) {
+        resumeNote.textContent = available.length > 0 ? 'or load a checkpoint saved from another browser' : ''
         return
       }
       /*
@@ -1446,10 +1475,12 @@ export function mountSetup(
        * shape, so a dial that decides a shape cannot change under a restored state — and the
        * refusal has to name the dial, because "you cannot resume with that change" is useless.
        */
-      const d = tweakDiff(resume.init, init)
-      const parts = [`resume point at tick ${resume.tick.toLocaleString()}, seed ${resume.init.seed}`]
+      const d = tweakDiff(savedInit, init)
+      const at = resume?.meta.tick ?? startTick
+      const parts = [`starting at tick ${at.toLocaleString()}, seed ${savedInit.seed}`]
       if (d.allowed.length > 0) parts.push(`changing ${d.allowed.join(', ')} from that tick on`)
-      if (d.refused.length > 0) parts.push(`⚠ ${d.refused.join(', ')} cannot change at a resume point — that would restore the saved state into a differently shaped world, so those will be ignored`)
+      if (d.refused.length > 0)
+        parts.push(`⚠ ${d.refused.join(', ')} cannot change at a checkpoint — that would restore the saved state into a differently shaped world, so those will be ignored`)
       if (d.allowed.length === 0 && d.refused.length === 0) parts.push('no changes: it will run on exactly as it was')
       resumeNote.textContent = parts.join(' · ')
     }
@@ -1457,6 +1488,7 @@ export function mountSetup(
     q('#s-resume').addEventListener('click', () => q<HTMLInputElement>('#s-resume-file').click())
     q('#s-resume-clear').addEventListener('click', () => {
       resume = null
+      startTick = 0
       refresh()
     })
     q<HTMLInputElement>('#s-resume-file').addEventListener('change', async (e) => {
@@ -1464,13 +1496,13 @@ export function mountSetup(
       if (!f) return
       try {
         const file = JSON.parse(await f.text()) as ResumeFile
-        if (file.kind !== 'simplecell-resume') throw new Error('that is a config or a run, not a resume point')
-        resume = file
+        if (file.kind !== 'simplecell-resume') throw new Error('that is a config or a run, not a checkpoint')
+        resume = fromResumeFile(file)
         // The dials become the *tweaks*, so they have to start from what was saved — otherwise
         // every difference between the current panel and the saved world reads as a deliberate
         // change the user never made.
         init = file.init
-        warmup = file.tick
+        startTick = file.tick
         custom = true
         chosen = -1
         refresh()
@@ -1559,8 +1591,19 @@ export function mountSetup(
     for (const el of Array.from(root.querySelectorAll<HTMLElement>('[data-panel]'))) el.hidden = el.dataset.panel !== tab
   }
 
+  /**
+   * The world changed: record it in the URL and rebuild the preview.
+   *
+   * Rebuilding here, rather than only at the end of `refresh`, is a fix rather than a tidy-up.
+   * Controls split into two kinds — ones that call `refresh` because they change which *other*
+   * controls should exist, and ones that call `sync` because they only change a number. The second
+   * kind updated `init` and left the preview showing the previous world, so a dial could be moved
+   * with no visible effect and the obvious conclusion was that the dial did not work. Which dials
+   * were affected depended on which ones happened to need a re-layout, so it looked intermittent.
+   */
   function sync(): void {
     writeHash(init, perf)
+    repreview()
   }
 
   /** What the current choice would have produced untouched, so changes can be pointed out. */
@@ -1615,7 +1658,27 @@ export function mountSetup(
     return `${chemistryOf(recipe.chemistry).name} · ${worldKindOf(recipe.world).name}`
   }
 
+  /**
+   * Looks up which checkpoints this world has, and re-paints if the answer changed.
+   *
+   * Async and fire-and-forget, deliberately: the panel must render immediately whether or not the
+   * collection has answered yet, so the list starts empty and fills in. `init` is read fresh each
+   * time because changing a dial changes the world's identity, and a checkpoint from before the
+   * change does not belong to it.
+   */
+  const findCheckpoints = async (): Promise<void> => {
+    const base = checkpointInit ?? init
+    const found = await collection.checkpoints(initId(base))
+    const ticks = found.map((c) => c.tick)
+    if (ticks.join(',') === available.join(',')) return
+    available = ticks
+    if (ticks.length > 0) checkpointInit = base
+    if (startTick > 0 && !ticks.includes(startTick)) startTick = 0
+    refresh()
+  }
+
   function refresh(): void {
+    void findCheckpoints()
     if (document.activeElement !== seedEl) seedEl.value = String(init.seed)
     const sizeHost = q('#s-size')
     sizeHost.innerHTML = ''
@@ -1691,8 +1754,7 @@ export function mountSetup(
     organisms()
     learning()
     paintTabs()
-    sync()
-    repreview()
+    sync() // records the world and rebuilds the preview
   }
 
   /** Move a dial: the recipe changes, and everything downstream of it is rebuilt. */
@@ -1759,28 +1821,33 @@ export function mountSetup(
   q('#s-lib').addEventListener('click', () => hooks.library())
   q('#s-disco').addEventListener('click', () => hooks.discoveries())
 
-  const go = (build: boolean): void => {
+  const go = async (build: boolean): Promise<void> => {
     preview.stop()
     /*
-     * With a resume point loaded the world is built from the **saved** configuration and the dials
-     * are handed over separately as tweaks, because that is what makes the changeover semantics
-     * work: the state restores into the world it was saved from, and only then does the change take
+     * With a checkpoint the world is built from the **saved** configuration and the dials are
+     * handed over separately as tweaks, because that is what makes the changeover semantics work:
+     * the state restores into the world it was saved from, and only then does the change take
      * effect. Building from the edited config instead would restore the arrays into a world they
-     * do not describe, which `decodeResume` would refuse outright for a shape change and — worse —
-     * would silently accept for everything else.
+     * do not describe — which `decodeResume` refuses outright for a shape change and, worse, would
+     * silently accept for everything else.
      */
-    if (resume) hooks.start(resume.init, { ...perf }, { build, warmup, resume, tweaks: init })
-    else hooks.start(init, { ...perf }, { build, warmup })
+    let packed = resume
+    if (!packed && startTick > 0) {
+      const saved = (await collection.checkpoints(initId(checkpointInit ?? init))).find((c) => c.tick === startTick)
+      if (saved) packed = { meta: saved.meta as PackedResume['meta'], buffer: saved.buffer }
+    }
+    if (packed) hooks.start(packed.meta.init, { ...perf }, { build, resume: packed, tweaks: init })
+    else hooks.start(init, { ...perf }, { build })
   }
-  q('#s-start').addEventListener('click', () => go(false))
-  q('#s-start-paused').addEventListener('click', () => go(true))
+  q('#s-start').addEventListener('click', () => void go(false))
+  q('#s-start-paused').addEventListener('click', () => void go(true))
 
   addEventListener('keydown', (e) => {
     if (root.hidden) return
     const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement
     if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
       ;(document.activeElement as HTMLElement | null)?.blur()
-      go(false)
+      void go(false)
     } else if (typing) return
     else if (e.key >= '1' && e.key <= '5' && building) {
       tab = TABS[Number(e.key) - 1][0]
@@ -1797,7 +1864,7 @@ export function mountSetup(
     load: (loaded: Init) => {
       init = loaded
       resume = null
-      warmup = 0
+      startTick = 0
       custom = true
       chosen = -1
       setBuilding(true)
