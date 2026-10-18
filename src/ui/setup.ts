@@ -10,8 +10,11 @@ import {
   LAWS,
   type Laws,
   elementsOf,
+  foodAxes,
   LEVEL_MULTIPLIER,
   QUANTA,
+  type SourceMotion,
+  type SourceRelation,
   type WallLayout,
   applyFoodLevel,
   baseFoodRate,
@@ -639,8 +642,9 @@ export function mountSetup(
     p.innerHTML = '<div class="cols"></div>'
     const cols = p.querySelector('.cols')!
     const where = card('Where it falls')
+    const moves = card('How the sources move')
     const how = card('How much, and for how long')
-    cols.append(where, how)
+    cols.append(where, moves, how)
 
     fieldsOf(where).append(
       new Chips<FoodMode>({
@@ -736,6 +740,119 @@ export function mountSetup(
         }).el,
       )
     }
+
+    /*
+     * The source axes. Separate card because they are genuinely independent of the pattern above:
+     * the pattern says where food lands around a source, these say what the source itself does.
+     *
+     * `legacy` is a real option rather than an omission. It is what every saved world and every
+     * catalog row runs on, and picking it here puts this world back on exactly that code path — so
+     * "did moving food help?" stays a comparison rather than an assumption.
+     */
+    const legacyAxes = foodAxes(init.foodMode)
+    fieldsOf(moves).append(
+      new Chips<SourceMotion | 'legacy'>({
+        label: 'each source',
+        value: init.sourceMotion ?? 'legacy',
+        options: [
+          { value: 'legacy', label: `as the pattern says (${legacyAxes.motion})`, hint: 'the original behaviour for this pattern, unchanged — the control every comparison needs' },
+          { value: 'static', label: 'stays put', hint: 'fixed. Find it once and stop: the optimal policy is a constant, so there is nothing to get better at' },
+          { value: 'comet', label: 'runs straight', hint: 'a constant heading across the world. Pure pursuit' },
+          { value: 'orbit', label: 'circles', hint: 'periodic, so it comes back — the only motion where remembering where food was pays off' },
+          { value: 'wander', label: 'wanders', hint: 'a random walk at the same speed as circling: tracking, with nothing to anticipate' },
+          { value: 'tide', label: 'sweeps', hint: 'all sources share a heading, so the food crosses the world as a band. Food comes to you' },
+          { value: 'shy', label: 'flees the crowd', hint: 'moves away from wherever the population has massed. The better they get at finding it, the harder it is to hold' },
+        ],
+        onChange: (v) => {
+          init.sourceMotion = v === 'legacy' ? undefined : v
+          refresh()
+        },
+      }).el,
+      new Chips<SourceRelation | 'legacy'>({
+        label: 'the sources together',
+        value: init.sourceRelation ?? 'legacy',
+        options: [
+          { value: 'legacy', label: `as the pattern says (${legacyAxes.relation})`, hint: 'the original behaviour for this pattern' },
+          { value: 'independent', label: 'independently', hint: 'each goes its own way; no relationship between them' },
+          { value: 'converging', label: 'gather', hint: 'all close on the middle and stay. Populations that have never met end up sharing a table' },
+          { value: 'diverging', label: 'scatter', hint: 'all spread outward from where they began. Populations that had met are driven apart' },
+          { value: 'cyclical', label: 'gather and scatter', hint: 'in and out for ever, so isolation and contact keep alternating' },
+          { value: 'formation', label: 'in formation', hint: 'spacing preserved while the whole pattern travels' },
+        ],
+        onChange: (v) => {
+          init.sourceRelation = v === 'legacy' ? undefined : v
+          refresh()
+        },
+      }).el,
+    )
+    if (init.sourceMotion !== undefined || init.sourceRelation !== undefined) {
+      fieldsOf(moves).append(
+        new Slider({
+          label: 'source speed',
+          min: 0.1,
+          max: 1.5,
+          step: 0.05,
+          value: init.sourceSpeed ?? 0.5,
+          format: (v) => `${v.toFixed(2)}×`,
+          /*
+           * A fraction of how fast an organism travels, not a number of units. The absolute version
+           * was the bug: one pattern's source ran at 1.9× anything that could chase it while four
+           * others sat at exactly zero, and nobody could see either from the dial.
+           */
+          hint: (v) =>
+            v >= 1
+              ? `${v.toFixed(2)}× an organism's own speed — faster than anything can chase, so this is the uncatchable control`
+              : `${v.toFixed(2)}× an organism's own speed, so a good swimmer can catch it and a poor one cannot`,
+          onChange: (v) => {
+            init.sourceSpeed = Math.round(v * 100) / 100
+            sync()
+          },
+        }).el,
+      )
+      if (init.sourceRelation === 'converging' || init.sourceRelation === 'diverging' || init.sourceRelation === 'cyclical') {
+        fieldsOf(moves).append(
+          new Slider({
+            label: init.sourceRelation === 'cyclical' ? 'one full cycle' : 'takes',
+            min: 200,
+            max: 40000,
+            step: 100,
+            value: init.converge_ticks,
+            curve: 'log',
+            format: (v) => `${Math.round(v)}t`,
+            hint: () => 'nothing happens until the world is asked to merge — a held world keeps its colonies apart until you say so',
+            onChange: (v) => {
+              init.converge_ticks = Math.round(v)
+              sync()
+            },
+          }).el,
+        )
+      }
+    }
+    fieldsOf(moves).append(
+      new Slider({
+        label: 'how many sources',
+        min: 1,
+        max: Math.max(8, 8 * init.scale * init.scale),
+        step: 1,
+        value: Math.max(1, init.n_patch),
+        curve: 'log',
+        /*
+         * Shown as coverage because the count alone means nothing across scales. At 16x the world
+         * is 4,800 units across: a handful of sources are needles in it, and a thousand blanket it
+         * so evenly that there is no gradient left to navigate towards.
+         */
+        hint: (v) => {
+          const cover = (100 * Math.PI * init.r_patch * init.r_patch * Math.round(v)) / (init.size * init.size)
+          return cover > 70
+            ? `${Math.round(v)} sources covering ~${Math.round(Math.min(100, cover))}% of the world — near-uniform, so there is no gradient left to follow`
+            : `${Math.round(v)} sources, ~${cover < 1 ? cover.toFixed(1) : Math.round(cover)}% of the world within reach of food`
+        },
+        onChange: (v) => {
+          init.n_patch = Math.round(v)
+          refresh()
+        },
+      }).el,
+    )
 
     const sus = sustenanceRate(init)
     fieldsOf(how).append(

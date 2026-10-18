@@ -8,6 +8,10 @@ import {
   FOOD_LEVELS,
   type FoodMode,
   FOOD_MODES,
+  SOURCE_MOTIONS,
+  SOURCE_RELATIONS,
+  type SourceMotion,
+  type SourceRelation,
   type FoodRegime,
   FOOD_REGIMES,
   type Init,
@@ -247,6 +251,14 @@ export function parseConfig(text: string): { init: Init; perf?: Perf } {
     n_patch: Math.round(num(src.n_patch, base.n_patch, 0, 1e4)),
     r_patch: num(src.r_patch, base.r_patch, 1, 1e5),
     v_patch: num(src.v_patch, base.v_patch, 0, 100),
+    /*
+     * The source axes survive a round-trip, and an **absent** axis stays absent rather than being
+     * filled with a default. That is load-bearing: absent is what puts a world on the legacy motion
+     * path, so a saved world that predates these axes must not come back carrying them.
+     */
+    sourceMotion: SOURCE_MOTIONS.includes(src.sourceMotion as SourceMotion) ? (src.sourceMotion as SourceMotion) : base.sourceMotion,
+    sourceRelation: SOURCE_RELATIONS.includes(src.sourceRelation as SourceRelation) ? (src.sourceRelation as SourceRelation) : base.sourceRelation,
+    sourceSpeed: src.sourceSpeed === undefined && base.sourceSpeed === undefined ? undefined : num(src.sourceSpeed, base.sourceSpeed ?? 0.5, 0, 8),
     learn: learnConfig(src.learn, base.learn),
     merge_hold: bool(src.merge_hold, base.merge_hold ?? false),
     metabolism: num(src.metabolism, base.metabolism, 0.05, 8),
