@@ -30,7 +30,7 @@ function solo(over: Partial<Init> = {}): Init {
 function inACloud(input: number, weight = 1): number {
   const w = new World(solo(), { laws: { SIZE: 300 }, autoSpawn: false })
   const b = w.nIntr
-  w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [] })
+  w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [], reserve: 50 })
   // eight crumbs, evenly spaced, inside the interaction cutoff and outside eating range
   for (let k = 0; k < 8; k++) {
     const a = (k / 8) * Math.PI * 2
@@ -57,7 +57,7 @@ describe('seeing food you are already inside of', () => {
   it('reads less when there is less food around, so the count is graded rather than a flag', () => {
     const w = new World(solo(), { laws: { SIZE: 300 }, autoSpawn: false })
     const b = w.nIntr
-    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [] })
+    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [], reserve: 50 })
     w.feedAt(150 + 25, 150)
     w.wBrain[b]!.fill(0)
     w.wBrain[b]![BRAIN_OUT.FX * N_BRAIN_IN + BRAIN_IN.FOOD_NEAR] = 1
@@ -124,7 +124,10 @@ describe('a brain feels its own motion', () => {
   it('reports last tick’s actual displacement, not the force it asked for', () => {
     const w = new World(solo(), { laws: { SIZE: 300 }, autoSpawn: false })
     const b = w.nIntr
-    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [] })
+    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [], reserve: 50 })
+    // a placed organism has to be given energy: matter now starts with none, because a particle is
+    // matter and matter has to eat. Without this it cannot pay for the move the test asks it to make
+    w.energy[b] = 50
     w.wBrain[b]!.fill(0)
     w.wBrain[b]![BRAIN_OUT.FX * N_BRAIN_IN + BRAIN_IN.BIAS] = 4 // always push +x
     // The force is decided in `think()`, which runs *after* `integrate()`, so a decision is
@@ -152,7 +155,7 @@ describe('silence has a reason', () => {
     const init = solo({ repro: true })
     const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
     const b = w.nIntr
-    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [] }) // no limbs to copy
+    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [], reserve: 50 }) // no limbs to copy
     w.energy[b] = 1000
     w.repCool[b] = 0 // a freshly placed organism waits out its cooldown first
     w.step()
@@ -316,7 +319,7 @@ describe('spores: a genome that drifts', () => {
   it('moves energy from parent to spore and no more', () => {
     const w = viable('spore')
     const b = w.nIntr
-    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }], reserve: 50 })
     w.energy[b] = 100
     const before = w.totalEnergy()
     expect(w.sowFor(b)).toBe(true)
@@ -335,8 +338,10 @@ describe('spores: a genome that drifts', () => {
     const base = specInit({ ...VIABLE, reproMode: 'spore', T: 0 })
     const w = new World({ ...base, laws: { ...base.laws, E_activate: 1e9 } }, { autoSpawn: false })
     const b = w.nIntr
-    w.placeOrganism({ brain: b, x: 40, y: 40, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    w.placeOrganism({ brain: b, x: 40, y: 40, limbs: [{ idx: 0, quad: 0, angle: 0.5 }], reserve: 50 })
     w.energy[b] = 100
+    // the limb too: matter starts with nothing now, and a limb at zero takes the body down with it
+    w.energy[0] = 50
     w.sowFor(b)
     const sp = Array.from({ length: w.nIntr }, (_, i) => i).find((i) => w.isSpore[i])!
     // park it somewhere empty, well clear of the patches: it must not wake
@@ -374,10 +379,20 @@ describe('spores: a genome that drifts', () => {
 
   it('relieves the scarcity it exists for: the population cap', () => {
     /*
-     * The measurement that corrected my own design. I built sowing as a response to crowding —
-     * "nowhere to put a child" — and in a world that lives, that never happens: `room` blocked
-     * reproduction 0 times and a free *brain slot* blocked it 41,244 times. A spore needs a slot
-     * only when it germinates, so it banks a reproduction the cap would otherwise have discarded.
+     * **The scarcity this was built for has gone, and that is the finding.**
+     *
+     * Sowing was designed against crowding — "nowhere to put a child" — and measured: `room` blocked
+     * reproduction 0 times while a free *brain slot* blocked it **41,244** times in 6,000 ticks. The
+     * population sat permanently at its cap, so a spore banked a reproduction the cap would
+     * otherwise have thrown away.
+     *
+     * Organisms now have to eat their way over an activation barrier and recruit their own limbs, so
+     * the population no longer saturates: 29 or 30 of 40 slots, with the cap blocking **0** times and
+     * `room` blocking 2. The cap is no longer the binding constraint on anything.
+     *
+     * What is still true, and is what this now pins, is the mechanism: a spore sows, drifts, and
+     * wakes where it finds food — 44 sown and 24 germinated over the same run. Whether that is
+     * *worth* anything is no longer settled by the cap and is a question for the search.
      */
     const plain = viable('bud')
     const sown = viable('spore')
@@ -385,9 +400,12 @@ describe('spores: a genome that drifts', () => {
       plain.step()
       sown.step()
     }
-    expect(plain.repBlocked.slots).toBeGreaterThan(10000)
+    expect(plain.repBlocked.slots, 'the cap no longer binds').toBe(0)
+    expect(sown.nSown).toBeGreaterThan(0)
     expect(sown.nGerminated).toBeGreaterThan(0)
-    expect(sown.repBlocked.slots).toBeLessThan(plain.repBlocked.slots / 4)
+    // the old "spores relieve the cap" comparison is gone with the cap: both are now 0, and a
+    // ratio between two zeroes is not a claim
+    expect(sown.repBlocked.slots).toBe(0)
   })
 
   it('is off unless asked for', () => {

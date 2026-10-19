@@ -84,7 +84,21 @@ export const LAWS = {
    * `spore_food` is counted in the same units as the brain's new food-count input, so germination
    * and perception agree about what "food is here" means.
    */
-  E_spore: 30,
+  /**
+   * What a parent invests in a spore.
+   *
+   * **Was 30, which is exactly `2 * E_birth` — the floor `germinate` refuses to start a body
+   * below.** So a spore began life on the knife-edge and `decay_free` pushed it under within a few
+   * ticks: measured, a spore parked in empty space held 28.8 after 20 ticks and was discarded
+   * unfertilised, which made the whole mechanism a coin-flip on whether food happened to be within
+   * reach on the very tick it was sown. The point of a spore is to *wait* and drift until it finds
+   * food, and it could not afford to wait at all.
+   *
+   * Three times `E_birth` gives it room to drift for a few hundred ticks at the default decay. A
+   * spore that still finds nothing is correctly forgotten — the matter and its energy stay, so
+   * nothing is destroyed either way.
+   */
+  E_spore: 45,
   spore_food: 3,
   /**
    * What a particle spends to copy itself, and how long it waits before doing so again.
@@ -522,6 +536,25 @@ export interface Init {
   max_food: number
   food_batch: number // food particles per injection event (area scaling)
   spawn_batch: number // organisms per spawn event (area scaling)
+  /**
+   * Particles arriving per tick, per kind: `[P1, P2, P3, P4, Brain]`.
+   *
+   * **The only things this world creates are particles and food, both at stated rates. Organisms
+   * are not created at all** — a loose brain particle has to eat its way over the activation
+   * barrier and assemble a body out of whatever drifts into reach.
+   *
+   * Two routes previously handed organisms out for free, and both are closed. A spawn every
+   * `T_spawn` ticks built a four-limbed body and endowed every particle of it from nothing (41% and
+   * 67% of all energy entering two sample worlds). And more quietly, loose brain slots started life
+   * holding `E_init` — 30, against an activation barrier of 25 — so **every brain in the world
+   * became an organism on tick 1** whatever the barrier said. Matter now arrives with nothing and
+   * starts with nothing.
+   *
+   * Per kind rather than one rate, because the kinds are not interchangeable: a world starved of
+   * brains has matter and nothing to organise it, and one starved of a matter type cannot build
+   * whatever that type's chemistry made possible.
+   */
+  arrive: number[]
   foodMoves: boolean // food drifts and responds to forces; otherwise it stays where it lands
   /**
    * Which ways of reproducing this world allows, beyond budding (R7.7), which is always on when
@@ -895,6 +928,11 @@ function seedWorld(seed: number, scale = 1): Init {
     max_food: 300 * area,
     food_batch: area,
     spawn_batch: area,
+    /*
+     * Brains arrive an order of magnitude more slowly than matter, because a brain needs four limbs
+     * to be a body and parity would leave most brains permanently bare.
+     */
+    arrive: [0.05, 0.05, 0.05, 0.05, 0.004].map((r) => r * area),
     foodMoves: false,
     conjugation: false,
     spore: false,
@@ -935,6 +973,13 @@ function seedWorld(seed: number, scale = 1): Init {
    * count it is handed — a world built in the browser with eight sources should get eight.
    */
   if (init.foodMode === 'comet' || init.foodMode === 'spring') init.n_patch = 1
+  /*
+   * **No pre-assembled organisms.** A generated world is particles and food; anything that is an
+   * organism got there by eating its way over the activation barrier and recruiting its own limbs.
+   * `n_start` is kept on the Init so a test or a hand-built scenario can place bodies on purpose,
+   * but nothing the sampler or the seed generator produces uses it.
+   */
+  init.n_start = 0
   return init
 }
 

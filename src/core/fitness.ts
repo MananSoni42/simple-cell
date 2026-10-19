@@ -64,6 +64,56 @@ export const FITNESS: { key: FitnessKey; name: string; blurb: string; invented: 
 ]
 
 export const N_SCALARS = FITNESS.length
+
+/**
+ * The objectives a search may select, as named combinations.
+ *
+ * Named rather than arbitrary weight vectors, because a factor table over a continuous
+ * ten-dimensional simplex says nothing a person can read, where a table over eight named objectives
+ * answers the question that matters: **does what you optimise change what you get?**
+ *
+ * That question has never been asked here. `specInit` hardcoded `offspring` and the sampler never
+ * touched `fitness`, so **every learner in every one of 260,640 searched worlds optimised offspring
+ * count and nothing else** — and offspring count is precisely the breed-fast, clump-and-thrift
+ * strategy. The project's central complaint, that every learner converges on spending less, has a
+ * complete explanation that is nothing to do with the algorithms: they were all handed the same
+ * degenerate objective.
+ *
+ * `offspring` is kept as the first level deliberately, so v1's regime remains a comparison rather
+ * than disappearing.
+ *
+ * **`seeking` appears nowhere.** It is the measure `ladder.ts` documents as defeated — the mean
+ * cosine of command against the food direction, with no null at all, which a brain reading only its
+ * own velocity scores 0.298 on. It stays in `FITNESS` because the UI may show it and a hand-written
+ * config may ask for it, and it is kept out of here because a search optimising a defeated measure
+ * would corrupt its own conclusions rather than merely weaken them. This is the M5 fix.
+ */
+export const OBJECTIVES: { key: string; keys: FitnessKey[]; combine: Combiner; blurb: string }[] = [
+  { key: 'offspring', keys: ['offspring'], combine: 'geometric', blurb: "children left behind — v1's objective, kept as the comparison" },
+  { key: 'net', keys: ['net'], combine: 'geometric', blurb: 'energy taken in less everything spent: the hardest to game' },
+  { key: 'per_tick', keys: ['per_tick'], combine: 'geometric', blurb: 'energy a tick alive — is it good at living' },
+  { key: 'lifespan', keys: ['lifespan'], combine: 'geometric', blurb: 'ticks lived, which rewards caution and should expose it' },
+  { key: 'efficiency', keys: ['efficiency'], combine: 'geometric', blurb: 'energy per unit travelled: foraging skill rather than throughput' },
+  { key: 'together', keys: ['together'], combine: 'geometric', blurb: 'time joined to others, weighted by size — the only social objective' },
+  {
+    key: 'offspring+net',
+    keys: ['offspring', 'net'],
+    combine: 'geometric',
+    blurb: 'both, multiplied, so breeding fast while running a deficit scores nothing',
+  },
+  {
+    key: 'per_tick+lifespan',
+    keys: ['per_tick', 'lifespan'],
+    combine: 'geometric',
+    blurb: 'live well and live long, which cannot be had by rushing',
+  },
+]
+
+/** The named objective as a spec, or the default when the name is unknown. */
+export function objectiveOf(key: string | undefined): FitnessSpec {
+  const o = OBJECTIVES.find((x) => x.key === key)
+  return o ? specFromKeys(o.keys, o.combine) : DEFAULT_SPEC()
+}
 export const KEYS: FitnessKey[] = FITNESS.map((f) => f.key)
 export const indexOfKey = (k: FitnessKey): number => KEYS.indexOf(k)
 

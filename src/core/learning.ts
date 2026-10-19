@@ -1105,7 +1105,22 @@ class TdLambda extends Online {
       this.deltaSum += Math.abs(delta)
       this.deltaN++
       for (let i = 0; i < N_BRAIN_IN; i++) this.v[i] += cfg.criticLr * delta * this.eV[eVo + i]
-      for (let q = 0; q < N_GENE_BRAIN; q++) s.wBrain[q] += cfg.actorLr * delta * this.eA[eAo + q] - cfg.decay * s.wBrain[q]
+      /*
+       * Decay is scaled by the learning rate, which it was not.
+       *
+       * Written as `+= actorLr * delta * trace - decay * w`, the decay term is **independent of the
+       * learning rate** — so with `actorLr = 0` the gradient term vanishes and the decay keeps
+       * shrinking every weight toward zero, tick after tick. "Learning switched off" still rewrote
+       * the policy, and the only reason that was ever visible is a test asserting weights do not
+       * move when the rates are zero.
+       *
+       * Weight decay is part of the update, so it belongs inside the step size. This is also the
+       * standard form: decoupled weight decay scales with the learning rate precisely so that
+       * turning learning down turns regularisation down with it.
+       */
+      for (let q = 0; q < N_GENE_BRAIN; q++) {
+        s.wBrain[q] += cfg.actorLr * (delta * this.eA[eAo + q] - cfg.decay * s.wBrain[q])
+      }
       this.updates++
     }
 
@@ -1246,7 +1261,9 @@ class Hebbian extends Online {
       const g = cfg.actorLr * adv * post
       for (let i = 0; i < N_BRAIN_IN; i++) {
         const w = row + i
-        s.wBrain[w] += g * s.xin[i] - cfg.decay * s.wBrain[w]
+        // decay inside the step size, for the same reason as TD above: an unscaled decay term means
+        // "learning switched off" still shrinks every weight toward zero on every tick
+        s.wBrain[w] += g * s.xin[i] - cfg.actorLr * cfg.decay * s.wBrain[w]
       }
     }
     this.updates++

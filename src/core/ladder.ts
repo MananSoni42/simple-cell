@@ -576,6 +576,30 @@ export class LadderTracker {
       cog.lineage.n > 0 ? `r ${cog.lineage.r.toFixed(2)} with gen, z ${cog.lineage.z.toFixed(1)}` : 'too few',
     )
 
+    /*
+     * The thermodynamic rung, placed at tier 3 beside `Improves` because both ask about a single
+     * life getting something right rather than about descent or society.
+     *
+     * Schrödinger's framing — a living thing maintains order while dissipating energy — read
+     * literally would be order times throughput, and that is not a measure of intelligence: a
+     * sticky chemistry gives order for nothing, upkeep gives throughput for nothing, and a world
+     * with no brains in it would pass. This ladder has already been rebuilt once for exactly that
+     * mistake.
+     *
+     * What makes dissipation behavioural is whether it is **modulated by information**, so the rung
+     * asks whether an organism spends when spending pays. Two properties follow, and both are the
+     * reason it is here: **sitting still scores exactly zero**, because flat spending has no
+     * covariance with anything — which is the thrift attractor that every learner and every search
+     * in this project has converged on — and so does thrashing, for the same reason.
+     */
+    add(
+      3,
+      'Budgets',
+      'spends effort when food is near and holds back when it is not, beyond the same food shuffled in time',
+      both(cog.budget, 0.05),
+      cog.budget.n > 0 ? `${cog.budget.effect.toFixed(3)} over shuffled, z ${cog.budget.z.toFixed(1)}` : 'too few',
+    )
+
     // ---- tier 5: social. Uses information that came from another organism --------------------
     /*
      * Only the part of the signal gradient **orthogonal to the food gradient** counts. Organisms

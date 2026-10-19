@@ -1,7 +1,7 @@
 import { type Element, type FoodLevel, type FoodMode, type FoodRegime, type Init, type SourceMotion, type SourceRelation, LAWS, type Laws, applyFoodLevel, applyQuantization, initFromSeed, quantize, substepsFor } from './params'
 import { LEARN_DEFAULTS, type LearnAlgo } from './learning'
 import { FOOD_ROW, N_MATRIX } from './types'
-import { specFromKeys } from './fitness'
+import { objectiveOf } from './fitness'
 
 /**
  * The catalog: every world we have ever run, in a form that can be run again.
@@ -60,6 +60,22 @@ export interface WorldSpec {
   /** Off for the search itself; set only when a surviving world is tested with a learner. */
   learn?: LearnAlgo
   /**
+   * What the learner optimises, as a named objective from `OBJECTIVES`.
+   *
+   * Searchable, which it never was: v1 ran 260,640 worlds all optimising offspring count. Absent
+   * means offspring, so v1's regime is still reachable rather than lost.
+   */
+  objective?: string
+  /**
+   * Whether a child inherits what its parent **learned** or what it was **born with**.
+   *
+   * Lamarckian against Darwinian, already implemented and never varied by a search. It is the
+   * direct coupling between reproduction and learning: with `learned`, a lifetime's adaptation is
+   * passed on and selection acts on the adapted genome; with `birth`, learning is wiped each
+   * generation and only the inherited starting point is selected.
+   */
+  inherit?: 'learned' | 'birth'
+  /**
    * Physics and economics the search is allowed to vary.
    *
    * These were constants, and a constant is a decision made before the evidence. Every one of
@@ -93,6 +109,18 @@ export interface WorldSpec {
   eBirth?: number
   /** The reserve at which a brain may reproduce. */
   eRepro?: number
+  /**
+   * What a loose brain must hold before it becomes an organism — the **starting** value of a trait
+   * that is then heritable.
+   *
+   * The range deliberately crosses `eRepro`, because the two sides of that comparison are different
+   * worlds. Below it, abiogenesis is cheaper than breeding, so the population is constantly
+   * reseeded with random genomes and selection cannot accumulate — which is the regime v1 ran in
+   * without knowing, at 97% fresh spawns. Above it, descent dominates, at the cost of a world that
+   * cannot restart once it empties. P8 predicts this is among the three strongest factors on every
+   * tier above 0.
+   */
+  eActivate?: number
   /** Std-dev of the Gaussian noise added to an inherited brain: the mutation rate. */
   reproMut?: number
   /**
@@ -290,7 +318,14 @@ export function specInit(spec: WorldSpec): Init {
   init.walls = 'none'
   init.n_wall = 0
   init.wallPositions = []
-  init.learn = { ...LEARN_DEFAULTS, algo: spec.learn ?? 'none', fitness: specFromKeys(['offspring']) }
+  /*
+   * The objective is now the spec's business rather than a constant. It was hardcoded here, and the
+   * sampler never touched `fitness`, so every learner in every searched world optimised offspring
+   * count — which is the breed-fast strategy, and a complete explanation for "every learner
+   * converges on thrift" that has nothing to do with the algorithms.
+   */
+  init.learn = { ...LEARN_DEFAULTS, algo: spec.learn ?? 'none', fitness: objectiveOf(spec.objective) }
+  if (spec.inherit !== undefined) init.learn.inherit = spec.inherit
   if (spec.reproMut !== undefined) init.repro_mut = spec.reproMut
   if (spec.elements) init.elements = spec.elements
   if (spec.templating !== undefined) init.templating = spec.templating
@@ -330,6 +365,7 @@ export function specLaws(spec: WorldSpec): Partial<Laws> {
   if (spec.rEat !== undefined) L.r_eat = spec.rEat
   if (spec.eBirth !== undefined) L.E_birth = spec.eBirth
   if (spec.eRepro !== undefined) L.E_repro = spec.eRepro
+  if (spec.eActivate !== undefined) L.E_activate = spec.eActivate
   if (spec.eSpore !== undefined) L.E_spore = spec.eSpore
   if (spec.sporeFood !== undefined) L.spore_food = spec.sporeFood
   return L
@@ -356,6 +392,14 @@ export function specId(spec: WorldSpec): string {
     spec.learn ?? 'none',
   ]
   /*
+   * The learning axes, appended only when set — the same discipline as the law dials and the food
+   * axes. An empty field would still change the canonical string for every spec that does not use
+   * them, and re-run the catalog.
+   */
+  if (spec.objective !== undefined || spec.inherit !== undefined) {
+    canon.push(`learn:${spec.objective ?? '-'}:${spec.inherit ?? '-'}`)
+  }
+  /*
    * A world given whole is identified by the whole of it, because nothing else in the spec
    * describes it. Appended only when present — an empty field would still change the canonical
    * string for every spec that does not use it, and re-run the catalog.
@@ -381,7 +425,7 @@ export function specId(spec: WorldSpec): string {
     spec.muFood, spec.fMax, spec.kBond, spec.fBreak, spec.maxBonds, spec.rEat, spec.eBirth, spec.eRepro, spec.reproMut,
     spec.reproMode, spec.eSpore, spec.sporeFood,
     spec.templating === undefined ? undefined : spec.templating ? 1 : 0, spec.rowMut, spec.decayScale,
-    spec.handBuilt, spec.spawnEvery,
+    spec.handBuilt, spec.spawnEvery, spec.eActivate,
     // the element table, canonicalised: field order fixed by `ELEMENT_FIELDS` so two equal tables
     // written in different key orders cannot hash differently
     spec.elements

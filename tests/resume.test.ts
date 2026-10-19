@@ -186,8 +186,13 @@ describe('resume points', () => {
     // The axes include `srcV`, a cached measurement, and a per-source offset. Both are state: a
     // resume that dropped them would run on a stale source speed and drift.
     for (const motion of ['comet', 'orbit', 'wander'] as const) {
+      /*
+       * 3,000 ticks, not 700. `srcV` is a *fraction of organism speed* and so needs organisms to
+       * measure against, and a world now grows its own population rather than being handed one —
+       * at 700 ticks there were too few solitary organisms for the measurement to take at all.
+       */
       const spec = { ...BASE, sourceMotion: motion, sourceSpeed: 0.8 }
-      const a = after(new World(specInit(spec)), 700)
+      const a = after(new World(specInit(spec)), 3000)
       expect(a.srcV).toBeGreaterThan(0)
       const file = JSON.parse(JSON.stringify(encodeResume(a, takeSnapshot(a))))
       const b = restoreSnapshot(new World(specInit(spec)).init, decodeResume(file, new World(specInit(spec))))

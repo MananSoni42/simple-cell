@@ -100,7 +100,7 @@ const Q_CRIT: readonly number[] = [0, 0, 2.77, 3.31, 3.63, 3.86, 4.03, 4.17, 4.2
  * the weak part of this — add a factor and the constant should move — so it is deliberately an
  * over-estimate, which errs toward calling fewer things real.
  */
-const FAMILY = 60
+const FAMILY = 64
 
 /**
  * Normal quantile, Acklam's rational approximation. Accurate to about 1e-9 over (0,1), which is
@@ -210,6 +210,14 @@ export function dialFactors(rows: CatalogEntry[]): Factor[] {
      * the four kinds of matter to differ in more than their chemistry?
      */
     factor('types differ by', group(rows, (e) => e.spec.elementSpread ?? '(uniform)')),
+    /*
+     * The two learning axes that have never been varied. The first is the one to read before
+     * anything else: if what a learner optimises changes what the world becomes, then v1's whole
+     * conclusion about learning was a conclusion about offspring count.
+     */
+    factor('activation barrier', group(rows, (e) => String(e.spec.eActivate ?? '(default)'))),
+    factor('optimises', group(rows, (e) => e.spec.objective ?? 'offspring')),
+    factor('inheritance', group(rows, (e) => e.spec.inherit ?? '(default)')),
     // whether the chemistry evolves. Read this one first: it decides what every *other* chemistry
     // factor in the report is even about — a starting point, or a law
     factor('chemistry evolves', group(rows, (e) => (e.spec.templating ? 'yes' : 'no'))),

@@ -1,3 +1,4 @@
+import { LAWS } from './params'
 import { Rng } from './rng'
 
 /**
@@ -96,6 +97,16 @@ export interface CognitionStats {
    */
   improves: Paired
   /**
+   * The thermodynamic rung: is dissipation **modulated by information**?
+   *
+   * Covariance of commanded effort with food in reach, nulled by shuffling the food an organism saw
+   * in time. Order-times-throughput would have been the obvious reading of Schrödinger, and it is
+   * not an intelligence measure — sticky chemistry gives order for free and upkeep gives throughput
+   * for free, so a world with no brains would pass it. Spending *when it pays* cannot be had for
+   * free, and flat spending — the thrift every learner here converges on — scores exactly zero.
+   */
+  budget: Paired
+  /**
    * Tier 4: among organisms alive at the **same moment**, does a higher generation mean better
    * conversion? Contemporaries only, because generation number otherwise just counts elapsed time
    * and any world-wide improving trend would pass.
@@ -145,6 +156,25 @@ export class Cognition {
   private readonly taxR: Float64Array
   private readonly taxS: Float64Array
   private readonly taxN: Float64Array
+  /**
+   * The thermodynamic rung's accumulators: commanded effort against food in reach, and the same
+   * against food the organism saw at a random *earlier* tick.
+   *
+   * Schrödinger's framing is that a living thing maintains order while dissipating energy, and the
+   * tempting way to measure that is order times throughput. That version is not an intelligence
+   * measure: a sticky chemistry gives order for nothing and upkeep gives throughput for nothing, so
+   * it would be passed by a world with no brains in it at all — and this ladder has already been
+   * rebuilt once for measuring organisation instead of intelligence.
+   *
+   * What makes dissipation behavioural is **whether it is modulated by information**. So the
+   * question is: does the organism spend when spending pays, and hold back when it does not? That
+   * cannot be passed by sitting still, which is the whole point of putting it here — the thrift
+   * attractor every learner in this project falls into scores exactly zero, because flat spending
+   * has no covariance with anything.
+   */
+  private readonly budR: Float64Array
+  private readonly budS: Float64Array
+  private readonly budN: Float64Array
   private readonly socR: Float64Array
   private readonly socS: Float64Array
   private readonly socN: Float64Array
@@ -174,6 +204,14 @@ export class Cognition {
   private readonly emaExp: Float64Array
   private readonly lastMeals: Float64Array
 
+  /** The most force a brain may command in this world, so effort can be read as a fraction of it. */
+  private fMax = LAWS.F_max
+
+  /** Told the world's own `F_max`, which the law dials may have moved. */
+  setFMax(v: number): void {
+    this.fMax = v > 0 ? v : LAWS.F_max
+  }
+
   constructor(cap: number, seed: number) {
     // its own stream: a measurement that consumed the world's randomness would change the thing
     // it was measuring, which is the one thing an instrument may not do
@@ -184,6 +222,9 @@ export class Cognition {
     this.taxR = f()
     this.taxS = f()
     this.taxN = f()
+    this.budR = f()
+    this.budS = f()
+    this.budN = f()
     this.socR = f()
     this.socS = f()
     this.socN = f()
@@ -212,7 +253,7 @@ export class Cognition {
   reset(b: number): void {
     this.ringN[b] = 0
     for (const a of [
-      this.taxR, this.taxS, this.taxN, this.socR, this.socS, this.socN,
+      this.taxR, this.taxS, this.taxN, this.budR, this.budS, this.budN, this.socR, this.socS, this.socN,
       this.sT, this.sF, this.sFs, this.sTF, this.sTFs, this.sT2, this.sF2, this.sFs2, this.sN,
       this.prevMx, this.prevMy, this.prevGx, this.prevGy, this.earlyMeals, this.earlyExp, this.emaMeals, this.emaExp, this.lastMeals,
     ]) {
@@ -278,6 +319,38 @@ export class Cognition {
         this.taxR[b] += (s.mx * s.gx + s.my * s.gy) / (mMag * gMag) - drift
         this.taxS[b] += (s.mx * shufGx + s.my * shufGy) / (mMag * sMag) - driftShuf
         this.taxN[b] += 1
+      }
+
+      /*
+       * ---- the thermodynamic rung: effort against what it is worth ----------------------
+       *
+       * `effort` is the magnitude of the commanded force, which is what the organism is *asking* to
+       * dissipate — `c_mv` charges for exactly this. Commanded rather than realised, for the same
+       * reason every other rung here uses the command: a crowded food patch physically jostles
+       * whatever is inside it, so realised motion correlates with food whether or not anything
+       * decided anything.
+       *
+       * The pair below is a covariance estimator with its own null built in. `shufFood` is drawn
+       * from this organism's own earlier ticks, so it has the same distribution as `food` and the
+       * difference of the two means is `Cov(effort, food)` in expectation — while a static
+       * regularity in how much food this organism tends to see cancels out of both sides.
+       */
+      if (haveShuffle) {
+        /*
+         * Effort as a **fraction of the most a brain may command**, and food as a **presence
+         * indicator**. Both normalisations are there to make the number scale-free, which the raw
+         * covariance was not: in force-times-count units the threshold meant something different in
+         * every world, and an unaided world with a lot of food around cleared it — measured, 1 of
+         * 30 tripping at 1.02.
+         *
+         * With food as 0 or 1 the difference of the two sides is `p(1-p)` times the extra effort
+         * commanded when food is in reach, so it is bounded by a quarter and reads directly as
+         * "how much harder it pushes when there is something to push towards".
+         */
+        const e = Math.min(1, mMag / Math.max(1e-9, this.fMax))
+        this.budR[b] += e * (s.food > 0 ? 1 : 0)
+        this.budS[b] += e * (shufFood > 0 ? 1 : 0)
+        this.budN[b] += 1
       }
 
       // ---- tier 5: social ----------------------------------------------------------------
@@ -479,6 +552,7 @@ export class Cognition {
 
     return {
       taxis: paired(this.taxR, this.taxS, this.taxN, 200),
+      budget: paired(this.budR, this.budS, this.budN, 200),
       social: paired(this.socR, this.socS, this.socN, 200),
       search: pairedOf(corrDs),
       improves: pairedOf(logs),

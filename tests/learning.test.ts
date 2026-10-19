@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { FITNESS, type LifeStats, fitnessOf, isImplicitOnly, keysOf } from '../src/core/fitness'
 import { type LearnAlgo, LEARN_DEFAULTS, type LifeRecord, N_GENE_BRAIN, makeLearner } from '../src/core/learning'
 import { N_WLIMB } from '../src/core/neurons'
-import { type Init, initFromSeed } from '../src/core/params'
+import { type Init, applyFoodLevel, initFromSeed } from '../src/core/params'
 import { specInit } from '../src/core/catalog'
 import { Rng } from '../src/core/rng'
 import { takeSnapshot, restoreSnapshot } from '../src/core/snapshot'
@@ -193,14 +193,27 @@ describe('the learner seam', () => {
 })
 
 describe('a learner in a world', () => {
-  const worldWith = (algo: LearnAlgo, over: Partial<Init> = {}): Init => ({
-    ...initFromSeed(404, 1),
-    T_spawn: 40,
-    T_food: 2,
-    foodLevel: 'average',
-    ...over,
-    learn: { ...LEARN_DEFAULTS, algo, warmup: 200, batch: 4, pool: 8 },
-  })
+  /*
+   * Seeded and fed, because a learner needs deaths to learn from and births to supply.
+   *
+   * `T_spawn: 40` used to top the population up every forty ticks and no longer does anything —
+   * organisms come from loose brains crossing an activation barrier now. Without a population these
+   * tests observe zero lives and every one of them reads "the learner did nothing", which is true
+   * and is not what any of them is asking about.
+   */
+  const worldWith = (algo: LearnAlgo, over: Partial<Init> = {}): Init => {
+    const init: Init = {
+      ...initFromSeed(404, 1),
+      T_food: 2,
+      n_start: 12,
+      n_brain: 24,
+      n_intrinsic: 300,
+      foodLevel: 'abundant',
+      ...over,
+      learn: { ...LEARN_DEFAULTS, algo, warmup: 200, batch: 4, pool: 8 },
+    }
+    return applyFoodLevel(init)
+  }
 
   /**
    * The claim the design rests on, stated exactly. A learner changes the weights organisms are
@@ -511,7 +524,15 @@ describe('online learners act inside a life', () => {
       let b = -1
       for (let i = w.nIntr; i < w.nMatter && b < 0; i++) if (w.alive[i] && w.isBrain(i)) b = i
       const before = Float64Array.from(w.wBrain[b]!)
-      const living = (): boolean => w.isBrain(b) && !!w.wBrain[b]
+      /*
+       * **Identity, not just occupancy.** `isBrain(b) && wBrain[b]` is true for *whichever*
+       * organism holds slot `b`, and slots are recycled constantly now that bodies come and go —
+       * so the test compared one organism's weights against a later occupant's and reported that a
+       * learner with its rates at zero had changed something. It had not; the organism had been
+       * replaced.
+       */
+      const born = w.bornAt[b]
+      const living = (): boolean => w.isBrain(b) && !!w.wBrain[b] && w.bornAt[b] === born
       for (let t = 0; t < 300 && living(); t++) w.step()
       if (living()) expect(Array.from(w.wBrain[b]!), algo).toEqual(Array.from(before))
     }

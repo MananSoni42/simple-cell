@@ -1,5 +1,6 @@
 import { N_TRI, REPRO_MODES, TRI, type WorldSpec } from './catalog'
 import type { Element } from './params'
+import { OBJECTIVES } from './fitness'
 import { LAWS, QUANTA, SOURCE_MOTIONS, SOURCE_RELATIONS, type FoodLevel, type FoodMode, type FoodRegime } from './params'
 import { Rng } from './rng'
 import { BRAIN_ROW, FOOD_ROW } from './types'
@@ -91,6 +92,11 @@ const DIALS = {
   rEat: [6, 12, 20],
   eBirth: [5, 15, 30],
   eRepro: [30, 60, 120],
+  /*
+   * Crossing `eRepro` on purpose: 10 is "abiogenesis is trivial, nothing accumulates", 200 is
+   * "descent dominates, but a dead world stays dead". The regime boundary is the finding.
+   */
+  eActivate: [10, 25, 60, 120, 200],
   /** The mutation rate: 0 makes heredity exact and evolution impossible. */
   reproMut: [0, 0.02, 0.05, 0.15],
   /**
@@ -117,6 +123,14 @@ const DIALS = {
    * and tuned entry by entry; this only decides how varied the draw is.
    */
   elementSpread: [0, 0.3, 0.6, 1],
+  /*
+   * What the learner optimises. Never varied before — v1's whole run optimised offspring count, and
+   * offspring count *is* the breed-fast, clump-and-thrift strategy, so the project's central
+   * finding may be an artefact of this one constant.
+   */
+  objective: OBJECTIVES.map((o) => o.key),
+  /** Lamarckian against Darwinian: the direct coupling between reproduction and learning. */
+  inherit: ['learned', 'birth'] as ('learned' | 'birth')[],
   /**
    * Whether the chemistry itself evolves.
    *
@@ -249,11 +263,14 @@ function dials(rng: Rng, spec: Partial<WorldSpec> = {}): Omit<WorldSpec, 'seed' 
     rEat: spec.rEat ?? pick(rng, DIALS.rEat),
     eBirth: spec.eBirth ?? pick(rng, DIALS.eBirth),
     eRepro: spec.eRepro ?? pick(rng, DIALS.eRepro),
+    eActivate: spec.eActivate ?? pick(rng, DIALS.eActivate),
     reproMut: spec.reproMut ?? pick(rng, DIALS.reproMut),
     reproMode: spec.reproMode ?? pick(rng, DIALS.reproMode),
     eSpore: spec.eSpore ?? pick(rng, DIALS.eSpore),
     sporeFood: spec.sporeFood ?? pick(rng, DIALS.sporeFood),
     elementSpread: spec.elementSpread ?? pick(rng, DIALS.elementSpread),
+    objective: spec.objective ?? pick(rng, DIALS.objective),
+    inherit: spec.inherit ?? pick(rng, DIALS.inherit),
     templating: spec.templating ?? pick(rng, DIALS.templating),
     rowMut: spec.rowMut ?? pick(rng, DIALS.rowMut),
     decayScale: spec.decayScale ?? pick(rng, DIALS.decayScale),

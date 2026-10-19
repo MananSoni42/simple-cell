@@ -25,7 +25,7 @@ import { World } from '../src/core/world'
  * and read in the same tick has limbs at their requested angles rather than at the ones the forces
  * put them at, and a test that pins drawn geometry should see the settled version.
  */
-export function placeOne(w: World, limbs = 2, at: [number, number] = [50, 50]): number {
+export function placeOne(w: World, limbs = 2, at: [number, number] = [50, 50], reserve = 50): number {
   const b = w.nIntr
   const quads = [0, 1, 2, 3].slice(0, Math.max(1, Math.min(4, limbs)))
   w.placeOrganism({
@@ -33,6 +33,9 @@ export function placeOne(w: World, limbs = 2, at: [number, number] = [50, 50]): 
     x: at[0],
     y: at[1],
     limbs: quads.map((q, i) => ({ idx: i, quad: q, angle: w.quadLo(q) + 0.3 })),
+    // matter starts with zero energy now, so a placed body has to be endowed or it cannot pay for
+    // its first move. Booked as injected, so the ledger still closes.
+    reserve,
   })
   for (let t = 0; t < 20; t++) w.step()
   return b

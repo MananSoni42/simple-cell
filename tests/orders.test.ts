@@ -18,9 +18,9 @@ function joined(over: Partial<Init> = {}): { w: World; a: number; b: number; c: 
   for (let i = 0; i < 6; i++) w.setType(i, 0)
   const [a, b, c] = [w.nIntr, w.nIntr + 1, w.nIntr + 2]
   // limbs pointing at each other, tips a bond-length apart
-  w.placeOrganism({ brain: a, x: 180, y: 200, limbs: [{ idx: 0, quad: 0, angle: 0.08 }] })
-  w.placeOrganism({ brain: b, x: 180 + 2 * 16 + 9, y: 200, limbs: [{ idx: 1, quad: 2, angle: Math.PI + 0.08 }] })
-  w.placeOrganism({ brain: c, x: 60, y: 60, limbs: [{ idx: 2, quad: 0, angle: 0.4 }] })
+  w.placeOrganism({ brain: a, x: 180, y: 200, limbs: [{ idx: 0, quad: 0, angle: 0.08 }], reserve: 50 })
+  w.placeOrganism({ brain: b, x: 180 + 2 * 16 + 9, y: 200, limbs: [{ idx: 1, quad: 2, angle: Math.PI + 0.08 }], reserve: 50 })
+  w.placeOrganism({ brain: c, x: 60, y: 60, limbs: [{ idx: 2, quad: 0, angle: 0.4 }], reserve: 50 })
   // Silence the brains. With random weights they wander off and tear their own bonds apart
   // within ~120 ticks, which is true of the real world but not what these tests are about.
   for (const brain of [a, b, c]) w.wBrain[brain]!.fill(0)
@@ -93,7 +93,14 @@ describe('n-order survival', () => {
      * seeded with six organisms ended the run with one, and a test about counting structures had
      * nothing to count.
      */
-    const w = new World(applyFoodLevel({ ...initFromSeed(3, 2), n_start: 24, foodLevel: 'abundant' }))
+    /*
+     * Sticky chemistry, because this is a test of the *structure census* and seed 3's own chemistry
+     * forms no compounds at all — so the census had nothing to count and read zero objects. Every
+     * pairing attracts here, which is the condition the counting code exists for.
+     */
+    const init = applyFoodLevel({ ...initFromSeed(3, 2), n_start: 40, n_brain: 60, foodLevel: 'abundant' })
+    init.A = Array.from({ length: 6 }, (_, i) => Array.from({ length: 6 }, (_, j) => (i === 4 || j === 4 ? 0.5 : 1)))
+    const w = new World(init)
     for (let t = 0; t < 2000; t++) w.step()
     const s = w.orders.stats(w)
     let objects = 0

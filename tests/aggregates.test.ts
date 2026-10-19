@@ -10,9 +10,9 @@ function pair(gap: number) {
   const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
   const [a, b, c] = [w.nIntr, w.nIntr + 1, w.nIntr + 2]
   // limbs point at each other along x, brains `gap` apart
-  w.placeOrganism({ brain: a, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.13 }] })
-  w.placeOrganism({ brain: b, x: 150 + gap, y: 150, limbs: [{ idx: 1, quad: 2, angle: Math.PI + 0.13 }] })
-  w.placeOrganism({ brain: c, x: 40, y: 40, limbs: [{ idx: 2, quad: 0, angle: 0.3 }] })
+  w.placeOrganism({ brain: a, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.13 }], reserve: 50 })
+  w.placeOrganism({ brain: b, x: 150 + gap, y: 150, limbs: [{ idx: 1, quad: 2, angle: Math.PI + 0.13 }], reserve: 50 })
+  w.placeOrganism({ brain: c, x: 40, y: 40, limbs: [{ idx: 2, quad: 0, angle: 0.3 }], reserve: 50 })
   w.grid.build()
   return { w, a, b, c }
 }

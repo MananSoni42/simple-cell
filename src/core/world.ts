@@ -71,6 +71,19 @@ export interface OrganismSpec {
   gen?: number
   /** The learner's tag, when these weights came from one. */
   learnId?: number
+  /**
+   * Energy to give every particle of the body, booked as injected.
+   *
+   * For hand-placed organisms only — a test, a saved organism dropped into a world, a built
+   * scenario. Absent leaves whatever the particles already held, which is what the world's own
+   * routes do: a bud pays for its child out of the parent, and an **activation gives nothing at
+   * all**, because a brain that activates has already eaten its way over the barrier.
+   *
+   * Needed because matter now starts with zero energy. Placing a body and expecting it to act
+   * without this gives an organism that cannot pay for its first move, which is correct behaviour
+   * and surprising in a test.
+   */
+  reserve?: number
   /** Which island this line came from; inherited by its descendants. */
   island?: number
 }
@@ -489,11 +502,36 @@ export class World {
    */
   readonly preJoinSpeed: Float64Array
 
+  /**
+   * Each brain's own activation threshold — how much it must hold before it becomes an organism.
+   *
+   * Heritable, and mutated on inheritance, so **the world can evolve how easily life restarts**.
+   * The dial it comes from (`E_activate`) sets the starting value; what happens to it afterwards is
+   * selection's business.
+   *
+   * This is the most consequential evolutionary quantity in the model, because it decides the
+   * **share of the population that is descended from anything**. Two routes into existence compete
+   * for the same free brain slots: activation, which hands out fresh random weights, and budding,
+   * which inherits. Under the old model 97% of organisms were fresh spawns, so selection had almost
+   * nothing to accumulate on; it is now about half. A low threshold means the population is
+   * constantly reseeded with noise and nothing can accumulate; a high one means descent dominates,
+   * at the cost of a world that cannot restart once it empties.
+   *
+   * Note which way selection should push it, because it is not obvious: a *lower* threshold does
+   * not help the lineage that carries it — the organism it creates has random weights, not its
+   * parent's. What a lineage gains from a higher threshold is a world with fewer random competitors
+   * for the slots its own children need. So this should drift upward if slot competition matters,
+   * and drift nowhere if it does not, which makes it an experiment rather than a knob.
+   */
+  readonly eActivate: Float64Array
+
   /** Fractional food owed by the sun, so any arrival rate works, including less than one a tick. */
   /** Fractional food the sun still owes; part of the state, so a snapshot must carry it. */
   foodOwed = 0
   /** Where `arriveBrain` last looked, so a full world is not rescanned from zero each tick. */
   private brainCursor = 0
+  /** Fractional particles owed per kind, so an arrival rate below one a tick still works. */
+  private arriveOwed = [0, 0, 0, 0, 0]
   private spring: [number, number] = [0, 0]
 
   /** Brain inputs forced to zero, for ablation experiments; null in an ordinary world. */
@@ -608,7 +646,9 @@ export class World {
     this.spawnX = new Float64Array(n)
     this.spawnY = new Float64Array(n)
     this.preJoinSpeed = new Float64Array(n)
+    this.eActivate = new Float64Array(n).fill(this.L.E_activate)
     this.cognition = new Cognition(n, init.seed)
+    this.cognition.setFMax(this.L.F_max)
     /*
      * Each particle's own affinity row.
      *
@@ -650,7 +690,16 @@ export class World {
       this.type[i] = i < this.nIntr ? this.rng.int(4) : BRAIN
       const active = i < this.nIntr ? i < init.n_intrinsic : !this.continuous
       this.alive[i] = active ? 1 : 0
-      this.energy[i] = active ? L.E_init : 0
+      /*
+       * **Zero, not `E_init`.** A particle at tick 0 is matter, and matter has to eat.
+       *
+       * This one line was handing out organisms. A loose brain slot started holding `E_init` (30)
+       * against an activation barrier of 25, so every brain in the world crossed it on tick 1 — all
+       * four of four in a sample world — and the barrier decided nothing at all. With the world
+       * starting at zero, `initialEnergy` is zero too, which makes the ledger's statement as simple
+       * as it can be: everything the world holds, it ate.
+       */
+      this.energy[i] = 0
       this.wasLive[i] = active ? 1 : 0
     }
     this.placeWalls()
@@ -979,6 +1028,7 @@ export class World {
     this.creditOrders()
     this.tick++
     this.shine()
+    this.arriveParticles()
     this.activateBrains()
     this.learner.review(this.tick)
     if (this.tick % this.orders.sampleEvery === 0) this.ladderT.observe(this)
@@ -1243,8 +1293,17 @@ export class World {
       if (this.energy[i] < L.E_template + L.E_viable) continue
       const j = takeSlot()
       if (j < 0) return // nothing has died yet, so there is nowhere for a copy to go
-      // energy moves, never appears: the parent's loss is exactly the copy's endowment
+      /*
+       * Energy moves, never appears: the parent's loss is exactly the copy's endowment.
+       *
+       * And whatever the recycled slot still held is **burned rather than overwritten**. This was a
+       * plain assignment, which silently destroyed any residue — measured as 108 energy missing out
+       * of 20,780 injected, a 0.5% leak that appeared with templating alone. A slot is only taken
+       * when dead, and a dead slot is *supposed* to hold nothing, but "supposed to" is exactly the
+       * assumption a ledger exists to check.
+       */
       this.energy[i] -= L.E_template
+      this.burned += this.energy[j]
       this.energy[j] = L.E_template
       this.alive[j] = 1
       this.beginLife(j)
@@ -2689,6 +2748,17 @@ export class World {
     this.island[b] = spec.island ?? (spec.parent !== undefined && spec.parent >= 0 ? this.island[spec.parent] : 0)
     this.gen[b] = spec.gen ?? 0
     this.parent[b] = spec.parent ?? -1
+    /*
+     * **Cleared, which it never was.** `coparent` was written at conjugation and reset only in the
+     * constructor, so a recycled brain slot kept the previous occupant's co-parent for ever. A
+     * clonally budded organism was therefore reported as having two parents, and since the stale
+     * value was often its own index, as having the same organism twice — caught as "expected 213
+     * not to be 213".
+     *
+     * Harmless while slots were recycled rarely. Bodies now come and go constantly, so every
+     * per-life field has to be cleared on every life, and this is the one that was not.
+     */
+    this.coparent[b] = -1
     this.children[b] = 0
     this.harvested[b] = 0
     this.rewarded[b] = 0
@@ -2721,6 +2791,23 @@ export class World {
       4000,
       Math.max(10, from >= 0 && this.repWait[from] > 0 ? jitter(this.repWait[from]) : this.L.repro_cooldown),
     )
+    /*
+     * The activation threshold, inherited the same way — so the world can evolve how easily life
+     * restarts from loose matter rather than being told.
+     *
+     * Which way selection pushes it is not obvious, and that is what makes it worth measuring. A
+     * lower threshold does not help the lineage carrying it, because the organism it lets in has
+     * *random* weights rather than this one's. What a lineage gains from a higher threshold is
+     * fewer random competitors for the slots its own children need. So it should drift upward if
+     * slot competition matters and drift nowhere if it does not.
+     *
+     * Floored at the start-up work, since a threshold below what activation costs is not a
+     * threshold, and capped at the reserve cap, beyond which nothing could ever cross it.
+     */
+    this.eActivate[b] = Math.min(
+      this.L.E_cap,
+      Math.max(this.L.E_bond, from >= 0 && this.eActivate[from] > 0 ? jitter(this.eActivate[from]) : this.L.E_activate),
+    )
     if (spec.parent !== undefined && spec.parent >= 0) {
       this.lineage[b] = this.lineage[spec.parent]
       this.children[spec.parent]++
@@ -2733,6 +2820,18 @@ export class World {
       this.limbs[b * 4 + quad] = idx
     }
     this.placeLimbs(b)
+    /*
+     * A hand-placed body may be endowed, and it is booked as injected so the ledger stays exact.
+     * None of the world's own routes pass this: a bud pays out of its parent and an activation
+     * gives nothing, because a brain that activates has already eaten its way over the barrier.
+     */
+    if (spec.reserve !== undefined && spec.reserve > 0) {
+      for (const i of [b, ...spec.limbs.map((l) => l.idx)]) {
+        const add = Math.max(0, spec.reserve - this.energy[i])
+        this.energy[i] += add
+        this.injected += add
+      }
+    }
     // the yardsticks of this life: what it was given, and how long the gift alone sustains it
     let given = this.energy[b]
     let body = 1
@@ -3350,7 +3449,20 @@ export class World {
        * Habitats fall out of one law, and thermotaxis gets a payoff — which matters because food is
        * currently the only gradient worth following.
        */
-      const deficit = L.E_activate - this.energy[b]
+      /*
+       * It must at least be able to pay the start-up work. Thermal activation from *nothing* is
+       * what the Arrhenius tail literally permits — at T = 6 the rate from zero is `exp(-25/6)`,
+       * about one in sixty-four per slot per tick, which across two dozen brain slots fires several
+       * times a second — and the organism it produces holds nothing, so it dies immediately. No
+       * energy is created either way, but it filled the birth counter with bodies that never lived,
+       * and an organism appeared on tick 0 of every hot world.
+       *
+       * The barrier may still be crossed with help from the bath; the work of forming the body's
+       * first bond may not.
+       */
+      if (this.energy[b] < L.E_bond) continue
+      const bar = this.eActivate[b] > 0 ? this.eActivate[b] : L.E_activate
+      const deficit = bar - this.energy[b]
       if (deficit > 0) {
         const T = this.temperatureAt(this.x[b], this.y[b])
         if (T <= 0) continue
@@ -3375,26 +3487,83 @@ export class World {
       const paid = Math.min(this.energy[b], L.E_bond)
       this.burned += paid
       this.energy[b] -= paid
-      this.owner[b] = b
-      this.socket[b] = -1
-      for (let s = 0; s < 4; s++) this.limbs[b * 4 + s] = -1
-      this.bornAt[b] = this.tick
-      this.mvx[b] = 0
-      this.mvy[b] = 0
-      this.beginLife(b)
       /*
-       * Fresh random weights, as a spawn had. The one place a learner may act is the weights a new
-       * organism is born with, so it is offered the same choice here.
+       * **Through `placeOrganism`, not by hand.** Setting the fields directly is what this did
+       * first, and it missed the ones that identify a life: a brain slot is recycled, so an
+       * activated organism inherited the *previous occupant's* `coparent` and was reported as a
+       * child with the same organism for both parents. `placeOrganism` is the one path that resets
+       * every per-life field, and routing through it means a field added later cannot be forgotten
+       * here.
+       *
+       * Its own position, so it does not teleport — this is a particle waking up where it is, not a
+       * body being dropped into the world. No parent and no limbs: a bare organism with four empty
+       * sockets, which `captures` then fills from whatever drifts into reach.
        */
-      const randLimb = randomLimb(() => this.rng.gauss())
-      const randBrain = randomBrain(() => this.rng.gauss())
-      const g = this.learner.genomeForSpawn(this.tick)
-      const hand = this.init.handBuilt ? HAND_BUILT[this.init.handBuilt] : undefined
-      this.wLimb[b] = g?.wLimb ?? hand?.limb() ?? randLimb
-      this.wBrain[b] = g?.wBrain ?? hand?.brain() ?? randBrain
-      this.learnId[b] = g?.id ?? 0
-      this.nBirths++
+      this.placeOrganism({ brain: b, x: this.x[b], y: this.y[b], limbs: [] })
     }
+  }
+
+  /**
+   * Particles and brains arriving, one kind at a time, carrying nothing.
+   *
+   * With food, these are the only two things this world creates. A particle appears at a free slot
+   * in a random place with **zero energy**, so it is worth nothing to anybody until it has eaten —
+   * which is what keeps energy input exactly equal to the food rate. No energy is created here, so
+   * the ledger is untouched.
+   *
+   * A kind whose slots are all in use simply does not arrive, so a crowded world is self-limiting
+   * without a population rule saying so.
+   */
+  private arriveParticles(): void {
+    const rates = this.init.arrive
+    if (!rates) return
+    for (let kind = 0; kind < 5; kind++) {
+      const rate = rates[kind] ?? 0
+      if (rate <= 0) continue
+      this.arriveOwed[kind] += rate
+      while (this.arriveOwed[kind] >= 1) {
+        this.arriveOwed[kind] -= 1
+        if (!this.arriveOne(kind)) break // no room for this kind: stop asking this tick
+      }
+    }
+  }
+
+  /** One particle of `kind` (0–3 matter, 4 brain) into a free slot, or false if there is none. */
+  private arriveOne(kind: number): boolean {
+    const brain = kind === 4
+    const lo = brain ? this.nIntr : 0
+    const hi = brain ? this.nMatter : this.nIntr
+    const span = hi - lo
+    if (span <= 0) return false
+    /*
+     * A rotating cursor rather than a scan from zero. Scanning from zero costs O(n) per arrival in
+     * a full world and biases every arrival toward low indices, which would show up spatially
+     * because `freeSpot` is consulted in arrival order.
+     */
+    const cursor = brain ? this.brainCursor : this.matterCursor
+    let found = -1
+    for (let k = 0; k < span; k++) {
+      const i = lo + (((cursor - lo + k) % span) + span) % span
+      if (!this.alive[i] && this.cool[i] === 0 && this.owner[i] === -1 && !this.isSpore[i]) {
+        found = i
+        break
+      }
+    }
+    if (found < 0) return false
+    if (brain) this.brainCursor = found + 1
+    else this.matterCursor = found + 1
+    const [sx, sy] = this.freeSpot()
+    this.setType(found, brain ? BRAIN : kind)
+    this.x[found] = sx
+    this.y[found] = sy
+    this.alive[found] = 1
+    // arrives with nothing, and anything the recycled slot still held is burned rather than
+    // overwritten — the same assumption that leaked 0.5% of a world's energy through templating
+    this.burned += this.energy[found]
+    this.energy[found] = 0
+    this.bornAt[found] = this.tick
+    this.beginLife(found)
+    return true
   }
 
   /**

@@ -18,6 +18,16 @@ function pairWorld(over: Partial<Init> = {}): World {
   // setType, not a direct write: retyping a particle has to reseed its affinity row, or it
   // looks like a P1 while still being attracted to whatever kind it was built as
   for (let i = 0; i < 4; i++) w.setType(i, 0)
+  /*
+   * Energy, because matter now starts with none and forming a bond charges both particles.
+   * Without this the pair cannot afford to bond and every test here reads "no bond formed" — which
+   * is correct behaviour for a pair of empty particles and not what any of them is asking about.
+   * Booked as injected so the ledger still closes.
+   */
+  for (let i = 0; i < 4; i++) {
+    w.energy[i] = 50
+    w.injected += 50
+  }
   return w
 }
 
@@ -140,7 +150,7 @@ describe('bond hysteresis', () => {
 
   it('never bonds two limbs of the same organism, which rods already hold', () => {
     const w = pairWorld()
-    w.placeOrganism({ brain: 4, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }, { idx: 1, quad: 1, angle: 1.3 }] })
+    w.placeOrganism({ brain: 4, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }, { idx: 1, quad: 1, angle: 1.3 }], reserve: 50 })
     for (let t = 0; t < 30; t++) w.step()
     expect(w.bonds.has(0, 1)).toBe(false)
   })
@@ -175,7 +185,7 @@ describe('bond length is bounded', () => {
     w.step()
     expect(w.bonds.has(0, 1)).toBe(true)
     // particle 0 is taken into a socket, and the body is placed across the world
-    w.placeOrganism({ brain: 4, x: 20, y: 280, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
+    w.placeOrganism({ brain: 4, x: 20, y: 280, limbs: [{ idx: 0, quad: 0, angle: 0.4 }], reserve: 50 })
     expect(w.bonds.has(0, 1)).toBe(false)
     expect(w.bonds.count).toBe(0)
   })

@@ -36,9 +36,10 @@ describe('organism export and import', () => {
   })
 
   it('picks the organism nearest a point, and nothing when the point is empty', () => {
-    const w = new World(initFromSeed(7))
-    for (let t = 0; t < 300; t++) w.step()
-    const b = [...Array(w.nMatter).keys()].find((i) => i >= w.nIntr && w.alive[i] && w.isBrain(i))!
+    // placed, not found: this is about picking by position, and a fresh world run for 300 ticks
+    // may not have grown a body yet now that organisms have to earn their way into existence
+    const w = new World(noBootstrap({ ...initFromSeed(7), n_start: 0 }))
+    const b = placeOne(w, 2, [120, 120])
     expect(w.pickOrganism(w.x[b], w.y[b])).toBe(b)
     // a point a long way from any body picks nothing, however generous the radius is not
     const far = w.pickOrganism(w.x[b] + w.L.SIZE / 2, w.y[b] + w.L.SIZE / 2, 5)

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { pairForce, pairPotential } from '../src/core/forces'
 import { LifeTracker, RollingMean, summarize } from '../src/core/lifestats'
 import { census, clusterStats, lifeStats, meanClusterSize, massTotals, potentialEnergy, stateHash } from '../src/core/metrics'
-import { type Init, LAWS, type Laws, QUANTA, initFromSeed, stability, substepsFor } from '../src/core/params'
+import { type Init, LAWS, type Laws, QUANTA, applyFoodLevel, initFromSeed, stability, substepsFor } from '../src/core/params'
 import { Rng } from '../src/core/rng'
 import { serialBackend } from '../src/core/backend'
 import { BRAIN_IN, BRAIN_OUT, N_BRAIN_IN } from '../src/core/neurons'
@@ -164,8 +164,7 @@ describe('phenomenology', () => {
         limbs: [
           { idx: 0, quad: 0, angle: 0.8 },
           { idx: 1, quad: 1, angle: 2.3 },
-        ],
-      })
+        ], reserve: 50 })
       for (let t = 0; t < 600; t++) w.step()
       return w.theta[1] - w.theta[0]
     }
@@ -179,10 +178,14 @@ describe('phenomenology', () => {
     const init = smallInit({ T: 0, n_brain: 1, n_intrinsic: 3, T_food: 1e9, T_spawn: 1e9 })
     init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
     const w = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
-    w.placeOrganism({ brain: 3, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.3 }] })
+    w.placeOrganism({ brain: 3, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.3 }], reserve: 50 })
     // free particle sitting on the quadrant-0 rod circle, away from the existing tip
     w.x[1] = 150 + w.L.L_rod * Math.cos(1.2)
     w.y[1] = 150 + w.L.L_rod * Math.sin(1.2)
+    // the replacement particle has to exist as matter; the brain pays the recruitment fee out of
+    // the reserve it was placed with
+    w.energy[1] = 20
+    w.injected += 20
     w.energy[0] = 0
     w.step()
     expect(w.owner[0]).toBe(-1)
@@ -202,8 +205,7 @@ describe('stats', () => {
     w.x[1] = 250; w.y[1] = 60
     w.placeOrganism({
       brain: 4, x: 150, y: 150,
-      limbs: [{ idx: 2, quad: 0, angle: 0.6 }, { idx: 3, quad: 2, angle: 4.0 }],
-    })
+      limbs: [{ idx: 2, quad: 0, angle: 0.6 }, { idx: 3, quad: 2, angle: 4.0 }], reserve: 50 })
     const c = clusterStats(w)
     expect(c.max).toBe(3)
     expect(c.count).toBe(3)
@@ -337,7 +339,15 @@ describe('free particle decay', () => {
   const lone = (decay: number) => {
     const init = smallInit({ T: 0, n_brain: 0, n_intrinsic: 1, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, decay_free: decay })
     init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
-    return new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
+    const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
+    /*
+     * Stated rather than inherited. Matter starts with zero energy now — it is a particle, and a
+     * particle has to eat — so a test about *decay* has to say what there is to decay. 30 is what
+     * `E_init` used to hand out, which keeps the arithmetic below unchanged.
+     */
+    w.energy[0] = 30
+    w.injected += 30
+    return w
   }
 
   it('drains a free particle exponentially, burns exactly what it loses, and records its lifespan', () => {
@@ -347,13 +357,15 @@ describe('free particle decay', () => {
       w.step()
       expect(w.energy[0]).toBeCloseTo(30 * Math.pow(1 - k, t), 9)
     }
-    expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy, 9)
+    // `+ injected`, because the 30 this particle starts with is now given to it rather than being
+    // part of what the world was built holding
+    expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 9)
     const expectedLife = Math.ceil(Math.log(0.01 / 30) / Math.log(1 - k))
     for (let t = 0; t < 1200; t++) w.step()
     expect(w.energy[0]).toBe(0)
     expect(w.lifeParticles.summary().n).toBe(1)
     expect(Math.abs(w.lifeParticles.summary().max - expectedLife)).toBeLessThanOrEqual(2)
-    expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy, 9)
+    expect(w.totalEnergy() + w.burned).toBeCloseTo(w.initialEnergy + w.injected, 9)
   })
 
   it('does nothing when off, and never touches bound particles', () => {
@@ -364,7 +376,7 @@ describe('free particle decay', () => {
     const init = smallInit({ T: 0, n_brain: 1, n_intrinsic: 2, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, decay_free: 0.5, repro: false })
     init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
     const w = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
-    w.placeOrganism({ brain: 2, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    w.placeOrganism({ brain: 2, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }], reserve: 50 })
     for (let t = 0; t < 10; t++) w.step()
     expect(w.energy[0]).toBeGreaterThan(29) // only upkeep and signalling, no 50% decay
     expect(w.energy[1]).toBeLessThan(0.1) // the free particle has been drained
@@ -624,7 +636,7 @@ describe('food sensing', () => {
     init.A[0][4] = init.A[4][0] = 1 // P1 is a mouth
     const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
     w.setType(0, 0)
-    w.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
+    w.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }], reserve: 50 })
     // one food particle to the right of the limb, inside the interaction range
     w.injectFood()
     const f = w.foodStart
@@ -639,7 +651,7 @@ describe('food sensing', () => {
     // with the mouth type repelled instead, the same geometry pulls the other way
     const w2 = new World({ ...init, A: init.A.map((r, i) => r.map((v, j) => ((i === 4 || j === 4) && v !== 0 ? -1 : v))) }, { laws: { SIZE: 300 }, autoSpawn: false })
     w2.setType(0, 0)
-    w2.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }] })
+    w2.placeOrganism({ brain: 1, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.4 }], reserve: 50 })
     w2.injectFood()
     w2.x[w2.foodStart] = w2.x[0] + 22
     w2.y[w2.foodStart] = w2.y[0]
@@ -679,7 +691,7 @@ describe('food economy', () => {
     const init = smallInit({ T: 0, n_intrinsic: 2, n_brain: 1, n_start: 0, n_food0: 0, T_food: 1e9, T_spawn: 1e9, repro: false, decay_free: 0, food_life: 0 })
     init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
     const w = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
-    w.placeOrganism({ brain: 2, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    w.placeOrganism({ brain: 2, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }], reserve: 50 })
     w.energy[2] = 0 // starve the brain
     w.energy[0] = 70 // the limb still holds plenty
     const before = w.totalEnergy() + w.burned - w.injected
@@ -751,7 +763,7 @@ describe('neuron wiring', () => {
     init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
     const w = new World(init, { laws: { SIZE: 300 }, autoSpawn: false })
     const b = 2
-    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }], reserve: 50 })
     // a brain that always shouts at socket 0, and a limb that only repeats what it is told
     w.wBrain![b]!.fill(0)
     w.wBrain![b]![(BRAIN_OUT.SIG + 0) * N_BRAIN_IN + BRAIN_IN.BIAS] = 5 // weight on the bias input
@@ -770,12 +782,12 @@ describe('neuron wiring', () => {
     init.A = Array.from({ length: 5 }, () => new Array(5).fill(0))
     const w = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
     const b = 2
-    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    w.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }], reserve: 50 })
     w.wBrain![b]!.fill(0)
     w.wBrain![b]![(BRAIN_OUT.SIG + 0) * N_BRAIN_IN + BRAIN_IN.BIAS] = 8
     w.step()
     const quiet = new World(init, { laws: { SIZE: 300, releaseFrac: 0 }, autoSpawn: false })
-    quiet.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }] })
+    quiet.placeOrganism({ brain: b, x: 150, y: 150, limbs: [{ idx: 0, quad: 0, angle: 0.5 }], reserve: 50 })
     quiet.wBrain![b]!.fill(0)
     quiet.step()
     expect(w.burned).toBeGreaterThan(quiet.burned) // shouting is not free
@@ -793,7 +805,7 @@ describe('brains repel', () => {
     init.A = Array.from({ length: 5 }, () => new Array(5).fill(0)) // no chemistry at all
     const at = (gap: number): number => {
       const w = new World(init, { laws: { SIZE: 400 }, autoSpawn: false })
-      w.placeOrganism({ brain: 1, x: 200, y: 200, limbs: [] })
+      w.placeOrganism({ brain: 1, x: 200, y: 200, limbs: [], reserve: 50 })
       w.x[0] = 200 + gap
       w.y[0] = 200
       w.grid.build()
@@ -808,7 +820,9 @@ describe('brains repel', () => {
   })
 
   it('keeps a clear space around itself in a running world', () => {
-    const w = new World({ ...initFromSeed(101), n_start: 6, n_intrinsic: 150, n_brain: 10 })
+    // seeded and fed: this is about the repulsion law holding in a *running* world, so it needs a
+    // population, and a world now has to grow one rather than being handed it
+    const w = new World(applyFoodLevel({ ...initFromSeed(101), n_start: 8, n_intrinsic: 150, n_brain: 10, foodLevel: 'abundant' }))
     for (let t = 0; t < 1500; t++) w.step()
     let near = 0
     let checks = 0
@@ -827,8 +841,17 @@ describe('brains repel', () => {
       }
     }
     expect(checks).toBeGreaterThan(0)
-    // Not zero: a limb held by another organism's rod cannot yield radially, so it can be
-    // pressed closer than a free particle ever would be.
-    expect(near / checks).toBeLessThan(0.002)
+    /*
+     * Not zero: brain repulsion is a *force*, not a hard constraint, and a limb held by another
+     * organism's rod cannot yield radially — so it can be pressed closer than a free particle ever
+     * would be.
+     *
+     * The bar is 0.005 rather than 0.002 because the population is denser than it was. The old
+     * figure was measured in a world handed six organisms that mostly died; this one grows and
+     * feeds a real population, and more bodies in the same space means more rod-held limbs pressed
+     * against a brain. Measured 0.0034 here. It is a density figure, not a law, so it is stated
+     * with the population it came from.
+     */
+    expect(near / checks).toBeLessThan(0.005)
   })
 })
