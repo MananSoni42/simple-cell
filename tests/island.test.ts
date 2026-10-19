@@ -13,10 +13,18 @@ function plan(ticks = 600): ArchipelagoPlan {
     walls: 'none',
     n_wall: 0,
     wallPositions: [],
-    n_brain: 8,
-    n_start: 3,
-    n_intrinsic: 110,
-    T_spawn: 30,
+    /*
+     * Seeded with a population that can survive the run, and fed well enough to.
+     *
+     * `T_spawn: 30` used to top each island up every thirty ticks and no longer does anything —
+     * bodies come from loose brains crossing an activation barrier now. Each island has to end with
+     * survivors for there to be anything to merge, and at the old settings one island of four
+     * regularly had none, which the merge tests read as a bug in the merge.
+     */
+    n_brain: 24,
+    n_start: 12,
+    n_intrinsic: 300,
+    foodLevel: 'abundant',
     food_life: 250,
     learn: { ...LEARN_DEFAULTS, warmup: 50, batch: 8, pool: 12 },
   })

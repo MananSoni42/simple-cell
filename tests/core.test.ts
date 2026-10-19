@@ -220,8 +220,15 @@ describe('stats', () => {
 })
 
 describe('continuous inflow', () => {
-  it('keeps spawning past the brain count, closes the ledger, and never exceeds capacity', () => {
-    const init = smallInit({ inflow: true, n_brain: 3, T_spawn: 25, T_food: 2, T: 3 })
+  it('fills past the nominal brain count, closes the ledger, and never exceeds capacity', () => {
+    /*
+     * Renamed because the mechanism changed. This used to test that periodic *spawning* pushed the
+     * population past `n_brain`, and periodic spawning no longer exists — bodies now come from
+     * loose brains crossing an activation barrier and from reproduction. What is still worth
+     * pinning is the thing the name was really about: an inflow world allocates three times the
+     * nominal brain count, so the population may exceed `n_brain` without ever exceeding capacity.
+     */
+    const init = smallInit({ inflow: true, n_brain: 3, T_food: 2, T: 3 })
     const w = new World(init, SMALL)
     let maxOrgs = 0
     for (let t = 0; t < 3000; t++) {
@@ -478,7 +485,13 @@ describe('chemistry', () => {
 
 describe('lineage', () => {
   it('gives each spawned organism its own lineage and passes it to descendants', () => {
-    const w = new World(smallInit({ repro: true, n_brain: 6, n_start: 1, T_spawn: 1e9, T_food: 1 }), SMALL)
+    /*
+     * Bootstrap off: this test names one organism and looks for *its* child, and a loose brain that
+     * eats enough now activates on its own — so `find` could return a spontaneously started brain
+     * instead and the test would be following the wrong lineage.
+     */
+    const base = smallInit({ repro: true, n_brain: 6, n_start: 1, T_food: 1 })
+    const w = new World({ ...base, laws: { ...base.laws, E_activate: 1e9 } }, SMALL)
     const b = [...Array(w.nMatter).keys()].find((i) => w.isBrain(i))!
     w.energy[b] = 95
     w.repCool[b] = 0

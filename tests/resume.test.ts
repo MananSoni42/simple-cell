@@ -102,7 +102,13 @@ describe('resume points', () => {
 
   it('splits a tweak into what may be applied at a resume point and what may not', () => {
     const saved = specInit(BASE)
-    const safe = specInit({ ...BASE, T: 6, foodLevel: 'scarce' })
+    /*
+     * `T` only. Changing the food *level* also changes `max_food`, because the food cap is now
+     * sized from the arrival rate rather than being a per-area constant — and `max_food` decides
+     * `cap`, which is an array length. So a food-level change is a shape change at a checkpoint,
+     * correctly refused, and it does not belong in a list of safe tweaks.
+     */
+    const safe = specInit({ ...BASE, T: 6 })
     expect(tweakDiff(saved, safe).refused).toEqual([])
     expect(tweakDiff(saved, safe).allowed.sort()).toContain('T')
 

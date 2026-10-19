@@ -39,7 +39,7 @@ export interface OrderStats {
     align: number
     /** How many members contributed to `align`. */
     alignN: number
-    /** The same agreement over every organism alive: the shared-environment control. */
+    /** The same agreement over the nearest non-members, matched on count and place: the control. */
     alignPop: number
     /** The order it has **now** — what a gate asking "is this a structure" must use. */
     order: number
@@ -89,24 +89,102 @@ interface Group {
 
 
 /**
- * How much better than chance a set of commands agree, in [0, 1].
+ * How well a set of commands agree: `R = |Σv| / Σ|v|`, raw.
  *
- * `|Σv| / Σ|v|` is the alignment the physics asks for, but it is **not comparable across group
- * sizes**: its chance level is `1 / √n` and its ceiling is 1, so neither end is fixed. Scaling by
- * `√n` pins the chance end at 1.0 and leaves the ceiling at `√n` — which is why dividing a
- * six-member figure by a forty-member one under a shared current gave 0.40 instead of 1.0, exactly
- * `√6 / √40`.
+ * Raw on purpose, after two attempts to make it size-comparable failed in opposite directions. The
+ * physics asks for exactly this quantity — the world is overdamped, so N bodies moving
+ * independently each go at `|Fi| / g` while bonded into one structure of N times the drag they go
+ * at `|Σ Fi| / (N g)`, and the ratio of the two is R. What R is not is comparable across group
+ * sizes: its chance level is about `1 / sqrt(N)` and its ceiling is 1.
  *
- * Rescaling to the span between chance and perfect fixes both ends at once: 0 means "no better than
- * independent", 1 means "pulling exactly together", for any n. Two of these can then be divided.
+ * - **Rescaling to the span between chance and 1** left a large positive bias at small N, because R
+ *   fluctuates upward as often as down and the rescale clamps at zero. Unaided worlds tripped the
+ *   null **8 times in 30**, structures reading 0.70 to 0.97 at n = 5 against populations at 0.25.
+ * - **Standardising against a Monte-Carlo null per N** fixed that and broke it the other way: a
+ *   z-score grows with `sqrt(N)`, so dividing a six-member structure's z by a forty-member
+ *   population's z is biased *against* the structure. A synthetically well-coordinated structure
+ *   read **0.39**, below the threshold, and the null then "passed" only because the rung had become
+ *   nearly unpassable.
+ *
+ * So nothing is corrected here. The rung compares R against R over **the same number of non-member
+ * organisms**, which holds N fixed by construction and needs no model of the null at all. See
+ * `rivalAgreement`.
  */
 export function agreement(sx: number, sy: number, mag: number, n: number): number {
   if (n < 2 || mag < 1e-9) return 0
-  const a = Math.hypot(sx, sy) / mag
-  const chance = 1 / Math.sqrt(n)
-  if (chance >= 1 - 1e-9) return 0
-  return Math.max(0, (a - chance) / (1 - chance))
+  return Math.hypot(sx, sy) / mag
 }
+
+/**
+ * The same agreement over **as many non-member organisms as the structure has members**.
+ *
+ * This is the rung's control, and holding the group size fixed is the whole point: R depends
+ * sharply on how many commands go into it, so any comparison between a five-member structure and a
+ * forty-member population is measuring size as much as coordination. Both sides here are computed
+ * on exactly `n` commands.
+ *
+ * It must also be matched on **where they are**, and that is the part two earlier versions missed.
+ * A structure's members are bonded, so they sit on top of each other; they read nearly the same food
+ * gradient and therefore issue nearly the same command, for a reason that has nothing to do with
+ * each other. A control drawn from anywhere in the world is spread out and agrees less, so the
+ * ratio measures co-location. Measured: a world-wide average left 1 false positive in 30 unaided
+ * worlds, and a size-matched but randomly-placed control was **worse at 9 in 30, worst 2.43** —
+ * correcting size exposed the location confound it had been masking.
+ *
+ * So the comparison group is the `n` non-members **nearest the structure's own centroid**: the same
+ * number of organisms, in the same part of the world, reading the same gradient. What remains is
+ * whether being *bonded* makes them agree more than merely being *neighbours* does, which is the
+ * question the rung is asking.
+ */
+export function rivalAgreement(w: World, members: Set<number>): number {
+  const n = members.size
+  if (n < 2) return 0
+  // the structure's centroid, wrapped — a plain mean puts two members either side of the seam in
+  // the middle of the empty half
+  let cx = 0
+  let sxs = 0
+  let cy = 0
+  let sys = 0
+  let m = 0
+  for (const b of members) {
+    if (!w.alive[b] || !w.isBrain(b)) continue
+    const ax = (2 * Math.PI * w.x[b]) / w.L.SIZE
+    const ay = (2 * Math.PI * w.y[b]) / w.L.SIZE
+    cx += Math.cos(ax)
+    sxs += Math.sin(ax)
+    cy += Math.cos(ay)
+    sys += Math.sin(ay)
+    m++
+  }
+  if (m < 2) return 0
+  const back = (c: number, si: number): number => {
+    const a = Math.atan2(si / m, c / m)
+    return ((a < 0 ? a + 2 * Math.PI : a) * w.L.SIZE) / (2 * Math.PI)
+  }
+  const gx = back(cx, sxs)
+  const gy = back(cy, sys)
+  const half = w.L.SIZE / 2
+  const wrap = (d: number): number => (d > half ? d - w.L.SIZE : d < -half ? d + w.L.SIZE : d)
+
+  const near: { b: number; d: number }[] = []
+  for (let b = w.nIntr; b < w.nMatter; b++) {
+    if (!w.alive[b] || !w.isBrain(b) || members.has(b)) continue
+    near.push({ b, d: Math.hypot(wrap(w.x[b] - gx), wrap(w.y[b] - gy)) })
+  }
+  if (near.length < n) return 0
+  near.sort((p, q) => p.d - q.d)
+  let sx = 0
+  let sy = 0
+  let mag = 0
+  for (let k = 0; k < n; k++) {
+    const b = near[k].b
+    sx += w.mvx[b]
+    sy += w.mvy[b]
+    mag += Math.hypot(w.mvx[b], w.mvy[b])
+  }
+  return agreement(sx, sy, mag, n)
+}
+
 
 /**
  * A structure tracked through changes of membership: matched between samples by overlap rather
@@ -447,22 +525,7 @@ export class OrderTracker {
            * are 1.0 under chance, both rise together when there is a common current, and the ratio
            * exceeds 1 only if the structure's members agree *more than the world does*.
            */
-          alignPop: (() => {
-            let sx = 0
-            let sy = 0
-            let mag = 0
-            let n = 0
-            for (let b = w.nIntr; b < w.nMatter; b++) {
-              if (!w.alive[b] || !w.isBrain(b)) continue
-              const vx = w.mvx[b]
-              const vy = w.mvy[b]
-              sx += vx
-              sy += vy
-              mag += Math.hypot(vx, vy)
-              n++
-            }
-            return agreement(sx, sy, mag, n)
-          })(),
+          alignPop: rivalAgreement(w, st.members),
           age,
           replacements: st.replacements,
           heldFrac,

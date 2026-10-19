@@ -58,7 +58,7 @@ function gauss(seed: number): () => number {
 }
 
 describe('the travel rung as a coordination statistic', () => {
-  it('reads 1.0 for independent commands, at every group size', () => {
+  it('reads the chance level 1/sqrt(n) for independent commands, at every group size', () => {
     /*
      * The property the threshold rests on. If independent commands scored above 1 the rung would be
      * passed by any group that exists, and if they scored below it the rung would be unpassable —
@@ -74,13 +74,13 @@ describe('the travel rung as a coordination statistic', () => {
       }
       const mean = sum / trials
       /*
-       * Near **zero**, not near one: the statistic is rescaled to the span between chance and
-       * perfect agreement, so independent commands sit at the bottom of it whatever n is. It is not
-       * exactly zero because the rescaling clamps at zero and alignment fluctuates upward as often
-       * as down, which leaves a small positive bias — size-dependent, and the reason the rung
-       * divides by a population figure rather than comparing against a constant.
+       * `1 / sqrt(n)`, which is the whole difficulty with this statistic in one line: **its null
+       * depends sharply on the group size.** 0.58 at three members, 0.16 at forty. Two attempts to
+       * correct for that — rescaling the span to [0,1], then standardising against a Monte-Carlo
+       * null per size — each removed one bias and introduced its mirror. The rung therefore
+       * compares against a group of *the same size*, where the correction is unnecessary.
        */
-      expect(mean, `n=${n} independent`).toBeLessThan(0.3)
+      expect(mean, `n=${n} independent`).toBeCloseTo(1 / Math.sqrt(n), 1)
     }
   })
 
@@ -107,59 +107,40 @@ describe('the travel rung as a coordination statistic', () => {
     expect(last).toBeGreaterThan(0.5) // well clear of chance, so the rung can be met
   })
 
-  it('cancels a common current when divided by the population figure', () => {
+  it('cancels a common current when the comparison group is the same size', () => {
     /*
-     * The shared-environment confound, and why the rung divides by the same statistic taken over
-     * every organism alive. Members of a structure sit in one neighbourhood and read one food
-     * gradient, so their commands point the same way for a reason that has nothing to do with each
-     * other — measured raw, that alone read 1.38 on an unaided world and tripped the null.
+     * Why the rung's control is size-matched. Here every organism shares a drift, including the
+     * structure's members, so the ratio must come back to about 1: the members agree, but no more
+     * than their neighbours do.
      *
-     * Here every organism in the world shares the drift, including the structure's members. The
-     * ratio has to come back to about 1: the members agree, but no more than the world does.
+     * Comparing against the *whole population* instead is what failed in practice — a six-member
+     * structure against a forty-member world is measuring size as much as agreement, and it tripped
+     * the null on 8 of 30 unaided worlds.
      */
     const g = gauss(2024)
     let sum = 0
     const trials = 2000
     for (let t = 0; t < trials; t++) {
       const drift = 1.5
-      const world: [number, number][] = Array.from({ length: 40 }, () => [g() + drift, g()])
-      const struct = world.slice(0, 6) // members are part of the same population and current
-      sum += aligned(struct) / aligned(world)
+      const struct: [number, number][] = Array.from({ length: 6 }, () => [g() + drift, g()])
+      const rivals: [number, number][] = Array.from({ length: 6 }, () => [g() + drift, g()])
+      sum += aligned(struct) / aligned(rivals)
     }
     const mean = sum / trials
-    expect(mean).toBeGreaterThan(0.75)
-    expect(mean).toBeLessThan(1.3)
+    expect(mean).toBeGreaterThan(0.85)
+    expect(mean).toBeLessThan(1.2)
   })
 
-  it('exceeds 1 when a structure agrees more than its world does, and says what its ceiling is', () => {
-    /*
-     * The case the rung is for, and an honest limit on it.
-     *
-     * The ratio is the structure's agreement over the world's, so its **ceiling is `1 / e_pop`**:
-     * when the whole world is already pulling one way there is little headroom left to show that a
-     * structure pulls together *more*. Tightening the structure's commands from sigma 0.15 to 0.04
-     * moved the ratio not at all — 1.311 both times — because it was already near perfect agreement
-     * and the denominator was what bound it.
-     *
-     * That is the right behaviour rather than a flaw: a structure drifting with a strong global
-     * current has not demonstrated anything about itself. But it does mean the rung is hardest to
-     * pass exactly when a common current exists, which is worth knowing before reading a result.
-     */
+  it('exceeds 1 when a group agrees more than a same-sized group beside it', () => {
+    // The case the rung is for, with size held fixed so only agreement can move the number.
     const g = gauss(99)
-    const run = (worldDrift: number): number => {
-      let sum = 0
-      const trials = 2000
-      for (let t = 0; t < trials; t++) {
-        const world: [number, number][] = Array.from({ length: 40 }, () => [g() + worldDrift, g()])
-        const struct: [number, number][] = Array.from({ length: 6 }, () => [g() * 0.04 + 3, g() * 0.04])
-        sum += aligned(struct) / Math.max(1e-6, aligned(world))
-      }
-      return sum / trials
+    let sum = 0
+    const trials = 2000
+    for (let t = 0; t < trials; t++) {
+      const struct: [number, number][] = Array.from({ length: 6 }, () => [g() * 0.04 + 3, g() * 0.04])
+      const rivals: [number, number][] = Array.from({ length: 6 }, () => [g() + 0.3, g()])
+      sum += aligned(struct) / aligned(rivals)
     }
-    // a strong current leaves little headroom, and the rung still clears 1
-    expect(run(1.5)).toBeGreaterThan(1.2)
-    // a weak one leaves a great deal, which is where coordination is most visible
-    expect(run(0.2)).toBeGreaterThan(3)
-    expect(run(0.2)).toBeGreaterThan(run(1.5))
+    expect(sum / trials).toBeGreaterThan(1.5)
   })
 })

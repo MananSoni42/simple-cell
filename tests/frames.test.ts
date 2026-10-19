@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { initFromSeed } from '../src/core/params'
+import { applyFoodLevel, initFromSeed } from '../src/core/params'
 import { World } from '../src/core/world'
 import { allocFrame, frameState, layoutOf, worldState, writeFrame } from '../src/sim/frames'
 
@@ -11,7 +11,7 @@ describe('published frames', () => {
      * proves it can populate itself. A body now has to eat its way over an activation barrier, so
      * 300 ticks of a fresh world yields about four organisms where this once assumed a dozen.
      */
-    const w = new World({ ...initFromSeed(3, 2), inflow: true, n_start: 24 })
+    const w = new World(applyFoodLevel({ ...initFromSeed(3, 2), inflow: true, n_start: 24, n_brain: 40, foodLevel: 'abundant' }))
     for (let t = 0; t < 300; t++) w.step()
     const layout = layoutOf(w)
     const f = allocFrame(layout)

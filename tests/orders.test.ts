@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { MAX_ORDER, OrderTracker } from '../src/core/orders'
-import { type Init, initFromSeed } from '../src/core/params'
+import { type Init, applyFoodLevel, initFromSeed } from '../src/core/params'
 import { World } from '../src/core/world'
 
 /** Two organisms whose limbs are bonded, plus a third standing alone. */
@@ -87,7 +87,13 @@ describe('n-order survival', () => {
   })
 
   it('survives a long live world and never reports more objects than organisms', () => {
-    const w = new World({ ...initFromSeed(3, 2), n_start: 6, T_spawn: 40 })
+    /*
+     * Seeded with a real population. `T_spawn` used to top this up every 40 ticks and no longer
+     * does anything — bodies come from loose brains crossing an activation barrier now — so a world
+     * seeded with six organisms ended the run with one, and a test about counting structures had
+     * nothing to count.
+     */
+    const w = new World(applyFoodLevel({ ...initFromSeed(3, 2), n_start: 24, foodLevel: 'abundant' }))
     for (let t = 0; t < 2000; t++) w.step()
     const s = w.orders.stats(w)
     let objects = 0

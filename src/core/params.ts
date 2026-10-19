@@ -990,7 +990,36 @@ export function applyFoodLevel(init: Init, L: Laws = LAWS): Init {
   // one particle per T_food ticks, batched when a single particle a tick is not enough
   init.food_batch = Math.max(1, Math.round(want))
   init.T_food = Math.max(1, Math.round(init.food_batch / Math.max(1e-6, want)))
+  init.max_food = foodCapFor(init)
   return init
+}
+
+/**
+ * How many food slots a world actually needs, from its own arrival rate and spoilage.
+ *
+ * It used to be `300 * area`, a per-tile constant, and **about 10% of it was ever used** — measured
+ * at 11.0%, 9.8%, 9.9% and 9.8% across scales 1, 2, 4 and 8. That is nine tenths of the largest
+ * allocation in the program sitting idle, which did not matter at 1x and decides whether a large
+ * world fits in memory at all: at 128x the old rule asks for **4.9 million food slots**, and the
+ * arrays behind them are most of a two-gigabyte world.
+ *
+ * Standing food is governed by arrival rate times spoilage life, which predicted the measured peak
+ * within a factor of 1.6 at every scale (33 against 18, 118 against 67, 473 against 200, 1887
+ * against 1200). The overshoot is food accumulating where nothing eats it, so the headroom below is
+ * generous rather than tight — running out of food slots does not fail loudly, it quietly caps the
+ * sun, and `lightWasted` is the only trace.
+ *
+ * Food that never spoils is the case with no natural bound, so it keeps the old per-area rule.
+ */
+export function foodCapFor(init: Init, L: Laws = LAWS): number {
+  const area = (init.size / L.SIZE) ** 2
+  const perArea = Math.round(300 * area)
+  if (init.food_life <= 0) return perArea
+  const rate = init.food_batch / Math.max(1, init.T_food)
+  const standing = rate * init.food_life
+  // 4x headroom over the predicted standing level, a floor so small worlds are not starved of
+  // slots, and the old per-area figure as a ceiling so this can only ever ask for less
+  return Math.max(64, Math.min(perArea, Math.ceil(standing * 4)))
 }
 
 /** Food particles a tick this world is set to deliver, before the regime scales it. */

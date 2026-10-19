@@ -309,6 +309,51 @@ textarea { width: 100%; height: 110px; margin-bottom: 12px; }
 .explain p { color: var(--ink-2); font-size: 12px; line-height: 1.65; }
 .explain code { color: var(--ink-3); }
 .ex-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px 30px; margin-bottom: 22px; }
+
+/*
+ * Explainer tiles. Closed, a tile is a diagram and one line saying what the thing *is*; open, it is
+ * the full detail. The page used to lay seven fully-expanded sections side by side, so the reader
+ * met five thousand words about the ladder before learning what a body was.
+ *
+ * Native `<details>`, so this needs no JavaScript and stays keyboard-reachable and printable.
+ */
+.ex-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 14px; }
+.ex-tile {
+  border: 1px solid var(--line, #1b2230);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+  overflow: hidden;
+  transition: border-color 140ms ease;
+}
+.ex-tile:hover { border-color: rgba(255, 255, 255, 0.16); }
+/* an open tile spans the grid: the detail is prose and wants one column, not a third of one */
+.ex-tile[open] { grid-column: 1 / -1; background: rgba(255, 255, 255, 0.03); }
+.ex-tile > summary {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  padding: 14px 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.ex-tile > summary::-webkit-details-marker { display: none; }
+.ex-tile > summary::after {
+  content: '+';
+  margin-left: auto;
+  color: var(--ink-3, #6b7589);
+  font-size: 15px;
+  line-height: 1;
+}
+.ex-tile[open] > summary::after { content: '–'; }
+.ex-tile-art { flex: 0 0 88px; max-width: 88px; opacity: 0.9; }
+.ex-tile-art svg { width: 100%; height: auto; display: block; }
+.ex-tile-head h2 { margin: 0 0 3px; font-size: 13px; }
+.ex-tile-blurb { margin: 0; color: var(--ink-3, #6b7589); font-size: 11.5px; line-height: 1.5; }
+/* the diagram is shown full size once opened, where it has room to be read */
+.ex-tile[open] .ex-tile-art { flex-basis: 150px; max-width: 150px; }
+.ex-tile-body { padding: 0 16px 16px; max-width: 78ch; }
+.ex-tile-body > :first-child { margin-top: 0; }
+
 .ex-svg {
   width: 100%; height: auto; background: #0a0d14; border: 1px solid var(--line);
   border-radius: var(--r); margin-bottom: 10px;

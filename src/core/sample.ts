@@ -162,6 +162,14 @@ function drawElements(rng: Rng, spread: number): (Partial<Element> | undefined)[
       // valence is a count, so it steps rather than scales; 1 admits only pairs, 6 admits a sheet
       valence: Math.max(1, Math.min(8, Math.round(4 * jitter(1)))),
       bondStrength: Math.round(jitter(1) * 100) / 100,
+      /*
+       * What a brain pays to recruit this kind as a limb. Newly worth varying: it used to be a cost
+       * charged symmetrically when two particles bonded, and it now also gates *assembly* — a brain
+       * pays this out of its own reserve for each limb it takes on, and a body that cannot afford
+       * another limb does not get one. So a kind being expensive to recruit is a real property of
+       * the matter, and one a world might be built around.
+       */
+      bondCost: Math.round(jitter(LAWS.E_bond) * 1000) / 1000,
       decay: rng.next() < spread / 2 ? Math.round(jitter(0.004) * 10000) / 10000 : 0,
     }
   }

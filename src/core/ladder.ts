@@ -75,6 +75,8 @@ export const LEVELS = ['Viable', 'Reactive', 'Discriminative', 'Adaptive', 'Cumu
  */
 const AGREE_OVER_WORLD = 1.0
 
+
+
 /** A structure has to be this big, and this old in ticks, before either collective rung reports. */
 const STRUCT_MIN_ORDER = 3
 const STRUCT_MIN_AGE = 500
@@ -178,6 +180,8 @@ export class LadderTracker {
    * the guard wants 500. The capability was demonstrated and then forgotten.
    */
   private sTravel: number[] = []
+  /** What the agreement statistic read, kept for the readout only — the rung does not score it. */
+  private sAgree: number[] = []
   private sHold: number[] = []
   /** When each still-living lineage was first seen, so "outlives its members" is measurable. */
   private founded = new Map<number, number>()
@@ -190,6 +194,7 @@ export class LadderTracker {
     this.sJoined = []
     this.sLimbs = []
     this.sTravel = []
+    this.sAgree = []
     this.sHold = []
     this.founded.clear()
     this.met = []
@@ -245,6 +250,8 @@ export class LadderTracker {
     const st = o.oldest
     let travelMult = 0
     let holdCoasts = 0
+    /** What the agreement statistic actually read, reported but never scored. See below. */
+    let soloMultipleRaw = 0
     if (st && st.order >= STRUCT_MIN_ORDER) {
       /*
        * **The structure's own members, before they joined.** A within-organism null, because every
@@ -263,14 +270,78 @@ export class LadderTracker {
        * if something is coordinating them. See `align` in orders.ts for why no population baseline
        * can do this job in a world that bonds this readily.
        */
-      if (st.age >= STRUCT_MIN_AGE && st.alignN >= STRUCT_MIN_ORDER && st.alignPop > 1e-6) {
-        // the structure's agreement above chance, against the world's: 1.0 when they agree alike
-        travelMult = st.align / st.alignPop
-      }
+      /*
+       * Both sides are now **standard deviations above the null for a group of that size**, so they
+       * are comparable despite a structure having five members and a population forty. Dividing
+       * controls for a shared current: every organism reading the same food gradient raises both.
+       *
+       * The denominator floor is `1` rather than something near zero, and that is the guard the
+       * previous version lacked. A population that is itself agreeing no better than chance gives a
+       * denominator of noise, and a ratio against noise is how a null fails: a structure at a
+       * perfectly ordinary 1.5 sigma over a population at 0.05 sigma reads 30.
+       */
+      /*
+       * The structure's members against **the same number of non-members**, which is what makes
+       * this comparison mean anything: `R` depends sharply on how many commands go into it, so both
+       * sides are computed on exactly the structure's own size. A ratio above 1 means the members
+       * agree better than an arbitrary group of their neighbours does, which is the claim.
+       *
+       * The denominator floor only guards against dividing by a control that found no agreement at
+       * all. It is not a tuned threshold: `AGREE_OVER_WORLD` stays at 1.0, which is the null by
+       * construction, because a structure agreeing exactly as well as a same-sized group of its
+       * neighbours has demonstrated nothing.
+       */
+      /*
+       * **This rung is deliberately not scored.** Eight controls were tried and every one of them
+       * failed, each in a different way, and each failure initially looked like the rung working.
+       * Shipping the least-obviously-broken of them would put a number on the Discoveries page that
+       * nobody could trust, so it reports what it sees and never passes.
+       *
+       * What was tried, against 30 unaided worlds that must not trip it:
+       *
+       * 1. **organisms that never joined** — sticky for life, so in a world that bonds well the
+       *    baseline empties and the rung silently reads 0. A structure of order 41 travelling at
+       *    0.77 scored zero.
+       * 2. **organisms holding no bond** — fine only while bodies arrived pre-assembled. Once a
+       *    brain builds its body from loose matter it nearly always holds a bond, so the baseline
+       *    collapsed to brains in empty space: **3.81x** on an unaided world.
+       * 3. **not in a compound, matched on body size** — fixed a real confound (13 of 27 members had
+       *    four limbs against a solo spread of 4/2/3/4) and still read **2.77x**, because a solo
+       *    brain drags inert matter while a compound member's partners push. Anchoring.
+       * 4. **the members' own speed before they joined** — the strongest null in principle and
+       *    unavailable in practice: **median join age 19 ticks, 93% join before age 100, zero of 60
+       *    organisms had a usable baseline.** A within-organism null needs a solitary phase and this
+       *    world has none.
+       * 5. **command agreement rescaled between chance and 1, over the population** — the rescale
+       *    leaves a large positive bias at small N, so a five-member structure beats a forty-member
+       *    population by construction: **8 of 30, worst 2.13**.
+       * 6. **the same, standardised against a Monte-Carlo null per N** — removed that bias and
+       *    introduced its mirror, since a z-score grows with sqrt(N). A synthetically
+       *    well-coordinated structure read **0.39**, below the bar; the null then "passed" only
+       *    because the rung had become nearly unpassable.
+       * 7. **raw agreement against the same number of random non-members** — holding N fixed exposed
+       *    a location confound it had been masking: bonded members sit on top of each other and read
+       *    one gradient, so they agree for reasons unrelated to each other. **9 of 30, worst 2.43**.
+       * 8. **the same, against the n nearest non-members** — matched on size *and* place, and the
+       *    single nearby group is itself noisy, so the ratio blows up when its agreement is near
+       *    zero: **8 of 30, worst 13.09**.
+       *
+       * The pattern across all eight is that this world offers no population of organisms
+       * comparable to a structure's members: they are selected for being bonded, which correlates
+       * with size, anchoring, co-location and age all at once. A usable version of this rung
+       * probably needs a *physical* counterfactual — re-simulating the same members with their bonds
+       * removed for a few ticks and comparing — which is a real piece of work rather than another
+       * choice of baseline, and is recorded in the plan.
+       */
+      travelMult = 0
+      // kept visible in the readout so the rung still reports what it found, and so the gate it
+      // shares with `Holds together` stays in one place
+      if (st.age >= STRUCT_MIN_AGE && st.alignN >= STRUCT_MIN_ORDER) soloMultipleRaw = st.align
       const coast = this.medianCoast()
       if (coast > 1e-9) holdCoasts = st.age / coast
     }
     push(this.sTravel, travelMult)
+    push(this.sAgree, soloMultipleRaw)
     push(this.sHold, holdCoasts)
   }
 
@@ -525,15 +596,16 @@ export class LadderTracker {
     add(
       6,
       'Moves together',
-      `a structure of order ${STRUCT_MIN_ORDER}+ whose members pull together better than the world does`,
+      `a structure of order ${STRUCT_MIN_ORDER}+ pulling together — currently unscored, no null survives`,
       travelRatio,
-      soloMultiple > 0
-        ? `${soloMultiple.toFixed(2)}× the world's own agreement`
-        : !struct
-          ? 'none'
-          : struct.order < STRUCT_MIN_ORDER
-            ? `only order ${struct.order}`
-            : `order ${struct.order}, none held long enough to tell`,
+      (() => {
+        const agree = medianOfQualifying(this.sAgree)
+        if (!struct) return 'none'
+        if (struct.order < STRUCT_MIN_ORDER) return `only order ${struct.order}`
+        if (agree <= 0) return `order ${struct.order}, none held long enough to tell`
+        // reported, not scored: see the note where travelMult is set
+        return `order ${struct.order}, members agree ${agree.toFixed(2)} — not scored, no trustworthy null yet`
+      })(),
     )
     add(
       6,

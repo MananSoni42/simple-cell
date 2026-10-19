@@ -263,7 +263,7 @@ export function mountSetup(
     const beyondChips = new Slider({
       label: 'size beyond the chips',
       min: 1,
-      max: 32,
+      max: 128,
       step: 1,
       value: init.scale,
       curve: 'log',
@@ -1059,19 +1059,33 @@ export function mountSetup(
         },
       }).el,
     )
-    advanced(arrive, 'how new organisms keep arriving', [
+    /*
+     * Where organisms come from. The dial this replaced — "a new one every N ticks" — does nothing
+     * now, and it was worse than useless: it created a whole body *and the energy in it* out of
+     * nothing, which was 41% to 67% of all energy entering two sample worlds. Nothing is issued any
+     * more, so the control that matters is how hard it is for a body to start itself.
+     */
+    advanced(arrive, 'where organisms come from', [
+      lawSlider('it takes this much to start a body', 'E_activate', 5, 120, 5, (v) => {
+        const rep = (init.laws?.E_repro as number | undefined) ?? LAWS.E_repro
+        return v < rep
+          ? `${Math.round(v)} energy, below the ${Math.round(rep)} it takes to breed — bodies will start spontaneously faster than they reproduce, and may fill every slot`
+          : `${Math.round(v)} energy, against ${Math.round(rep)} to breed — starting from scratch is the rare route and descent is the common one`
+      }),
       new Slider({
-        label: 'a new one every',
-        min: 5,
-        max: 2000,
-        step: 5,
-        value: init.T_spawn,
-        curve: 'log',
-        format: (v) => `${Math.round(v)}t`,
-        hint: () => 'spawned organisms get random brain weights — nothing about them is designed',
+        label: 'kinds are re-drawn',
+        min: 0,
+        max: 1,
+        step: 0.05,
+        value: init.laws?.redraw_kind ?? LAWS.redraw_kind,
+        format: (v) => (v === 0 ? 'never' : v === 1 ? 'always' : `${Math.round(v * 100)}%`),
+        hint: (v) =>
+          v === 0
+            ? 'a particle keeps its kind for ever, so the mix a world starts with is the mix it has'
+            : `a particle returning to the loose pool is re-drawn as a random kind ${Math.round(v * 100)}% of the time — the only thing this world creates, and it creates identity rather than matter`,
         onChange: (v) => {
-          init.T_spawn = v
-          sync()
+          init.laws = { ...init.laws, redraw_kind: Math.round(v * 100) / 100 }
+          refresh()
         },
       }).el,
     ])
@@ -1743,10 +1757,26 @@ export function mountSetup(
     new Chips<string>({
       label: 'how big',
       value: String(init.scale),
-      options: [1, 2, 4, 8].map((n) => ({
+      /*
+       * Measured costs, not guesses. Each of these was allocated and stepped: 0.3ms a tick at 1x,
+       * 12.8 at 16x, 68 at 32x, 296 at 64x and 2,283 at 128x, with snapshots of 0.2MB up to 711MB.
+       * The numbers are in the hints because the choice is a real commitment past 16x — a 128x world
+       * runs at 0.4 ticks a second, so ten thousand ticks is about seven hours, and a checkpoint of
+       * it is most of a gigabyte.
+       */
+      options: [1, 2, 4, 8, 16, 32, 64, 128].map((n) => ({
         value: String(n),
         label: `${n}×`,
-        hint: `${300 * n} units across${n > 4 ? ' — placing things by hand needs a zoom in' : ''}`,
+        hint:
+          n <= 4
+            ? `${300 * n} units across`
+            : n <= 16
+              ? `${300 * n} units across — placing things by hand needs a zoom in`
+              : n <= 32
+                ? `${300 * n} units across, ~15 ticks a second. Big enough that distance is a real obstacle`
+                : n === 64
+                  ? `${300 * n} units across, ~3 ticks a second. A long run is hours`
+                  : `${300 * n} units across, ~0.4 ticks a second and a 700MB checkpoint. For watching one world, not for searching`,
       })),
       onChange: (v) => reseed(init.seed, Number(v)),
     }).el,

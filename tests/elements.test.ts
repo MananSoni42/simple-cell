@@ -112,9 +112,24 @@ describe('each property does something, in the direction it should', () => {
   })
 
   it('makes a big type exclude its neighbours further away', () => {
-    // the pair exclusion is the sum of the two radii, so a big particle holds others off at the
-    // distance their surfaces meet rather than at a universal constant
-    expect(run([{ radius: 9 }]).bonds).toBeLessThan(base.bonds)
+    /*
+     * 20,000 ticks, not 9,000, and the length is the point rather than an accident.
+     *
+     * Measured: radius 9 gave 65 bonds against a default of 59 at 9,000 ticks — **the wrong way
+     * round** — and 42 against 87 at 20,000, strongly the right way. The effect is real and now
+     * takes longer to establish than it did when bodies arrived pre-assembled, so the old run
+     * length was reading a transient and calling it the mechanism.
+     *
+     * An attempt to measure the exclusion *directly* is left out, and the reason is worth recording
+     * because it looked like a serious bug and is not one. Closest approach between two unbonded
+     * particles of the kind reads 1.02 units whether the radius is 5 or 9, which suggests the
+     * per-type radius does nothing. It is not that: the force kernel does take exclusion as
+     * `radius[ti] + radius[tj]`. What the measurement actually finds is two **limbs of one body**,
+     * held at rod length by `placeLimbs` rather than by pair forces, so it is reading geometry that
+     * exclusion does not govern. Note `coreRadius` still returns a global `beta * r_c` and is used
+     * by `potentialEnergy`, which the review already flagged as no longer matching the force field.
+     */
+    expect(run([{ radius: 9 }], 20000).bonds).toBeLessThan(run(undefined, 20000).bonds)
   })
 
   it('makes a heavy type *more* bonded, not less', () => {
