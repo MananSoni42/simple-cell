@@ -152,15 +152,52 @@ worlds:
    anti-correlated across sampled worlds — one world read `Lasts` 1.92 with `Feeds` 0.49, another
    `Feeds` 2.05 with `Lasts` 0.56. **No world passed both.**
 
-The common cause is that **both tier-0 rungs are defined against the birth endowment**, and the
-birth endowment no longer exists in the form they assume. `Feeds` is "harvested over endowment" and
-`Lasts` is "lifespan over what coasting on the endowment allows" — but an organism now activates
-holding almost nothing, so both denominators went to approximately zero and neither rung means what
-it says any more.
+### Correction: tier 0 is not broken. Tier 1 is the wall
 
-**Tier 0 gates `level` for the whole ladder**, so until it is recalibrated every world scores −1
-however good it is, and the search would rank on sub-rung scores and save twenty worlds that all
-look identical on the page. That is why this run has not been launched.
+I concluded from eight worlds that both tier-0 rungs were uncalibrated, because none passed both
+`Feeds` and `Lasts`. **That was an eight-world conclusion and it was wrong.** At sixty worlds and
+20,000 ticks:
+
+| rung | % met | median | max |
+|---|---|---|---|
+| Persists (0) | 65.0% | 1.00 | 1.00 |
+| Feeds (0) | 35.0% | 0.41 | 7.30 |
+| Lasts (0) | 23.3% | 0.33 | 4.18 |
+| **Taxis (1)** | **0.0%** | 0.00 | **0.21** |
+| Lingers (2) | 3.3% | 0.00 | 2.01 |
+| Improves (3) | 1.7% | 0.00 | 1.66 |
+| Budgets (3) | 0.0% | 0.00 | 0.22 |
+| Holds together (6) | 10.0% | 0.01 | 8.33 |
+
+**Six of sixty pass all of tier 0.** It is hard, not broken, and recalibrating it would have been a
+fix to a non-problem.
+
+**`Taxis` is 0 of 60 with a maximum of 0.21** — a fifth of the way, not a near miss. So starting
+`level` at tier 1 buys nothing either: the wall is tier 1, and it is not a threshold problem.
+
+### Why tier 1 is unreachable, and what that implies
+
+`Taxis` asks an organism to steer toward food beyond a time-shuffled null. Three mechanisms could
+produce that, and all three are currently closed:
+
+- **random weights at activation** — a random linear policy has no reason to correlate with a food
+  gradient, and that is where every new organism starts
+- **learning** — every learner measures *below* `none`, two significantly
+- **selection through budding** — per-life fitness has **CV 4.22**, needing ~28,000 lives per genome
+  against a budget of ~1,800 in total
+
+**There is no mechanism in this world by which taxis could arise.** The ladder above tier 0 is
+measuring something the world cannot yet produce, so more compute measures the same zero more
+precisely. The work that unblocks it is noise reduction in selection, not a bigger search:
+
+1. default objective to `per_tick` — **CV 1.07 against 4.22**, a 16-fold reduction in the samples a
+   comparison needs, and free
+2. **re-evaluation**: a genome must survive *k* lives before it is trusted, buying a √k reduction.
+   The only lever that attacks the wall directly
+3. re-measure the learners — they should move from harmful to at worst neutral, and if any becomes
+   positive it is the first climbing mechanism this project has had
+
+Until then a search would be legitimate but would produce worlds that differ only in viability.
 
 ### Three gates before committing the full budget, on a 2% pilot
 
