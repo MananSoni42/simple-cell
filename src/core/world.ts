@@ -2222,8 +2222,22 @@ export class World {
      * Only with templating on, so a world that does not replicate keeps immortal matter and every
      * existing `massByType` invariant.
      */
-    if (this.init.templating) {
-      for (let i = 0; i < this.nIntr; i++) {
+    {
+      /*
+       * **Any loose particle that runs dry dies, brain or matter, templating or not.**
+       *
+       * This was gated on `templating` and stopped at `nIntr`, so in most worlds no slot ever freed
+       * and in *every* world a brain slot never did. That made both arrival dials dead: measured,
+       * `brainShare` across a sixteenfold range gave bit-identical outcomes — 50 loose brains, 10
+       * organisms, 56 births at 0.25 and at 4 — because `arriveOne` needs a slot that is not alive
+       * and there has never been one. A brain pool fixed at `n_brain` from tick 0 to the end.
+       *
+       * Unconditional now, and running to `nMatter` so brains are included. It is also the rule the
+       * rest of the model already follows: a thing that cannot pay for itself stops existing, and
+       * its slot returns to the pool for something else to arrive into. Matter is still conserved —
+       * the slot is the matter, and nothing is created.
+       */
+      for (let i = 0; i < this.nMatter; i++) {
         if (!this.alive[i] || this.owner[i] !== -1 || this.isSpore[i]) continue
         if (this.energy[i] > 1e-12) continue
         // the residue is **burned**, not dropped. `totalEnergy` counts only live particles, so
