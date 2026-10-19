@@ -77,6 +77,8 @@ function learnConfig(src: unknown, base: LearnConfig): LearnConfig {
     sigma: num(r.sigma, base.sigma, 0, 5),
     batch: Math.round(num(r.batch, base.batch, 2, 4096)),
     pool: Math.round(num(r.pool, base.pool, 2, 4096)),
+    // lives a genome is averaged over before it may displace another: the noise-reduction lever
+    reeval: Math.round(num(r.reeval, base.reeval, 1, 64)),
     tournament: Math.round(num(r.tournament, base.tournament, 1, 64)),
     crossover: num(r.crossover, base.crossover, 0, 1),
     lr: num(r.lr, base.lr, 0, 10),

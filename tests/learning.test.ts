@@ -23,12 +23,21 @@ const stats = (over: Partial<LifeStats> = {}): LifeStats => ({
   ...over,
 })
 
+/**
+ * A synthetic completed life whose fitness is `fitness` under **either** default objective.
+ *
+ * It used to vary `children` alone, which stopped working when the default objective became
+ * `per_tick` — twenty lives differing only in children all scored the same percentile, so a test
+ * asserting the best was near the top of its cohort read 0.5. Varying `harvested` at a fixed age
+ * makes `per_tick` track `fitness` too, so these tests measure the pool's behaviour rather than
+ * which scalar happens to be selected.
+ */
 function life(rng: Rng, id: number, fitness: number): LifeRecord {
   return {
     id,
     wBrain: Float64Array.from({ length: N_GENE_BRAIN }, () => rng.gauss()),
     wLimb: Float64Array.from({ length: N_WLIMB }, () => rng.gauss()),
-    stats: stats({ children: fitness }),
+    stats: stats({ children: fitness, age: 100, harvested: fitness * 10 }),
     diedAt: 1000,
   }
 }
@@ -53,9 +62,25 @@ describe('fitness is a stated choice', () => {
   })
 
   it('names offspring as the one scalar the world was already counting', () => {
+    // still the only non-invented measure: the world counts children for its own reasons
     expect(FITNESS.filter((f) => !f.invented).map((f) => f.key)).toEqual(['offspring'])
-    expect(keysOf(LEARN_DEFAULTS.fitness)).toEqual(['offspring'])
-    expect(isImplicitOnly(LEARN_DEFAULTS.fitness)).toBe(true)
+  })
+
+  it('defaults to per_tick, because offspring is four times noisier', () => {
+    /*
+     * The default was `offspring` for all 260,640 v1 worlds, and it is the worst available choice on
+     * the axis that decides whether selection can work. Measured over 2,899 lives of one fixed
+     * genome: `offspring` CV **4.22** (≈28,000 lives per genome to detect a 10% effect) against
+     * `per_tick` CV **1.07** (≈1,800) — and the whole budget is about 1,800 lives shared across
+     * every genome. Selection that noisy is selection on which genome got lucky, and it measured
+     * worse than no learner at all for every algorithm tried.
+     *
+     * So the default is `per_tick`, which is also the least gameable of the cheap ones: it cannot be
+     * had by living longer, growing more limbs, or drifting into a patch, since all three raise the
+     * denominator too. `offspring` stays selectable as v1's comparison.
+     */
+    expect(keysOf(LEARN_DEFAULTS.fitness)).toEqual(['per_tick'])
+    expect(isImplicitOnly(LEARN_DEFAULTS.fitness)).toBe(false)
   })
 })
 
@@ -90,17 +115,37 @@ describe('the learner seam', () => {
     expect(g!.wBrain.every((v) => Number.isFinite(v))).toBe(true)
   })
 
-  it('a GA pool keeps the best and drops the worst', () => {
-    const ga = makeLearner({ ...LEARN_DEFAULTS, algo: 'ga', warmup: 0, pool: 4 }, 5)
+  it('a GA pool protects what it has measured and discards what it has not', () => {
+    /*
+     * The rule changed with re-evaluation, and the change is the point.
+     *
+     * It used to be "a newcomer better than the worst held gets in, a worse one does not" — which
+     * trusts a **single life** to rank a genome, at CV 1.07 on the best objective and 4.22 on the
+     * one every learner used. A pool that does that fills with whichever genome got lucky and
+     * destroys the diversity random initialisation supplied; measured, every algorithm then scored
+     * *worse than no learner at all*.
+     *
+     * Now an entry seen fewer than `reeval` times is **provisional**: its number is not trustworthy,
+     * so it gives way regardless of what that number says. Only an entry whose estimate is averaged
+     * over `reeval` lives is protected, and then only something better displaces it.
+     */
+    const ga = makeLearner({ ...LEARN_DEFAULTS, algo: 'ga', warmup: 0, pool: 2, reeval: 3 }, 5)
     const rng = new Rng(12)
-    for (const f of [10, 9, 8, 7, 6, 5]) ga.observe(life(rng, 0, f), 1000)
-    expect(ga.status().held).toBe(4)
-    // a newcomer better than the worst held gets in; one worse than all of them does not
+    // one genome, observed three times: an established entry with a high mean
+    for (let k = 0; k < 3; k++) ga.observe(life(rng, 7, 10), 1000)
+    // a second genome, observed once: provisional, however good it looks
+    ga.observe(life(rng, 9, 100), 1000)
+    expect(ga.status().held).toBe(2)
+
+    // a newcomer worse than both takes the *provisional* slot, because that slot is not evidence
     const before = ga.status().updates
-    ga.observe(life(rng, 0, 1), 1000)
-    expect(ga.status().updates).toBe(before)
-    ga.observe(life(rng, 0, 100), 1000)
-    expect(ga.status().updates).toBe(before + 1)
+    ga.observe(life(rng, 11, 1), 1000)
+    expect(ga.status().updates, 'a provisional slot gives way').toBe(before + 1)
+
+    // and another life of the established genome updates it in place rather than competing
+    const held = ga.status().held
+    ga.observe(life(rng, 7, 10), 1000)
+    expect(ga.status().held, 'a repeat observation is evidence, not a competitor').toBe(held)
   })
 
   it('a GA drops entries whose fitness came from a world that has since moved on', () => {
@@ -352,7 +397,17 @@ describe('every learner, against a target it should be able to find', () => {
         const g = learner.genomeForSpawn(1000 + k)!
         let err = 0
         for (let i = 0; i < g.wBrain.length; i++) err += (g.wBrain[i] - TARGET) ** 2
-        learner.observe({ id: g.id, wBrain: g.wBrain, wLimb: g.wLimb, stats: stats({ children: 1000 / (1 + err) }), diedAt: 1000 + k }, 1000 + k)
+        /*
+         * The signal goes through the scalar the **default objective actually reads**, which is
+         * `per_tick` now rather than `children`. Feeding it through `children` alone made every
+         * synthetic life score identically, so the gradient under test was zero and the method
+         * looked broken — a test measuring its own setup rather than the algorithm.
+         */
+        const good = 1000 / (1 + err)
+        learner.observe(
+          { id: g.id, wBrain: g.wBrain, wLimb: g.wLimb, stats: stats({ children: good, age: 100, harvested: good * 100 }), diedAt: 1000 + k },
+          1000 + k,
+        )
       }
       expect(dist(), `${algo} should close on the target`).toBeLessThan(before)
     }

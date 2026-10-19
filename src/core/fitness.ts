@@ -89,9 +89,9 @@ export const N_SCALARS = FITNESS.length
  * would corrupt its own conclusions rather than merely weaken them. This is the M5 fix.
  */
 export const OBJECTIVES: { key: string; keys: FitnessKey[]; combine: Combiner; blurb: string }[] = [
-  { key: 'offspring', keys: ['offspring'], combine: 'geometric', blurb: "children left behind — v1's objective, kept as the comparison" },
+  { key: 'per_tick', keys: ['per_tick'], combine: 'geometric', blurb: 'energy a tick alive — the default, and the least noisy by a factor of four' },
+  { key: 'offspring', keys: ['offspring'], combine: 'geometric', blurb: "children left behind — v1's objective, kept as the comparison. CV 4.22, so mostly noise" },
   { key: 'net', keys: ['net'], combine: 'geometric', blurb: 'energy taken in less everything spent: the hardest to game' },
-  { key: 'per_tick', keys: ['per_tick'], combine: 'geometric', blurb: 'energy a tick alive — is it good at living' },
   { key: 'lifespan', keys: ['lifespan'], combine: 'geometric', blurb: 'ticks lived, which rewards caution and should expose it' },
   { key: 'efficiency', keys: ['efficiency'], combine: 'geometric', blurb: 'energy per unit travelled: foraging skill rather than throughput' },
   { key: 'together', keys: ['together'], combine: 'geometric', blurb: 'time joined to others, weighted by size — the only social objective' },
@@ -196,7 +196,29 @@ export function specFromKeys(keys: FitnessKey[], combine: Combiner = 'geometric'
   return { weights, combine, window }
 }
 
-export const DEFAULT_SPEC = (): FitnessSpec => specFromKeys(['offspring'], 'geometric')
+/**
+ * The default objective: **energy taken in per tick alive**, not offspring count.
+ *
+ * Offspring count was the default for every learner in all 260,640 v1 worlds, and it is the worst
+ * available choice on the one axis that decides whether selection can work at all. Measured over
+ * 2,899 lives of a single fixed genome:
+ *
+ * | objective | CV | lives per genome for a 10% effect |
+ * |---|---|---|
+ * | `offspring` | **4.22** | ~28,000 |
+ * | `lifespan` | 2.14 | ~7,200 |
+ * | `net` | 2.09 | ~6,900 |
+ * | **`per_tick`** | **1.07** | **~1,800** |
+ *
+ * The budget is about 1,800 lives *in total*, shared across every genome. So `offspring` is short by
+ * four orders of magnitude while `per_tick` is merely short — and selection on an objective that
+ * noisy is not weak selection, it is selection on which genome got lucky, which measured *worse than
+ * no learner at all* on every algorithm tried.
+ *
+ * `per_tick` is also the least gameable of the cheap ones: it cannot be had by living longer, by
+ * growing more limbs, or by drifting into a patch, because all three raise the denominator too.
+ */
+export const DEFAULT_SPEC = (): FitnessSpec => specFromKeys(['per_tick'], 'geometric')
 
 export function keysOf(spec: FitnessSpec): FitnessKey[] {
   return KEYS.filter((_, i) => (spec.weights[i] ?? 0) > 0)

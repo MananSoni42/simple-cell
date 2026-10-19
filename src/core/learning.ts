@@ -155,6 +155,20 @@ export interface LearnConfig {
   gamma: number
   lambda: number
   /**
+   * How many lives a genome must be observed over before it is trusted to displace another.
+   *
+   * **The only lever that attacks the evaluation-noise wall directly.** One life is an enormously
+   * noisy estimate of a genome — per-life fitness runs at CV 1.07 on the best objective and 4.22 on
+   * the one every learner used — so a pool that inserts on a single observation fills with whichever
+   * genome got lucky, destroys the diversity random initialisation supplied, and measures *worse
+   * than no learner at all*. Averaging over `reeval` lives cuts the standard error by its square
+   * root, which is the only thing available short of more lives.
+   *
+   * A genome is recognised across lives by its `learnId`, which a budded child inherits from its
+   * parent — so a genome accumulates evidence from its whole lineage rather than from one organism.
+   */
+  reeval: number
+  /**
    * Whether a child inherits what its parent *learned* or what it was *born with*.
    *
    * A real and well-studied distinction, not an implementation detail: Lamarckian inheritance is
@@ -206,6 +220,9 @@ export const LEARN_DEFAULTS: LearnConfig = {
    */
   gamma: 0.99,
   lambda: 0.97,
+  // four lives halves the standard error of a genome's estimate; eight would quarter it, at the
+  // cost of a pool that turns over four times more slowly
+  reeval: 4,
   inherit: 'learned',
   cells: 6,
 }
@@ -573,6 +590,10 @@ class Ga extends Learner {
   private born: Float64Array
   /** Raw scalars per pool entry, so changing what counts re-scores the pool instead of voiding it. */
   private raw: Float64Array
+  /** The genome tag each slot holds, so another life of the same genome is recognised. */
+  private gid: Float64Array
+  /** How many lives each slot's estimate is averaged over. Below `reeval` it is provisional. */
+  private seenN: Float64Array
   private n = 0
 
   constructor(cfg: LearnConfig, seed: number) {
@@ -581,6 +602,8 @@ class Ga extends Learner {
     this.genes = new Float64Array(cap * N_GENE)
     this.fit = new Float64Array(cap).fill(-Infinity)
     this.born = new Float64Array(cap)
+    this.gid = new Float64Array(cap)
+    this.seenN = new Float64Array(cap)
     this.raw = new Float64Array(cap * N_SCALARS)
   }
 
@@ -625,6 +648,30 @@ class Ga extends Learner {
   protected score(r: LifeRecord, scalars: Float64Array, fitness: number): void {
     // every entry against the same cohort, so "better than the worst held" is a fair comparison
     this.rescore()
+    /*
+     * **Re-evaluation: another life of a genome already held updates its estimate rather than
+     * competing with it.**
+     *
+     * A genome is recognised by its `learnId`, which a budded child inherits — so a genome
+     * accumulates evidence from its whole lineage. The scalars are kept as a running mean, so an
+     * entry's fitness is the mean over every life that carried it rather than whatever one life
+     * happened to do.
+     *
+     * Without this a pool inserts on a single observation at CV 1.07 (or 4.22 on `offspring`), so
+     * it fills with whichever genome got lucky and destroys the diversity random initialisation
+     * supplied — measured *worse than no learner at all* for every algorithm tried.
+     */
+    if (r.id > 0) {
+      for (let i = 0; i < this.n; i++) {
+        if (this.gid[i] !== r.id) continue
+        const k = ++this.seenN[i]
+        const o = i * N_SCALARS
+        for (let j = 0; j < N_SCALARS; j++) this.raw[o + j] += (scalars[j] - this.raw[o + j]) / k
+        this.rescore()
+        this.updates++
+        return
+      }
+    }
     // stale entries first: fitness earned under a food regime that has since changed misleads
     const cutoff = this.tick - this.cfg.maxAge
     for (let i = 0; i < this.n; i++) {
@@ -641,27 +688,41 @@ class Ga extends Learner {
     let slot = -1
     if (this.n < this.cap) slot = this.n++
     else {
+      /*
+       * **A provisional entry is displaced before an established one.** An entry seen fewer than
+       * `reeval` times is an estimate from too few lives to trust, so it gives way first regardless
+       * of the number against its name — otherwise a lucky single observation sits in the pool
+       * holding a high fitness it has not earned, and the pool converges on noise.
+       */
       let worst = 0
-      for (let i = 1; i < this.n; i++) if (this.fit[i] < this.fit[worst]) worst = i
-      if (fitness > this.fit[worst]) slot = worst
+      const rank = (i: number): number => (this.seenN[i] >= this.cfg.reeval ? 1 : 0)
+      for (let i = 1; i < this.n; i++) {
+        if (rank(i) < rank(worst) || (rank(i) === rank(worst) && this.fit[i] < this.fit[worst])) worst = i
+      }
+      // a new single observation may only take a provisional slot, never an established one
+      if (rank(worst) === 0 || fitness > this.fit[worst]) slot = worst
     }
     if (slot < 0) return
     this.genes.set(join(r.wBrain, r.wLimb), slot * N_GENE)
     this.raw.set(scalars.subarray(0, N_SCALARS), slot * N_SCALARS)
     this.fit[slot] = fitness
     this.born[slot] = this.tick
+    this.gid[slot] = r.id
+    this.seenN[slot] = 1
     this.updates++
   }
 
   saveSize(): number {
-    return super.saveSize() + 1 + this.cap * (N_GENE + 2 + N_SCALARS)
+    // +2 per slot for `gid` and `seenN`: the accumulated evidence *is* the learning, so a rewind
+    // that dropped it would restore a world whose pool had never been re-evaluated
+    return super.saveSize() + 1 + this.cap * (N_GENE + 4 + N_SCALARS)
   }
 
   saveInto(a: Float64Array, off: number): void {
     super.saveInto(a, off)
     let o = off + super.saveSize()
     a[o++] = this.n
-    for (const arr of [this.genes, this.fit, this.born, this.raw]) {
+    for (const arr of [this.genes, this.fit, this.born, this.raw, this.gid, this.seenN]) {
       a.set(arr, o)
       o += arr.length
     }
@@ -671,7 +732,7 @@ class Ga extends Learner {
     super.loadFrom(a, off)
     let o = off + super.saveSize()
     this.n = a[o++]
-    for (const arr of [this.genes, this.fit, this.born, this.raw]) {
+    for (const arr of [this.genes, this.fit, this.born, this.raw, this.gid, this.seenN]) {
       arr.set(a.subarray(o, o + arr.length))
       o += arr.length
     }
