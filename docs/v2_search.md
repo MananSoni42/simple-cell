@@ -35,7 +35,40 @@ entirely the four dead worlds correctly staying dead. One world went 1.69 → 1.
 phase-0 score; that is selection on noise, and it is the identical error that makes the learners
 harmful (§1.3).
 
-### 1.3 Every learner is worse than no learner
+### 1.3 No learner beats no learner, and one result had to be retracted
+
+**Measured on two independent sets of 30 persisted worlds, 3 reps each — 90 paired comparisons per
+set.** Both columns matter; a result that appears in only one is not a result.
+
+| learner | set A | set B | replicates? |
+|---|---|---|---|
+| random | +0.000 ± 0.000 | +0.000 ± 0.000 | yes — a no-op by design |
+| ga | +0.010 ± 0.032 | −0.060 ± 0.040 (t −1.5) | **no, sign flips** |
+| es | +0.053 ± 0.056 | −0.023 ± 0.040 | **no, sign flips** |
+| cem | +0.070 ± 0.064 | +0.004 ± 0.045 | collapsed to zero |
+| **elites** | **+0.098 ± 0.041, t 2.4** | **−0.070 ± 0.043, t −1.6** | **no, sign flips** |
+| td | +0.075 ± 0.072 | −0.153 ± 0.093 (t −1.6) | **no, sign flips** |
+| hebb | −0.118 ± 0.069 | −0.147 ± 0.080 (t −1.8) | yes — consistently negative |
+
+**Retraction.** I reported MAP-Elites at t = 2.4 as "the first learner in this project to beat the
+control". On an independent world set it is negative at t = −1.6, and the sign test flips with it,
+24–15 becoming 18–28. The claim was wrong.
+
+The reason is in the control row, which is the one to read first: **`none` itself scored 1.282 on set
+A and 1.809 on set B**, a 41% shift that dwarfs every learner effect ever measured here — all of them
+under 0.15. So the effective sample was **one world set**, not ninety comparisons. Pseudo-replication,
+and the same error this project already has on record in the `Lineage improves` rung.
+
+`scripts/learners.ts` now runs both sets by default and prints them side by side with a
+`replicates?` column, so a single-set result cannot be presented as a finding again.
+
+**What does hold:** the earlier fixes removed the large harm. Before defaulting the objective to
+`per_tick` and adding re-evaluation, the offline arms ran −0.25 to −0.58; now nothing is worse than
+−0.15. Those fixes were real. They moved learning from harmful to **neutral**, not to useful — which
+is why learning stays OFF for every world-search phase.
+
+#### The original single-set measurement, kept as the record
+
 
 Paired against `none` on the same six seeds, 6,000 ticks:
 
