@@ -127,11 +127,47 @@ the mean: world scores are heavy-tailed, so the median is the robust statistic.
 **Phase 2 is where the factor tables come from** — 20,000 ticks is the first horizon at which the
 upper rungs are reachable at all.
 
+### The pilot ran, and it stopped the launch
+
+**A 4,000-world pilot (2% of budget, 30 minutes) found that the full run would have produced twenty
+showcase worlds all at level −1.** Recorded here because it is the result, not a preamble to one.
+
+| gate | result |
+|---|---|
+| 1 — dial coverage | **pass**: thinnest level n = 464, scaling to 23,200 at full budget |
+| 2 — no rung pinned | 3 rungs at 100% zero, all three horizon-limited rather than pinned |
+| 3 — worlds reach level ≥ 1 | **0.0%**, and `level >= 0` is also **0.0%** |
+
+Re-run at the full phase-1 horizon on 300 gate-passing worlds: `Persists` 81% met, `Feeds` 21%,
+**`Lasts` 0.0%**, everything above it at or near zero, and **not one world at level ≥ 0**.
+
+Two causes, found in sequence, and both are my own specification errors rather than facts about the
+worlds:
+
+1. **`Lasts` wants a p90 lifespan of 2,000 ticks and phase 1's horizon *is* 2,000 ticks.** You
+   cannot have a p90 lifespan of 2,000 in a 2,000-tick run, so tier 0 cannot be assessed at phase 1
+   at all, and a gate phrased as "phase-1 survivors reaching level ≥ 1" was impossible by
+   construction. At 20,000 ticks `Lasts` becomes passable — measured max 1.92.
+2. **At 20,000 ticks `Feeds` becomes the blocker instead: median 0.00.** And the two are
+   anti-correlated across sampled worlds — one world read `Lasts` 1.92 with `Feeds` 0.49, another
+   `Feeds` 2.05 with `Lasts` 0.56. **No world passed both.**
+
+The common cause is that **both tier-0 rungs are defined against the birth endowment**, and the
+birth endowment no longer exists in the form they assume. `Feeds` is "harvested over endowment" and
+`Lasts` is "lifespan over what coasting on the endowment allows" — but an organism now activates
+holding almost nothing, so both denominators went to approximately zero and neither rung means what
+it says any more.
+
+**Tier 0 gates `level` for the whole ladder**, so until it is recalibrated every world scores −1
+however good it is, and the search would rank on sub-rung scores and save twenty worlds that all
+look identical on the page. That is why this run has not been launched.
+
 ### Three gates before committing the full budget, on a 2% pilot
 
 1. every dial level holds n ≥ 30 after phase 1
 2. no rung pinned at 0 or 1 across all worlds
-3. at least 5% of phase-1 survivors reach level ≥ 1
+3. at least 5% of **phase-2** survivors reach level ≥ 1 — *phase 1 is too short to assess tier 0,
+   which is what the first pilot discovered the hard way*
 
 If gate 3 fails, the ladder is too hard for the current world and the pilot said so for 1/50th of
 the cost.

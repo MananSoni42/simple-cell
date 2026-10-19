@@ -66,7 +66,10 @@ const PHASES: Phase[] = [
     opts: { ticks: 500, maxExtend: 1, plateauFrac: 0, every: 100 },
     seeds: 1,
     budget: Number(flag('budget', '200000')),
-    keep: 60000,
+    // a gate: the cap is a budget, taken as an unbiased subsample of the survivors rather than the
+    // top of a ranking that carries no information at this horizon. 40,000 x 3 seeds is phase 1's
+    // measured 5.3 hours on 14 cores
+    keep: 40000,
     kills: 'impossible-only',
   },
   {
@@ -74,9 +77,11 @@ const PHASES: Phase[] = [
     name: 'screen',
     shape: { slots: 60, matter: 300, scale: 1 },
     opts: { ticks: 2000, maxExtend: 1.5, plateauFrac: 0.4, every: 200 },
-    seeds: 1,
-    budget: 60000,
-    keep: 600,
+    // three seeds, because this is the first phase allowed to rank and a world's score has a
+    // signal-to-noise of 2.4 at a short horizon — one seed would be ranking on a coin flip
+    seeds: 3,
+    budget: 40000,
+    keep: 2000,
     kills: 'rank',
   },
   {
@@ -84,9 +89,11 @@ const PHASES: Phase[] = [
     name: 'rank',
     shape: { slots: 150, matter: 700, scale: 1 },
     opts: { ticks: 20000, maxExtend: 1.5, plateauFrac: 0.3, every: 500 },
-    seeds: 2,
-    budget: 600,
-    keep: 40,
+    // the first horizon at which the upper rungs are reachable, so this is where the factor tables
+    // come from. S/N is 5.6 here, so three seeds rank reliably
+    seeds: 3,
+    budget: 2000,
+    keep: 100,
     kills: 'rank',
   },
   {
@@ -95,8 +102,9 @@ const PHASES: Phase[] = [
     shape: { slots: 150, matter: 700, scale: 1 },
     opts: { ticks: 100000, maxExtend: 1.5, plateauFrac: 0.25, every: 1000 },
     seeds: 5,
-    budget: 40,
-    keep: 10,
+    budget: 100,
+    // the showcase set: the worlds that get saved with checkpoints so progress can be watched
+    keep: 20,
     kills: 'rank',
   },
   {
@@ -145,6 +153,13 @@ function readCatalog(): CatalogEntry[] {
  * world is *broken* and nothing more. Ranking or gating on achievement at that length throws away
  * every slow starter, which is precisely what the search is looking for.
  */
+/** A stable hash of a world id, so a gate's random subsample is reproducible across a resume. */
+function hashId(id: string): number {
+  let h = 0x811c9dc5
+  for (let i = 0; i < id.length; i++) h = ((h ^ id.charCodeAt(i)) * 0x01000193) >>> 0
+  return h
+}
+
 function possible(e: CatalogEntry): boolean {
   if (e.stats.bonds === 0 && e.stats.bestOrder === 0) return false // the chemistry cannot hold
   if (e.stats.clampPct > 60) return false // the integrator is fighting it the whole way
@@ -205,7 +220,25 @@ function runPhase(phase: Phase): void {
       if (a) a.push(e)
       else cells.set(k, [e])
     }
-    for (const a of cells.values()) a.sort((x, y) => y.score - x.score)
+    /*
+     * **A gate subsamples at random; a ranker sorts by score.** Measured, this is the difference
+     * between a valid screen and selection on noise.
+     *
+     * Spearman between a 500-tick score and a 6,000-tick score is 0.87 over ten worlds — but
+     * **0.16 among the six live ones.** The 0.87 was entirely the four dead worlds correctly
+     * staying dead, so at a gate horizon the score tells you *whether* a world lives and nothing
+     * about how well. One world went 1.69 -> 1.05 while another went 0.60 -> 3.28.
+     *
+     * So a phase that is only allowed to kill the impossible must not also rank. It still needs a
+     * budget cap, and that cap is taken as a deterministic shuffle within each stratum — unbiased
+     * with respect to a score that carries no information at this horizon.
+     */
+    if (prev.kills === 'impossible-only') {
+      for (const a of cells.values()) {
+        // keyed on the world's own id, so the subsample is reproducible across a resumed run
+        a.sort((x, y) => (hashId(x.id) - hashId(y.id)) || (x.id < y.id ? -1 : 1))
+      }
+    } else for (const a of cells.values()) a.sort((x, y) => y.score - x.score)
     const cut: CatalogEntry[] = []
     const chosen = new Set<CatalogEntry>()
     let quota = Math.max(1, Math.ceil(prev.keep / Math.max(1, cells.size)))
