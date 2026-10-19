@@ -110,6 +110,30 @@ export interface WorldSpec {
   /** The reserve at which a brain may reproduce. */
   eRepro?: number
   /**
+   * How fast matter and brains arrive, as a multiplier on the area-scaled default rates.
+   *
+   * **Was a hardcoded constant in every searched world**, which is hard to defend: it sets how much
+   * raw material exists, how often a brain appears to try activating at all, and the whole matter
+   * turnover rate. It also interacts directly with `eActivate` — an activation barrier decides
+   * nothing in a world where no brains arrive to cross it.
+   */
+  arriveScale?: number
+  /**
+   * What share of arrivals are brains rather than matter, as a multiplier on the default share.
+   *
+   * Separate from `arriveScale` because the two ask different questions: how much stuff, against
+   * how much of it can organise the rest. A brain needs four limbs to be a body, so the default is
+   * deliberately lopsided and the interesting variation is around it rather than at parity.
+   */
+  brainShare?: number
+  /**
+   * The rate at which *any* loose particle bleeds its reserve, on top of its type's own decay.
+   *
+   * Never searched, and it is not negligible: the fixed 0.002 is comparable to the whole range of
+   * `decayScale`, and the two add — so the unsearched term was diluting the searched one.
+   */
+  decayFree?: number
+  /**
    * What a loose brain must hold before it becomes an organism — the **starting** value of a trait
    * that is then heritable.
    *
@@ -272,6 +296,12 @@ export function specInit(spec: WorldSpec): Init {
    * Note this is *inconsistent with `initFromSeed`*, which has always scaled its own count with
    * area. That inconsistency is the reason this dial exists; it is now explicit instead of implied.
    */
+  if (spec.decayFree !== undefined) init.decay_free = spec.decayFree
+  if (spec.arriveScale !== undefined || spec.brainShare !== undefined) {
+    const k = spec.arriveScale ?? 1
+    const b = spec.brainShare ?? 1
+    init.arrive = init.arrive.map((r, i) => r * k * (i === 4 ? b : 1))
+  }
   init.n_patch = Math.max(1, Math.round(spec.patches * spec.scale ** (spec.sourceDensity ?? 0)))
   /*
    * `comet` and `spring` name worlds with a *single* source, and the world used to enforce that by
@@ -332,9 +362,24 @@ export function specInit(spec: WorldSpec): Init {
   if (spec.handBuilt) init.handBuilt = spec.handBuilt
   if (spec.rowMut !== undefined) init.row_mut = spec.rowMut
   if (spec.decayScale !== undefined && spec.decayScale > 0) {
-    // templating needs somewhere to copy *into*, and only decay frees a slot — so a world that
-    // replicates without decaying would stall after filling whatever was empty at init
-    init.elements = [0, 1, 2, 3].map((t) => ({ ...(init.elements?.[t] ?? {}), decay: spec.decayScale }))
+    /*
+     * Templating needs somewhere to copy *into*, and only decay frees a slot — so a world that
+     * replicates without decaying would stall after filling whatever was empty at init.
+     *
+     * **A multiplier on the drawn per-type decay, not an overwrite.** It used to assign one uniform
+     * value to all four types, and since every `decayScale` level is above zero it fired in *every*
+     * sampled world — so the `decay` component of `elementSpread` never reached a world at all. A
+     * dial with four levels producing no variation, the same class of defect as `muFood`, and worse
+     * than no dial because the factor table reports a null result and we believe it.
+     *
+     * Types with no drawn decay still get the scale outright, so a homogeneous world
+     * (`elementSpread: 0`) behaves as it always did.
+     */
+    const drawn = init.elements
+    init.elements = [0, 1, 2, 3].map((t) => {
+      const base = drawn?.[t]?.decay
+      return { ...(drawn?.[t] ?? {}), decay: base !== undefined && base > 0 ? base * (spec.decayScale! / 0.004) : spec.decayScale }
+    })
   }
   const mode = spec.reproMode ?? 'bud'
   init.conjugation = mode === 'conjugation' || mode === 'conjugation+spore'
@@ -425,7 +470,7 @@ export function specId(spec: WorldSpec): string {
     spec.muFood, spec.fMax, spec.kBond, spec.fBreak, spec.maxBonds, spec.rEat, spec.eBirth, spec.eRepro, spec.reproMut,
     spec.reproMode, spec.eSpore, spec.sporeFood,
     spec.templating === undefined ? undefined : spec.templating ? 1 : 0, spec.rowMut, spec.decayScale,
-    spec.handBuilt, spec.spawnEvery, spec.eActivate,
+    spec.handBuilt, spec.spawnEvery, spec.eActivate, spec.arriveScale, spec.brainShare, spec.decayFree,
     // the element table, canonicalised: field order fixed by `ELEMENT_FIELDS` so two equal tables
     // written in different key orders cannot hash differently
     spec.elements

@@ -444,6 +444,14 @@ export class World {
   /** Snapshotted: see `views()`. Harvest already reported to an online learner. */
   readonly rewarded: Float64Array
   /**
+   * How much of an organism's spending has already been charged to an online learner's reward.
+   *
+   * The mirror of `rewarded`, which does the same for harvest. Both are needed because the reward
+   * is a *per-tick delta* of two running totals, and an organism that is rewarded for its lifetime
+   * harvest every tick is rewarded over and over for the same meal.
+   */
+  readonly spentPaid: Float64Array
+  /**
    * The weights an organism was born with, kept only when inheritance is Darwinian.
    *
    * With `inherit: 'learned'` a child copies its parent's *current* weights, so anything the
@@ -676,6 +684,7 @@ export class World {
     this.lvx = new Float64Array(n)
     this.lvy = new Float64Array(n)
     this.rewarded = new Float64Array(n)
+    this.spentPaid = new Float64Array(n)
     this.darwinian = (init.learn ?? LEARN_DEFAULTS).inherit === 'birth' && ONLINE_ALGOS.includes((init.learn ?? LEARN_DEFAULTS).algo)
     this.wBirthBrain = new Array(n)
     this.wBirthLimb = new Array(n)
@@ -1914,7 +1923,18 @@ export class World {
         // in units of **one meal**, not raw energy. A reward of 10 against a value function
         // starting at 0 is what made TD(λ) diverge on its first run; the natural unit is the meal,
         // and it keeps the learning rates meaning the same thing at any `E_food`.
-        this.learner.act({ b, wBrain: wb, wLimb: wl, xin, yout, reward: got / L.E_food, tick: this.tick })
+        /*
+         * **Net of what the tick cost**, not raw food taken.
+         *
+         * `got / E_food` pays for every meal regardless of what was spent getting it, so the best
+         * policy under it is to thrash toward food whatever the price — and movement costs
+         * `c_mv * mu * F^2`, which is quadratic, so thrashing is exactly the behaviour a reward
+         * should discourage. `spent` is what this organism dissipated this tick on upkeep, movement
+         * and signalling, so the difference is the thing an organism should actually want.
+         */
+        const cost = (this.spent[b] - this.spentPaid[b]) / L.E_food
+        this.spentPaid[b] = this.spent[b]
+        this.learner.act({ b, wBrain: wb, wLimb: wl, xin, yout, reward: got / L.E_food - cost, tick: this.tick })
       }
 
       this.mvx[b] = L.F_max * Math.tanh(yout[BRAIN_OUT.FX])
@@ -3499,7 +3519,32 @@ export class World {
        * body being dropped into the world. No parent and no limbs: a bare organism with four empty
        * sockets, which `captures` then fills from whatever drifts into reach.
        */
-      this.placeOrganism({ brain: b, x: this.x[b], y: this.y[b], limbs: [] })
+      /*
+       * **The learner is asked here, and this is now the only place it can act.**
+       *
+       * An offline learner's single point of influence is the weights a new organism is born with,
+       * and activation is the only route that produces an organism not descended from another — a
+       * bud inherits its parent's. Routing activation through `placeOrganism` without passing the
+       * learner's proposal silently made every offline learner a no-op: `ga` and `es` scored
+       * **bit-identically to `none`** across six paired seeds, which is how this was caught.
+       *
+       * The random draw happens either way and in the same order, so switching a learner on does
+       * not move a single food particle — the property that makes a paired run on one seed an
+       * honest comparison.
+       */
+      const randLimb = randomLimb(() => this.rng.gauss())
+      const randBrain = randomBrain(() => this.rng.gauss())
+      const g = this.learner.genomeForSpawn(this.tick)
+      const hand = this.init.handBuilt ? HAND_BUILT[this.init.handBuilt] : undefined
+      this.placeOrganism({
+        brain: b,
+        x: this.x[b],
+        y: this.y[b],
+        limbs: [],
+        wLimb: g?.wLimb ?? hand?.limb() ?? randLimb,
+        wBrain: g?.wBrain ?? hand?.brain() ?? randBrain,
+        learnId: g?.id,
+      })
     }
   }
 

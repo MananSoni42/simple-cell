@@ -1,163 +1,212 @@
-# The v2 search: what to run, and what had to be fixed first
+# The v2 search
 
 *Written after the energy model changed. Every number in `v1_phased_search.md` predates that change
-and describes a world that no longer exists — see "What was discarded" below.*
+and describes a world that no longer exists — see "What was discarded".*
 
-## Why v1's conclusions cannot be carried over
+**Goal:** find worlds that climb the ladder, and save them so progress can be watched rather than
+read off a table.
 
-The world handed out organisms. Every `T_spawn` ticks it created a four-limbed body and **endowed
-every particle of it with energy out of nothing**, measured at **41% and 67% of all energy entering
-two sample worlds**. The ledger balanced because the creation was booked as injection, which is
-exactly why it survived 260,640 worlds of searching.
+---
 
-Three consequences for v1's results, in increasing seriousness:
+## 1. Three measurements that determine the design
 
-1. **Food level meant much less than it claimed.** A "scarce" world could still be two-thirds
-   subsidised, so the whole food axis was compressed toward the middle.
-2. **Efficiency metrics were partly measuring run length**, because the subsidy arrived per unit
-   time regardless of behaviour.
-3. **The thrift attractor may have been partly an artefact.** Every learner and every search in v1
-   converged on "spend less". A steady drip of free energy arriving whatever anybody did is a
-   mechanism that would produce exactly that, and we cannot now tell how much of it was real.
+Everything below follows from these rather than from preference.
 
-The most telling single number from the fix: in the default world, `budded` rose **0.33 → 4.47**
-while total births fell. The share of organisms that are *descendants* rather than fresh random
-spawns went from **2.6% to 48%**. For v1's entire run, 97% of organisms were freshly randomised, so
-selection had almost nothing to act on. That alone may matter more than the energy accounting.
+### 1.1 Searching worlds is well-posed. Searching genomes is not
 
-## What the world is now
+| | noise |
+|---|---|
+| per-life fitness, `offspring` | **CV 4.22** — ~28,000 lives per genome to detect a 10% effect |
+| per-life fitness, `per_tick` | CV 1.07 — ~1,800 lives per genome |
+| **world ladder score @ 500t** | signal/noise **2.38** |
+| **world ladder score @ 6000t** | signal/noise **5.59** |
 
-Nothing is issued. A loose brain particle eats until it crosses an **activation barrier**, written
-as a rate rather than a threshold so temperature decides how readily life starts, then assembles its
-own body out of whatever drifts into the right quadrant at the right radius — paying for each limb
-out of its own reserve. A body that runs dry dissolves, part of what it held becomes food, its
-particles return to the pool, and what they *are* is drawn again. **Matter is conserved; only energy
-flows, and all of it enters as food.**
+A world's score aggregates thousands of lives, so per-life noise averages out. The budget is ~1,800
+lives *in total*, shared across every genome — so genome-level selection is four orders of magnitude
+short, while world-level selection has a comfortable margin.
 
-## Measurements that decide the shape of the search
+### 1.2 A 500-tick score separates dead from alive, and nothing more
 
-### The search's own worlds are viable. The seeded ones are not
+Spearman(500t, 6000t) = **0.87** over ten worlds — but **0.16 among the six live ones**. The 0.87 was
+entirely the four dead worlds correctly staying dead. One world went 1.69 → 1.05 while another went
+0.60 → 3.28.
 
-This distinction nearly cost a redesign. `initFromSeed` worlds — the generator behind the goldens —
-mostly die now: four of six goldens end with 0 or 1 organisms where they had 2 to 16, while the one
-2× world is unscathed at 16. That looked like "1× worlds are no longer viable", which would have
-forced every phase up a scale and multiplied the search's cost by four.
+**Therefore phase 0 is a viability gate, not a ranker.** v1 kept "the best 60,000 of 200,000" by
+phase-0 score; that is selection on noise, and it is the identical error that makes the learners
+harmful (§1.3).
 
-It is not true of the **constrained sampler the search actually uses**:
+### 1.3 Every learner is worse than no learner
 
-| shape | ticks | still alive | mean organisms | mean limbs |
-|---|---|---|---|---|
-| slots 24, matter 120, 1× | 500 | **24/24** | 15.9 | 42.4 |
-| slots 24, matter 120, 2× | 500 | 23/24 | 15.9 | 21.8 |
-| slots 60, matter 300, 1× | 2000 | 23/24 | 36.7 | 117.1 |
-| slots 60, matter 300, 2× | 2000 | 23/24 | 29.3 | 83.0 |
-| slots 150, matter 700, 2× | 2000 | **24/24** | 81.3 | 251.9 |
+Paired against `none` on the same six seeds, 6,000 ticks:
 
-**So the phase shapes stay as they are.** The sampler's constrained chemistry produces worlds that
-live; `initFromSeed`'s unconstrained draw does not, which is a fact about that generator rather than
-about the scale.
+| learner | Δ score | t | won |
+|---|---|---|---|
+| random | +0.000 ± 0.000 | — | 0/6 |
+| cem | −0.256 ± 0.185 | −1.4 | 1/6 |
+| es | −0.368 ± 0.213 | −1.7 | 1/6 |
+| **elites** | **−0.451 ± 0.148** | **−3.1** | 0/6 |
+| **ga** | **−0.576 ± 0.250** | **−2.3** | 0/6 |
+| td | −1.080 ± 0.637 | −1.7 | 1/6 |
+| hebb | −1.091 ± 0.607 | −1.8 | 0/6 |
 
-### Large worlds now work, and what they cost
+One mechanism explains all of it: selecting on a CV-4.22 objective converges the population onto
+whichever genome got lucky, destroying the diversity random initialisation supplied. The ordering
+fits — the harder a method exploits, the more it hurts. `random` is bit-identical to `none` because
+it only records.
 
-Scale was raised to 128×, and two things had to be fixed to make it usable:
+**Therefore learning is OFF for every world-search phase** and gets its own factorial afterwards
+(§4). Turning it on during world selection would add cost and noise to a problem that is currently
+sound.
 
-- **The food cap was nine tenths idle.** `max_food` was `300 × area`, and measured use was 11.0%,
-  9.8%, 9.9% and 9.8% at scales 1, 2, 4 and 8. Sizing it from arrival rate × spoilage life instead
-  took a 128× world from **~2GB to ~646MB**.
-- **Seeding was quadratic.** `spawnRandom` rebuilt the full candidate pool per organism, so seeding
-  cost O(n_start × nMatter): **63 seconds** for a 128× world, against 73ms to allocate the same
-  world empty. Batching the scan took it to **4.6 seconds**.
+---
 
-| scale | across | alloc | per tick | snapshot | verdict |
-|---|---|---|---|---|---|
-| 1–8 | 300–2,400 | <10ms | 0.3–3.5ms | ≤3.5MB | search |
-| 16 | 4,800 | 26ms | 12.8ms | 12MB | search, at a cost |
-| 32 | 9,600 | 64ms | 68ms | 45MB | ~15 ticks/s — a few long runs |
-| 64 | 19,200 | 369ms | 296ms | 178MB | ~3 ticks/s — one run, overnight |
-| 128 | 38,400 | 4.6s | 2.3s | 711MB | ~0.4 ticks/s — watching one world, not searching |
+## 2. The dials
 
-**Recommendation: search at 1–2×, confirm promising worlds at 8–16×, and reserve 32×+ for
-observation.** A 128× run of 10,000 ticks is about seven hours and its checkpoint is most of a
-gigabyte, so it is a showcase rather than an instrument.
+**38 dials**, plus the chemistry matrix (20 triangle entries, drawn as constrained / uniform /
+mutant mixtures rather than factorially).
 
-## The ladder: nine of ten rungs are sound, one is not
+| group | dials |
+|---|---|
+| Physics & economics (10) | `metabolism, T, fMax, kBond, fBreak, maxBonds, rEat, muFood, bondFlow, elementSpread` |
+| Food (10) | `foodMode, foodLevel, foodRegime, foodLife, patches, radius, sourceMotion, sourceRelation, sourceSpeed, sourceDensity` |
+| Life & reproduction (10) | `eBirth, eRepro, eActivate, reproMut, reproMode, eSpore, sporeFood, fission, templating, rowMut` |
+| Matter supply (4) — **new** | `arriveScale, brainShare, decayFree, decayScale` |
+| Learning (2) — **new** | `objective, inherit` |
+| Other (2) | `spawnEvery, decayScale` |
 
-Across **30 unaided worlds** that must not trip anything above tier 0:
+### What was fixed to get here
 
-| rung | tripped | worst ratio |
+- **`arriveScale` and `brainShare` were hardcoded.** The rate at which matter and brains enter the
+  world was a constant in every searched world, when it sets how much raw material exists and how
+  often a brain appears to try activating. It also interacts directly with `eActivate`: a barrier
+  decides nothing in a world where no brain arrives to cross it.
+- **`decayFree` was never searched.** The fixed 0.002 is comparable to the whole range of
+  `decayScale`, and the two add, so the unsearched term was diluting the searched one.
+- **`decayScale` silently killed part of `elementSpread`.** It *overwrote* the drawn per-type decay
+  with one uniform value, and every level is above zero, so it fired in **100% of sampled worlds** —
+  the `decay` component of `elementSpread` never reached a world. Now a multiplier: per-type decay
+  reads 0.0120 / 0.0228 / 0.0120 / 0.0087 where it used to be uniform. Same class of defect as
+  `muFood`, and worse than a missing dial, because the factor table reports a null result and we
+  believe it.
+- **The element draw now covers Brain.** It was `t < 4`, so a brain's own mass, radius, valence and
+  bond strength were fixed constants. Defensible while a brain was handed a body; not now that it is
+  a particle which must drift, eat over a barrier, and physically recruit limbs — its mass decides
+  how far it drifts to find food and its radius what it can get close enough to recruit.
+  *(Index trap: `BRAIN = 4` and `FOOD = 5` as type ids, while `FOOD_ROW = 4` and `BRAIN_ROW = 5` as
+  matrix rows. The element table is indexed by type id.)*
+
+### What is deliberately not a dial
+
+- **Per-type masses individually.** `elementSpread` varies the *spread*, so a factor table can say
+  "worlds whose types differ more do better" but never "a heavy P1 helps". Answering the second needs
+  24 more dimensions; it belongs as a targeted follow-up on phase-3 survivors, not a blind sweep.
+- **Food's valence and bond strength.** Giving food those makes food structural, which is a
+  different world rather than a variation on this one.
+
+---
+
+## 3. The phases
+
+Costs measured on 14 cores, at the shapes below.
+
+| phase | shape | ticks | s/world | seeds | worlds | wall | rule |
+|---|---|---|---|---|---|---|---|
+| **0 gate** | 24 / 120 | 500 | 0.19 | 1 | 200,000 | **45 min** | keep everything alive; discard only zeros |
+| **1 rank** | 60 / 300 | 2,000 | 2.21 | 3 | 40,000 | **5.3 h** | keep top 2,000 by **median** across seeds |
+| **2 rank + factors** | 150 / 700 | 20,000 | 7.76 | 3 | 2,000 | **55 min** | keep top 100 |
+| **3 confirm + save** | 150 / 700 | 100,000 | ~39 | 5 | 100 | **23 min** | the showcase set |
+
+**≈ 7.5 hours total.** Budget is not the constraint; statistical validity is. The spare went into
+seeds rather than more worlds.
+
+**Phase 0 ranks nothing** (§1.2). Expected survival ~60%, from a measured 1-in-4 dead at this shape.
+
+**Phase 1 is the first legitimate ranking**, and it ranks on the **median** across seeds rather than
+the mean: world scores are heavy-tailed, so the median is the robust statistic.
+
+**Phase 2 is where the factor tables come from** — 20,000 ticks is the first horizon at which the
+upper rungs are reachable at all.
+
+### Three gates before committing the full budget, on a 2% pilot
+
+1. every dial level holds n ≥ 30 after phase 1
+2. no rung pinned at 0 or 1 across all worlds
+3. at least 5% of phase-1 survivors reach level ≥ 1
+
+If gate 3 fails, the ladder is too hard for the current world and the pilot said so for 1/50th of
+the cost.
+
+---
+
+## 4. Learning, as a separate factorial
+
+Not a dial in the world search. Take the **top 20 confirmed worlds** and cross:
+
+`local {off, hebb} × global {off, ga} × objective {offspring, per_tick} × inherit {birth, learned}`
+
+16 cells × 20 worlds × 5 seeds = **1,600 runs, ≈ 4 h**, paired within world so each world is its own
+control. This is the first honest test of "does learning ever help, and under what objective" — and
+it includes the **both-on** cell (lifetime learning feeding heritable weights, the Baldwin
+configuration) which cannot be expressed today and needs the two-engine composition built first.
+
+---
+
+## 5. What I expect to find
+
+Written before the run so it can be wrong. These are predictions, not hopes.
+
+| | prediction | why | what it would mean if wrong |
+|---|---|---|---|
+| **P1** | Self-repulsion wins by phase 2 | carried from v1, never tested at scale | — |
+| **P2** | `fMax / fBreak` is the strongest single factor on the structural rungs | it decides whether a body can drag a structure or tears free of it | structure is set by chemistry, not by force balance |
+| **P4** | `reproMut` 0 is clearly worse than any nonzero rate | without mutation there is no variation to select | **nothing in this model is evolving** — the most important finding available |
+| **P6** | A moving food source raises `Taxis` and `Improves` over the static control, and `orbit` beats `wander` at matched speed | the difference is anticipation | moving food is a cost with no benefit, and the whole food-dynamics programme was wrong |
+| **P7** | `Budgets` is passed by worlds no existing rung distinguishes | it is the only rung thrift cannot satisfy | the rung is measuring something another already captures |
+| **P8** | `eActivate` is among the three strongest factors on every tier above 0 | it sets the descended share of the population, which moved from 2.6% to 48% when the subsidy closed | selection pressure is not what limits this world |
+| **P9** | `arriveScale` interacts with `eActivate` more strongly than either acts alone | a barrier is meaningless without arrivals to cross it | the two are independent, and matter supply is not limiting |
+| **P10** | No learning configuration beats `local off, global off` | measured at −0.26 to −1.09 already, and the noise analysis says why | the objective was the whole problem, which would be excellent news |
+| **P11** | Most worlds plateau at level 1–2 | `Lingers` needs a product of two inputs and the brain is one linear layer (M1) | the brain is less of a limit than the architecture suggests |
+
+**P5 is retired as untestable.** It concerned the collective tier, and `Moves together` is currently
+unscored — see §7.
+
+---
+
+## 6. What gets saved
+
+| artefact | when | what for |
 |---|---|---|
-| Persists (tier 0, allowed) | — | 1.00 |
-| Feeds | 0/30 | 0.93 |
-| Lasts | 0/30 | 0.84 |
-| Taxis | 0/30 | 0.43 |
-| Lingers | 0/30 | 0.76 |
-| Improves | 0/30 | 0.07 |
-| Lineage improves | 0/30 | 0.91 |
-| Follows signal | 0/30 | 0.77 |
-| **Moves together** | **unscored** | see below |
-| Holds together | 0/30 | 0.30 |
+| `search/catalog-p{0..3}.jsonl` | every phase, appended | the full record; a resumed search skips what it holds |
+| `search/factors-p2.json` | phase 2 | the factor tables, with studentized-range and Bonferroni correction over a family of 68 |
+| `public/discoveries.json` | after phase 3 | the browser page: every showcase world, its ladder level, and its rung-by-rung sheet |
+| **checkpoints every 5,000 ticks, phase 3 only** | phase 3 | **the point of the exercise** — open any showcase world at any tick and watch it, instead of re-running 100,000 ticks. ~12 MB each at this shape, 20 kept per world |
+| `search/pilot.json` | before phase 0 | the three gates, so a failed gate is a record rather than a memory |
 
-Two were fixed on the way here. **`Lineage improves`** became a partial correlation with age
-partialled out of both sides: among contemporaries, generation correlates with youth, so any
-age-dependence of efficiency read as a generation effect and the rung passed on worlds where nothing
-is inherited — 1.03 unaided, now 0.20. This was owed as M4.
+Phase 3 survivors are the deliverable: a world you can open, scrub through, and watch climb.
 
-**`Moves together` is unscored, and that is the honest state.** Eight controls were tried and all
-eight failed, each differently and each initially looking like the rung working: a baseline that
-empties as a world gets better at bonding (0.00); organisms holding no bond (**3.81×**); size-matched
-non-compound organisms (**2.77×**, because a solo brain drags inert matter while a compound member's
-partners push); the members' own pre-join speed (unavailable — **median join age 19 ticks, 93% join
-before age 100, zero of 60 organisms had a usable baseline**); rescaled command agreement against the
-population (**8/30**); the same standardised per group size (biased the other way — a coordinated
-structure read 0.39); raw agreement against the same number of random non-members (**9/30**, as
-fixing size exposed a location confound); and against the *nearest* non-members (**8/30, worst
-13.09**, because a single nearby group is itself noisy).
+---
 
-The pattern is that this world offers no population comparable to a structure's members: being
-bonded correlates with size, anchoring, co-location and age simultaneously. A usable version probably
-needs a **physical** counterfactual — re-simulating the same members with their bonds removed for a
-few ticks — which is a real piece of work, not another choice of baseline. Until then the rung
-reports what it measures and never passes, so no search can optimise against a number nobody trusts.
+## 7. Known limits of this run
 
-**This means the collective tier is currently unreachable**, and v2 should be read with that in mind.
+- **`Moves together` is unscored, so the collective tier is unreachable.** Eight controls were tried
+  and all eight failed; the rung reports what it measures and never passes. **Phase 3 cannot produce
+  a world above level 5 however good it is.** Worth deciding whether to fix this before launching,
+  because it caps what the search can find.
+- **`Lingers` needs a product of two inputs** and the brain is a single linear layer, so tier 2 may
+  be unreachable for architectural reasons (M1). P11 predicts this bites.
+- **A ~0.4% energy leak remains**, halved from 0.5% by fixing an assignment in `templateParticles`.
+  `tests/evolution.test.ts` is left failing on purpose rather than relaxing a ledger bound.
+- **The learner evidence is six paired seeds.** Directions are consistent and two results are
+  individually significant, but nothing here should be treated as settled until §4 runs.
 
-## What was discarded
+---
 
-Everything below was measured under the subsidy and has been re-recorded or retired:
+## 8. What was discarded
 
-- the six golden worlds (re-pinned; the diff is in the commit)
+Measured under the energy subsidy, re-recorded or retired:
+
+- the six golden worlds (re-pinned)
 - the equivalence baseline (re-recorded)
-- `v1_phased_search.md`'s factor tables and rankings — **retained as a record of the method, not of
-  the world.** Any specific claim in it about which dial mattered should be re-derived.
-- the hand-built feasibility results, which were scored against a ladder with two broken nulls
-
-## Order of work before launching
-
-1. **T1 — the thermodynamic rung.** Now measurable honestly for the first time: it reads order
-   maintained against energy throughput, and until this week up to 67% of throughput was free money.
-   It is also the one rung that sitting still cannot pass, which is the whole point.
-2. **T2 — the detailed-balance test.** Turn the sun off; separations must follow `exp(−U(r)/T)`. A
-   hidden energy source shows up as the wrong effective temperature, and this would have caught the
-   endowment bug by inspection rather than by accident.
-3. **A 2% pilot**, against three gates: every dial level holds n ≥ 30, no rung pinned at 0 or 1
-   across all worlds, and stratifier cells populated.
-4. **Full phase 0**, with learners entering at phase 2 rather than after everything.
-
-## Pre-registered predictions
-
-Written before the search so they can be wrong.
-
-- **P1** Self-repulsion wins by phase 2. *(carried from v1, never tested at scale.)*
-- **P2** `fMax / fBreak` is the strongest single factor on the structural rungs.
-- **P4** `reproMut` 0 is clearly worse than any nonzero rate. If it is not, nothing here is evolving,
-  and that is the most important finding available.
-- **P5** Nothing reaches a collective tier without bond angular rigidity. *(Untestable until the
-  travel rung has a null — noted rather than quietly dropped.)*
-- **P6** A moving food source raises `Taxis` and `Improves` over the static control, and `orbit`
-  beats `wander` at matched speed, the difference being anticipation.
-- **P7** The thermodynamic rung is passed by worlds no existing rung distinguishes, because it is the
-  only one thrift cannot satisfy.
-- **P8** *(new)* `E_activate` is among the three strongest factors on every tier above 0. It sets how
-  much of the population is descended rather than freshly randomised, and that share just moved from
-  2.6% to 48% — if selection matters at all here, the dial that governs how much selection can
-  accumulate should matter most.
+- `v1_phased_search.md`'s factor tables and rankings — **kept as a record of the method, not of the
+  world.** Any specific claim about which dial mattered must be re-derived.
+- the hand-built feasibility results, scored against a ladder with two broken nulls

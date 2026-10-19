@@ -274,7 +274,15 @@ describe('food sources: three axes, not one enum', () => {
       // a world that says its sources move, moves them; a control does not
       const moved = Math.max(...w.patches.map((p) => Math.hypot(p.dx, p.dy)))
       if (world.motion === 'static') expect(moved, `${world.key} is a control`).toBe(0)
-      else expect(moved, `${world.key} moves`).toBeGreaterThan(20)
+      /*
+       * 5 units, not 20. Source speed is a *fraction of how fast an organism travels*, and worlds
+       * now grow their own populations rather than being handed one — so early organisms are
+       * smaller and slower and the sources they are measured against move more slowly with them.
+       * Measured 9.4 for `scattering` where the old bar was 20. The claim is that a source which
+       * says it moves does move, and 5 units over 900 ticks is unambiguous against a static control
+       * pinned at exactly zero.
+       */
+      else expect(moved, `${world.key} moves`).toBeGreaterThan(5)
 
       // food exists and, unless the world is uniform by design, is placed around a source
       let n = 0

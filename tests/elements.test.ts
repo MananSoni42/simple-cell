@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { type WorldSpec, specId, specInit } from '../src/core/catalog'
-import { type Element, LAWS, elementsOf } from '../src/core/params'
+import { type Element, type Init, LAWS, elementsOf } from '../src/core/params'
 import { configText, parseConfig } from '../src/ui/config'
 import { massTotals } from '../src/core/metrics'
 import { P1, P2 } from '../src/core/types'
@@ -113,23 +113,47 @@ describe('each property does something, in the direction it should', () => {
 
   it('makes a big type exclude its neighbours further away', () => {
     /*
-     * 20,000 ticks, not 9,000, and the length is the point rather than an accident.
+     * **The force, not the bond count.** This asserted that a bigger radius leaves fewer standing
+     * bonds, and that downstream consequence has now reversed sign three times as the world changed
+     * underneath it: 65 against 59 at 9,000 ticks, 42 against 87 at 20,000, and 69 against 49 once
+     * the element draw covered Brain. A claim that flips whenever anything moves is not a claim
+     * about radius.
      *
-     * Measured: radius 9 gave 65 bonds against a default of 59 at 9,000 ticks — **the wrong way
-     * round** — and 42 against 87 at 20,000, strongly the right way. The effect is real and now
-     * takes longer to establish than it did when bodies arrived pre-assembled, so the old run
-     * length was reading a transient and calling it the mechanism.
-     *
-     * An attempt to measure the exclusion *directly* is left out, and the reason is worth recording
-     * because it looked like a serious bug and is not one. Closest approach between two unbonded
-     * particles of the kind reads 1.02 units whether the radius is 5 or 9, which suggests the
-     * per-type radius does nothing. It is not that: the force kernel does take exclusion as
-     * `radius[ti] + radius[tj]`. What the measurement actually finds is two **limbs of one body**,
-     * held at rod length by `placeLimbs` rather than by pair forces, so it is reading geometry that
-     * exclusion does not govern. Note `coreRadius` still returns a global `beta * r_c` and is used
-     * by `potentialEnergy`, which the review already flagged as no longer matching the force field.
+     * The mechanism is exact and worth pinning instead: pair exclusion is the **sum of the two
+     * radii**, so a particle with a bigger radius pushes back at a distance where a smaller one
+     * feels nothing at all. Measured straight off the force kernel, with no world dynamics in the
+     * way, so it cannot drift.
      */
-    expect(run([{ radius: 9 }], 20000).bonds).toBeLessThan(run(undefined, 20000).bonds)
+    const forceAt = (radius: number | undefined, gap: number): number => {
+      const b = specInit(VIABLE)
+      const init: Init = { ...b, laws: { ...b.laws, redraw_kind: 0 }, T: 0 }
+      if (radius !== undefined) init.elements = [{ radius }]
+      const w = new World(init, { autoSpawn: false })
+      // two particles of the same kind, `gap` apart, nothing else near them
+      for (let i = 0; i < w.nIntr; i++) {
+        w.alive[i] = 0
+      }
+      for (const i of [0, 1]) {
+        w.alive[i] = 1
+        w.setType(i, P1)
+        w.energy[i] = 50
+        w.y[i] = 150
+      }
+      w.x[0] = 150
+      w.x[1] = 150 + gap
+      w.step()
+      // the x-force on the left particle: negative means it is being pushed away from the right one
+      return w.fx[0]
+    }
+    const els = elementsOf([{ radius: 9 }], LAWS)
+    expect(els[P1].radius).toBe(9)
+
+    // at a gap inside a big pair's exclusion (18) but outside a default pair's (10)
+    const gap = 14
+    const big = forceAt(9, gap)
+    const small = forceAt(undefined, gap)
+    expect(big, `big ${big.toFixed(3)} vs default ${small.toFixed(3)} at gap ${gap}`).toBeLessThan(0)
+    expect(Math.abs(big)).toBeGreaterThan(Math.abs(small) * 2)
   })
 
   it('makes a heavy type *more* bonded, not less', () => {

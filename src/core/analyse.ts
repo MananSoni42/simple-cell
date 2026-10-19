@@ -100,7 +100,7 @@ const Q_CRIT: readonly number[] = [0, 0, 2.77, 3.31, 3.63, 3.86, 4.03, 4.17, 4.2
  * the weak part of this — add a factor and the constant should move — so it is deliberately an
  * over-estimate, which errs toward calling fewer things real.
  */
-const FAMILY = 64
+const FAMILY = 68
 
 /**
  * Normal quantile, Acklam's rational approximation. Accurate to about 1e-9 over (0,1), which is
@@ -216,6 +216,9 @@ export function dialFactors(rows: CatalogEntry[]): Factor[] {
      * conclusion about learning was a conclusion about offspring count.
      */
     factor('activation barrier', group(rows, (e) => String(e.spec.eActivate ?? '(default)'))),
+    factor('matter supply', group(rows, (e) => String(e.spec.arriveScale ?? '(default)'))),
+    factor('brain share', group(rows, (e) => String(e.spec.brainShare ?? '(default)'))),
+    factor('loose decay', group(rows, (e) => String(e.spec.decayFree ?? '(default)'))),
     factor('optimises', group(rows, (e) => e.spec.objective ?? 'offspring')),
     factor('inheritance', group(rows, (e) => e.spec.inherit ?? '(default)')),
     // whether the chemistry evolves. Read this one first: it decides what every *other* chemistry

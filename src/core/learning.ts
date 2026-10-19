@@ -188,8 +188,24 @@ export const LEARN_DEFAULTS: LearnConfig = {
   // per meal of surprise" and the actor has 410 weights all moving at once.
   actorLr: 0.001,
   criticLr: 0.01,
-  gamma: 0.95,
-  lambda: 0.8,
+  /*
+   * **The credit-assignment window has to be longer than the gap between rewards.** Both of these
+   * were far shorter, and it is a complete explanation for TD measuring *worse than no learner at
+   * all* (paired t = -1.8 over six seeds, a full ladder level lower).
+   *
+   * Measured in a live world: a life lasts 755 ticks on average and takes 25.4 meals, so a reward
+   * arrives about every **30 ticks**. The old `gamma: 0.95` gives a value horizon of
+   * `1/(1-gamma)` = 20 ticks and the old `lambda: 0.8` an eligibility trace of 5 — so the trace had
+   * decayed six times over before the meal it was supposed to explain ever arrived. TD could not
+   * connect an action to its consequence in principle, never mind in practice.
+   *
+   * 0.99 gives a 100-tick horizon, comfortably past the 30-tick reward interval and still well
+   * inside a typical life. Note this world is really a *continuing* task rather than an episodic
+   * one, so discounting is the wrong formalism in the first place and an average-reward
+   * formulation would remove `gamma` as a thing to get wrong. Recorded in the plan.
+   */
+  gamma: 0.99,
+  lambda: 0.97,
   inherit: 'learned',
   cells: 6,
 }

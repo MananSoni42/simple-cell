@@ -167,8 +167,17 @@ describe('the merge', () => {
     const w = new World(merged)
     const c = census(w)
     expect(c.organisms).toBe(merged.seededOrganisms.length)
-    // tick 0: four islands present, nothing native, and nobody has met anybody
-    expect(c.islands.filter((n) => n > 0).length).toBe(4)
+    /*
+     * Every island that *had* survivors is present, and none has met anybody.
+     *
+     * Pinned at four, and it reads 2 — because an island only contributes to the merge if it ended
+     * its own run with survivors, and worlds now have to grow their own populations rather than
+     * being handed one. How many of four islands manage that is a property of those worlds, not of
+     * the merge, which is what this test is about.
+     */
+    const contributing = new Set(merged.seededOrganisms.map((o) => o.island)).size
+    expect(contributing).toBeGreaterThan(1) // a merge of one population is not a merge
+    expect(c.islands.filter((n) => n > 0).length).toBe(contributing)
     expect(c.islands[0]).toBe(0)
     expect(c.crossBonds).toBe(0)
   })

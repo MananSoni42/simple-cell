@@ -217,7 +217,14 @@ describe('what E8 found wrong with the ladder itself', () => {
      */
     const r = run('movesTogether', { ...CLEAN, A: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0.5, 0.5, 0.5, 0.5] })
     const o = r.w.orders.stats(r.w).oldest
-    expect(o?.order ?? 0).toBeGreaterThan(3) // structures form, and large ones
+    /*
+     * At least the rung's own minimum. It was `> 3` and reads exactly 3 now: worlds grow their own
+     * populations rather than being handed one, so there are fewer organisms around to join a
+     * structure and the ones that form are smaller. The claim this test needs is that structures
+     * of a countable size exist at all, so that the two collective rungs failing below is about
+     * the rungs rather than about there being nothing to measure.
+     */
+    expect(o?.order ?? 0).toBeGreaterThanOrEqual(3)
     // but neither collective rung is met: typically they neither keep up nor last
     expect(met(r.l, 'Moves together')).toBe(false)
     expect(met(r.l, 'Holds together')).toBe(false)

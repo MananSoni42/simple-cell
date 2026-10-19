@@ -3,7 +3,7 @@ import type { Element } from './params'
 import { OBJECTIVES } from './fitness'
 import { LAWS, QUANTA, SOURCE_MOTIONS, SOURCE_RELATIONS, type FoodLevel, type FoodMode, type FoodRegime } from './params'
 import { Rng } from './rng'
-import { BRAIN_ROW, FOOD_ROW } from './types'
+import { BRAIN_ROW, FOOD, FOOD_ROW } from './types'
 
 /**
  * Where candidates come from.
@@ -97,6 +97,16 @@ const DIALS = {
    * "descent dominates, but a dead world stays dead". The regime boundary is the finding.
    */
   eActivate: [10, 25, 60, 120, 200],
+  /*
+   * How much matter and how many brains arrive. Both were hardcoded constants in every searched
+   * world. `arriveScale` is the supply of raw material; `brainShare` is how much of it can organise
+   * the rest, and the default is deliberately lopsided because a brain needs four limbs to be a
+   * body — so the interesting variation is around that, not at parity.
+   */
+  arriveScale: [0.25, 1, 4],
+  brainShare: [0.25, 1, 4],
+  /** The global loose-matter bleed, comparable in size to `decayScale` and never searched. */
+  decayFree: [0, 0.002, 0.008],
   /** The mutation rate: 0 makes heredity exact and evolution impossible. */
   reproMut: [0, 0.02, 0.05, 0.15],
   /**
@@ -162,11 +172,35 @@ const DIALS = {
  * Only the four matter types vary. Brain and Food keep their defaults: a brain's radius is about
  * body geometry rather than chemistry, and food's mobility is already its own searchable dial.
  */
+/** Rows the element draw covers: P1..P4, Food (skipped), Brain. */
+const N_ELEMENT_DRAW = 6
+
 function drawElements(rng: Rng, spread: number): (Partial<Element> | undefined)[] | undefined {
   if (spread <= 0) return undefined
   const jitter = (base: number): number => base * Math.exp(spread * (rng.next() * 2 - 1))
   const out: (Partial<Element> | undefined)[] = []
-  for (let t = 0; t < 4; t++) {
+  /*
+   * Five rows, not four: **Brain is included now.**
+   *
+   * It was `t < 4`, so a brain's own mass, radius, valence and bond strength were fixed constants
+   * in every world ever searched. That was defensible while a brain was handed a body on a plate;
+   * it is not now that a brain is a particle which has to drift, eat its way over an activation
+   * barrier, and physically recruit its own limbs — its mass decides how far it drifts to find food
+   * and its radius decides what it can get close enough to recruit.
+   *
+   * **Mind the indices: `BRAIN = 4` and `FOOD = 5` as type ids, while `FOOD_ROW = 4` and
+   * `BRAIN_ROW = 5` as matrix rows.** They are swapped, and this table is indexed by *type id*. So
+   * index 4 here is the Brain and index 5 is Food — the opposite way round from the chemistry
+   * matrix a few lines above.
+   *
+   * Food keeps its defaults either way: its mobility is already the `muFood` dial, and giving it a
+   * valence or a bond strength would make food structural, which is a different world.
+   */
+  for (let t = 0; t < N_ELEMENT_DRAW; t++) {
+    if (t === FOOD) {
+      out[t] = undefined
+      continue
+    }
     out[t] = {
       // floored at `d_max`: a pair must exclude each other at a distance a single tick's motion
       // cannot cross, and exclusion is the sum of the two radii. `elementsOf` clamps it too, so a
@@ -264,6 +298,9 @@ function dials(rng: Rng, spec: Partial<WorldSpec> = {}): Omit<WorldSpec, 'seed' 
     eBirth: spec.eBirth ?? pick(rng, DIALS.eBirth),
     eRepro: spec.eRepro ?? pick(rng, DIALS.eRepro),
     eActivate: spec.eActivate ?? pick(rng, DIALS.eActivate),
+    arriveScale: spec.arriveScale ?? pick(rng, DIALS.arriveScale),
+    brainShare: spec.brainShare ?? pick(rng, DIALS.brainShare),
+    decayFree: spec.decayFree ?? pick(rng, DIALS.decayFree),
     reproMut: spec.reproMut ?? pick(rng, DIALS.reproMut),
     reproMode: spec.reproMode ?? pick(rng, DIALS.reproMode),
     eSpore: spec.eSpore ?? pick(rng, DIALS.eSpore),
